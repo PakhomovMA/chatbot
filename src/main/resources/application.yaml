@@ -81,7 +81,14 @@ management:
   endpoint:
     health:
       show-details: always
+  # Embabel tracing is wired but off by default; enable with SPRING_PROFILES_ACTIVE=observability.
+
+embabel.agent.platform.observability:
+  tracing-enabled: false
+  metrics-enabled: true
 
 logging:
+  pattern:
+    console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr([%t]){magenta} %clr(%-5level) %clr(%logger{0}){cyan} %clr(-){faint} %clr(%X{requestId} %X{conversationId} %X{messageId} %X{documentId}){faint} %msg%n"
   level:
     com.embabel: INFO

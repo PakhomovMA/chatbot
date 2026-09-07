@@ -3,9 +3,9 @@
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
 Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
 
-Current state: **Phase 7** (streaming) — a Vue app bundled into the jar offers Chat (answers streamed token
-by token, then verified citations and a sources panel) and Knowledge Base (upload, live status, re-index,
-delete) on top of the Embabel agent, hybrid retrieval and the Lucene index.
+Current state: **Phase 8** (observability) — Chat (streamed, cited answers), Knowledge Base (upload, live
+status, re-index, delete) and a Retrieval playground on top of the Embabel agent, hybrid retrieval and the
+Lucene index, with health components, RAG metrics, request correlation and optional tracing.
 
 ## Prerequisites
 
@@ -116,6 +116,11 @@ falls back to the structured path (one `delta` with the whole answer) otherwise;
 |---|---|
 | `POST /api/retrieval/search` `{query, topK?, mode?, documentIds?}` | Hybrid (default), `VECTOR` or `TEXT` search; hits carry provenance, cosine, BM25 and fused scores |
 | `GET /api/diagnostics/retrieval?limit=` / `GET /api/diagnostics/retrieval/{traceId}` | Recent retrieval traces (bounded ring buffer) |
+
+The **Retrieval** tab of the UI (`/playground`) runs the same search interactively. Health components
+(`embedding`, `luceneIndex`, `ollama`), `chatbot.*` and `embabel.*` metrics, log correlation via `X-Request-Id`
+and the optional `observability` profile (Embabel spans exported to the log) are described in
+[`docs/observability.md`](docs/observability.md).
 
 Retrieval is deterministic: vector k-NN and BM25 candidates are fused with reciprocal rank fusion
 (`chatbot.retrieval.*`). `evidenceSufficient` is true when the best cosine clears the calibrated

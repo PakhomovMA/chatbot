@@ -13,6 +13,7 @@ import com.personal.chatbot.models.chat.ChatTimings;
 import com.personal.chatbot.models.chat.ConversationTurn;
 import com.personal.chatbot.models.chat.ConversationView;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
+import com.personal.chatbot.observability.RequestContext;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -94,7 +95,11 @@ public class ChatService {
         List<ConversationTurn> history = conversations.history(conversationId);
 
         UserQuestion input = new UserQuestion(conversationId, messageId, question, history, options.topK(), options.documentIds(), sink);
-        GroundedAnswer answer = AgentInvocation.create(agentPlatform, GroundedAnswer.class).invoke(input);
+        GroundedAnswer answer;
+        try (RequestContext.Scope _ = RequestContext.with(RequestContext.CONVERSATION_ID, conversationId);
+             RequestContext.Scope _ = RequestContext.with(RequestContext.MESSAGE_ID, messageId)) {
+            answer = AgentInvocation.create(agentPlatform, GroundedAnswer.class).invoke(input);
+        }
 
         long totalMs = (System.nanoTime() - started) / 1_000_000;
         ChatTimings timings = new ChatTimings(answer.retrievalMs(), Math.max(0, totalMs - answer.retrievalMs()), totalMs);

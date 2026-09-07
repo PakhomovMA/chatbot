@@ -19,7 +19,7 @@ class SpaControllerTest extends AbstractChatbotIntegrationTest {
 
     @Test
     void clientRoutesForwardToIndex() throws Exception {
-        for (String route : new String[]{"/", "/chat", "/knowledge"}) {
+        for (String route : new String[]{"/", "/chat", "/knowledge", "/playground"}) {
             mockMvc.perform(get(route)).andExpect(status().isOk()).andExpect(forwardedUrl("/index.html"));
         }
         mockMvc.perform(get("/api/knowledge-base/status")).andExpect(forwardedUrl(null));

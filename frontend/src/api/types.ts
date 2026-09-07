@@ -49,6 +49,46 @@ export interface KnowledgeBaseStatus {
   }
   queue: { pending: number; activeDocumentId?: string }
   embedding: { provider: string; model: string; dimensions: number; fingerprint: string }
+  recentFailures: RecentFailure[]
+}
+
+export interface RecentFailure { documentId: string; stage: string; message: string; at: string }
+
+export type RetrievalMode = 'HYBRID' | 'VECTOR' | 'TEXT'
+
+export interface RetrievalQuery { query: string; topK?: number; mode?: RetrievalMode; documentIds?: string[] }
+
+export interface Provenance {
+  documentId: string
+  documentTitle: string
+  version: number
+  sectionTitle: string
+  sectionPath: string[]
+  chunkId: string
+  sequenceNumber: number
+}
+
+export interface RetrievedChunk {
+  chunkId: string
+  text: string
+  provenance: Provenance
+  vectorScore?: number | null
+  textScore?: number | null
+  fusedScore: number
+  rank: number
+}
+
+export interface RetrievalResult {
+  traceId: string
+  query: string
+  mode: RetrievalMode
+  topK: number
+  candidates: number
+  hits: RetrievedChunk[]
+  evidenceSufficient: boolean
+  maxVectorScore: number
+  timings: { vectorMs: number; textMs: number; fusionMs: number; totalMs: number }
+  at: string
 }
 
 export interface Citation {

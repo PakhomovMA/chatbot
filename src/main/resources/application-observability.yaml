@@ -1,0 +1,25 @@
+# `observability` profile (docs/observability.md): Embabel spans (agent, action, LLM call, tool loop,
+# embedding, RAG) are exported to the log via LoggingSpanExporter. Swap in an OTLP exporter bean to ship
+# them to Langfuse / Jaeger / Zipkin. Message content is NOT captured by default (may contain PII).
+embabel:
+  agent:
+    platform:
+      observability:
+        enabled: true
+        tracing-enabled: true
+        metrics-enabled: true
+        capture-message-content: false
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+logging:
+  level:
+    io.opentelemetry.exporter.logging: INFO
+    com.embabel.agent.observability: DEBUG

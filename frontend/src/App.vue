@@ -9,6 +9,7 @@ import { RouterLink, RouterView } from 'vue-router'
       <nav>
         <RouterLink to="/chat">Chat</RouterLink>
         <RouterLink to="/knowledge">Knowledge Base</RouterLink>
+        <RouterLink to="/playground">Retrieval</RouterLink>
       </nav>
     </header>
     <main class="content">

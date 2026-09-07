@@ -34,6 +34,10 @@ dependencies {
     // Spring
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    // Tracing of agent/action/LLM/tool/RAG spans (Embabel) with an OTLP-ready OpenTelemetry SDK; only
+    // exported under the "observability" profile (see LoggingSpanExporterConfiguration).
+    implementation 'com.embabel.agent:embabel-agent-starter-observability'
+    implementation 'io.opentelemetry:opentelemetry-exporter-logging'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
 
     // Embabel: platform, Ollama models, Lucene RAG store, Tika parsing.

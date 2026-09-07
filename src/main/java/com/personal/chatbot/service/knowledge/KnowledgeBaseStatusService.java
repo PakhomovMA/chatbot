@@ -33,6 +33,9 @@ public class KnowledgeBaseStatusService {
                         index.indexPath(), index.persistent(), index.incompatibilityReason(), index.recoveredFrom()),
                 new KnowledgeBaseStatus.QueueSummary(queue.pending(), queue.activeDocumentId()),
                 new KnowledgeBaseStatus.EmbeddingInfo(embeddingService.provider(), embeddingService.modelName(),
-                        embeddingService.dimensions(), embeddingService.fingerprint().value()));
+                        embeddingService.dimensions(), embeddingService.fingerprint().value()),
+                ingestionService.recentFailures().stream()
+                        .map(f -> new KnowledgeBaseStatus.RecentFailure(f.documentId(), f.stage(), f.message(), f.at()))
+                        .toList());
     }
 }

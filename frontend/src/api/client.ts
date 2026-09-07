@@ -7,6 +7,8 @@ import type {
   DocumentStatusView,
   KnowledgeBaseStatus,
   ProblemDetail,
+  RetrievalQuery,
+  RetrievalResult,
   UploadResponse,
 } from './types'
 
@@ -62,6 +64,7 @@ export const api = {
   reindexDocument: (id: string) => request<DocumentStatusView>(`/api/documents/${encodeURIComponent(id)}/reindex`, { method: 'POST' }),
 
   knowledgeBaseStatus: () => request<KnowledgeBaseStatus>('/api/knowledge-base/status'),
+  retrievalSearch: (body: RetrievalQuery) => request<RetrievalResult>('/api/retrieval/search', json(body)),
   reindexAll: () => request<{ queued: number }>('/api/knowledge-base/reindex', { method: 'POST' }),
 
   /** Live document status changes; returns a function that closes the stream. */

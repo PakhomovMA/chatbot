@@ -17,3 +17,5 @@ embabel:
 
 server:
   port: 0
+embabel.agent.platform.observability:
+  tracing-enabled: false

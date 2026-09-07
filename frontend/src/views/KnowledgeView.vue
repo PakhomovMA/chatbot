@@ -46,6 +46,12 @@ async function rebuild() {
     <div v-else-if="kb.status?.index.recoveredFrom" class="banner warn">
       A corrupt index was moved to <code>{{ kb.status.index.recoveredFrom }}</code> at startup; documents are being re-indexed.
     </div>
+    <div v-if="kb.status?.recentFailures.length" class="banner warn">
+      <strong>Recent ingestion failures</strong>
+      <div v-for="f in kb.status.recentFailures.slice(0, 5)" :key="f.documentId + f.at" class="small">
+        {{ formatTime(f.at) }} · {{ f.documentId }} · {{ f.stage }}: {{ f.message }}
+      </div>
+    </div>
     <div v-if="kb.error" class="banner bad">{{ kb.error }}</div>
     <div v-else-if="kb.notice" class="banner">{{ kb.notice }}</div>
 

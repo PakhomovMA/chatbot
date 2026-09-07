@@ -11,6 +11,7 @@ import com.personal.chatbot.models.knowledge.DocumentError;
 import com.personal.chatbot.models.knowledge.DocumentEvent;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
 import com.personal.chatbot.models.knowledge.dto.DocumentStatusView;
+import com.personal.chatbot.observability.RequestContext;
 import com.personal.chatbot.service.index.LuceneIndexStore;
 import com.personal.chatbot.service.parsing.DocumentParser;
 import io.micrometer.core.instrument.Counter;
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Service;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -50,6 +52,11 @@ public class IngestionService implements AutoCloseable {
     public record QueueStatus(int pending, @Nullable String activeDocumentId) {
     }
 
+    public record IngestionFailure(String documentId, String stage, String message, Instant at) {
+    }
+
+    static final int MAX_RECENT_FAILURES = 50;
+
     private final DocumentRegistry registry;
     private final BlobStore blobStore;
     private final DocumentParser parser;
@@ -62,6 +69,7 @@ public class IngestionService implements AutoCloseable {
             Thread.ofPlatform().name("ingestion-worker").daemon(true).factory());
     private final Set<String> queued = new LinkedHashSet<>();
     private final AtomicReference<@Nullable String> active = new AtomicReference<>();
+    private final ArrayDeque<IngestionFailure> failures = new ArrayDeque<>();
 
     public IngestionService(DocumentRegistry registry, BlobStore blobStore, DocumentParser parser,
                             LuceneIndexStore indexStore, ApplicationEventPublisher events,
@@ -200,7 +208,7 @@ public class IngestionService implements AutoCloseable {
             active.set(documentId);
         }
         long started = System.nanoTime();
-        try {
+        try (RequestContext.Scope _ = RequestContext.with(RequestContext.DOCUMENT_ID, documentId)) {
             Document document = registry.findById(documentId).orElse(null);
             if (document == null) {
                 log.info("Document {} vanished before ingestion", documentId);
@@ -273,10 +281,23 @@ public class IngestionService implements AutoCloseable {
         log.info("Document {} indexed: {} chunks", document.id(), chunkIds.size());
     }
 
+    /** Most recent ingestion failures, newest first, for the knowledge-base status. */
+    public List<IngestionFailure> recentFailures() {
+        synchronized (failures) {
+            return List.copyOf(failures);
+        }
+    }
+
     private void fail(String documentId, String stage, @Nullable String message) {
         indexStore.deleteDocument(DocumentParser.uriOf(documentId));
         Counter.builder("chatbot.ingestion.failures").tag("stage", stage).register(meterRegistry).increment();
         String detail = message != null ? message : "unknown error";
+        synchronized (failures) {
+            failures.addFirst(new IngestionFailure(documentId, stage, detail, now()));
+            while (failures.size() > MAX_RECENT_FAILURES) {
+                failures.removeLast();
+            }
+        }
         log.warn("Ingestion of {} failed at stage {}: {}", documentId, stage, detail);
         transition(documentId, d -> d.withStatusAt(DocumentStatus.FAILED, now())
                 .withStatusMessage(null).withChunkCount(null).withIndexedAt(null)
