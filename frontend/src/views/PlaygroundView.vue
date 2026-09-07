@@ -6,6 +6,7 @@ import type { RetrievalMode, RetrievalResult } from '@/api/types'
 const query = ref('')
 const topK = ref(8)
 const mode = ref<RetrievalMode>('HYBRID')
+const neighbours = ref(0)
 const result = ref<RetrievalResult | undefined>()
 const error = ref<string | undefined>()
 const busy = ref(false)
@@ -16,7 +17,7 @@ async function search() {
   busy.value = true
   error.value = undefined
   try {
-    result.value = await api.retrievalSearch({ query: text, topK: topK.value, mode: mode.value })
+    result.value = await api.retrievalSearch({ query: text, topK: topK.value, mode: mode.value, expandNeighbours: neighbours.value })
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Search failed'
   } finally {
@@ -38,6 +39,7 @@ const fmt = (n?: number | null) => (n == null ? '—' : n.toFixed(3))
         </select>
       </label>
       <label class="small">top-k <input v-model.number="topK" type="number" min="1" max="50" style="width: 60px; margin-left: 4px" /></label>
+      <label class="small" title="Chunks shown on each side of every hit as continuation context">neighbours <input v-model.number="neighbours" type="number" min="0" max="5" style="width: 55px; margin-left: 4px" /></label>
       <button class="btn primary" type="submit" :disabled="busy || !query.trim()">Search</button>
     </form>
 
@@ -50,6 +52,10 @@ const fmt = (n?: number | null) => (n == null ? '—' : n.toFixed(3))
         <strong :style="result.evidenceSufficient ? 'color: var(--ok)' : 'color: var(--warn)'">{{ result.evidenceSufficient ? 'sufficient' : 'insufficient' }}</strong> ·
         vector {{ result.timings.vectorMs }} ms, text {{ result.timings.textMs }} ms, fusion {{ result.timings.fusionMs }} ms, total {{ result.timings.totalMs }} ms ·
         trace <code>{{ result.traceId }}</code>
+      </div>
+      <div v-if="result.expansion" class="small muted" style="margin-bottom: 10px">
+        searched again ({{ result.expansion.strategy }}, +{{ result.expansion.addedHits }} hits, {{ result.expansion.tookMs }} ms):
+        <span v-for="q in result.expansion.queries" :key="q"><code>{{ q }}</code> </span>
       </div>
       <p v-if="!result.hits.length" class="muted">No hits.</p>
       <table v-else class="docs">

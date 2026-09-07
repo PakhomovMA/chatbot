@@ -3,6 +3,7 @@ package com.personal.chatbot.models.agent;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.personal.chatbot.models.chat.AnswerMode;
 import com.personal.chatbot.models.chat.ConversationTurn;
+import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
@@ -31,6 +32,11 @@ public record UserQuestion(
     public UserQuestion(String conversationId, String messageId, String question, List<ConversationTurn> history,
                         @Nullable Integer topK, @Nullable Set<String> documentIds) {
         this(conversationId, messageId, question, history, topK, documentIds, AnswerMode.DETERMINISTIC, null);
+    }
+
+    /** The retrieval this question asks for; the first pass and any widening of it share the options. */
+    public RetrievalQuery retrievalQuery() {
+        return new RetrievalQuery(question, topK, null, documentIds);
     }
 
     public void notifyStage(String stage) {

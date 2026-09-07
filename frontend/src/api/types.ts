@@ -56,7 +56,24 @@ export interface RecentFailure { documentId: string; stage: string; message: str
 
 export type RetrievalMode = 'HYBRID' | 'VECTOR' | 'TEXT'
 
-export interface RetrievalQuery { query: string; topK?: number; mode?: RetrievalMode; documentIds?: string[] }
+export interface RetrievalQuery {
+  query: string
+  topK?: number
+  mode?: RetrievalMode
+  documentIds?: string[]
+  /** Chunks shown on each side of every hit; omit for the configured default. */
+  expandNeighbours?: number
+}
+
+export type ExpansionStrategy = 'NONE' | 'NEIGHBOURS' | 'REWRITE' | 'HYDE'
+
+/** What a second, widened retrieval pass did; absent on a result with a single pass. */
+export interface SearchExpansion {
+  strategy: ExpansionStrategy
+  queries: string[]
+  addedHits: number
+  tookMs: number
+}
 
 export interface Provenance {
   documentId: string
@@ -90,6 +107,7 @@ export interface RetrievalResult {
   maxVectorScore: number
   timings: { vectorMs: number; textMs: number; fusionMs: number; totalMs: number }
   at: string
+  expansion?: SearchExpansion | null
 }
 
 export interface Citation {

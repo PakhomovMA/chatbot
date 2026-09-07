@@ -60,6 +60,13 @@ chatbot:
     history-turns: 10                    # in-memory conversation memory (D12)
     max-conversations: 1000
     conversation-ttl: 24h
+    expand-search:
+      # Second retrieval pass when the first one stays under sufficient-cosine (Phase 9a):
+      # NONE | NEIGHBOURS (wider reading window) | REWRITE (the model rephrases) | HYDE (the model
+      # writes the passage it expects). REWRITE measured best; NONE removes the extra model call on
+      # questions the corpus cannot answer (docs/eval-log.md).
+      strategy: REWRITE
+      queries: 3                         # rewrites asked for (REWRITE only)
 
 spring.servlet.multipart:
   max-file-size: 20MB

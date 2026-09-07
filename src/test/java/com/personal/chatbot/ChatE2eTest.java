@@ -5,6 +5,8 @@ import com.personal.chatbot.models.chat.ChatRequest;
 import com.personal.chatbot.models.chat.ChatResponse;
 import com.personal.chatbot.models.chat.Grounding;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
+import com.personal.chatbot.models.retrieval.ExpansionStrategy;
+import com.personal.chatbot.models.retrieval.SearchExpansion;
 import com.personal.chatbot.service.chat.ChatService;
 import com.personal.chatbot.service.knowledge.DocumentRegistry;
 import com.personal.chatbot.service.knowledge.DocumentService;
@@ -104,6 +106,28 @@ class ChatE2eTest {
     @Test
     void agenticModeAnswersGoldenQuestionsWithCitations() throws IOException {
         run(AnswerMode.AGENTIC, GOLDEN.size() - 2);
+    }
+
+    /**
+     * Phase 9a: a question asked in the user's words, not the documentation's, stays under the
+     * sufficiency floor on the first pass; the planner then inserts {@code expandSearch}, and the
+     * answer is written from the merged evidence.
+     */
+    @Test
+    void aWeaklyRetrievedQuestionIsSearchedAgainBeforeItIsAnswered() throws IOException {
+        seedDocuments();
+        String question = "How much of the real traffic sees a new version before it is everywhere?";
+        ChatResponse response = chat.chat(new ChatRequest(null, question,
+                new ChatRequest.Options(null, null, true, AnswerMode.DETERMINISTIC)));
+
+        SearchExpansion expansion = response.diagnostics() != null ? response.diagnostics().expansion() : null;
+        log.info("[expandSearch] Q: {}\n   -> {} in {} ms, widened with {}: {}", question, response.grounding(),
+                response.timings().totalMs(), expansion == null ? "nothing" : expansion.queries(),
+                response.answer().replace('\n', ' '));
+        assertThat(expansion).as("the question should be weak enough to be searched again").isNotNull();
+        assertThat(expansion.strategy()).isEqualTo(ExpansionStrategy.REWRITE);
+        assertThat(response.citations()).isNotEmpty();
+        assertThat(response.answer().toLowerCase(Locale.ROOT)).containsAnyOf("five percent", "5 percent", "5%");
     }
 
     private void run(AnswerMode mode, int minGrounded) throws IOException {

@@ -1,0 +1,111 @@
+{
+  "description": "Questions the corpus answers but the first retrieval pass answers badly: user wording instead of documentation wording, symptoms instead of terms, and Russian questions over an English corpus. They exist to exercise the expandSearch branch (docs/system-plan.md Phase 9a), which only fires when the first pass stays under sufficient-cosine; the golden set in questions.json never triggers it. Negatives here are near-topic: the widened search must not turn them into evidence.",
+  "questions": [
+    {
+      "id": "hard-01",
+      "question": "Клиенты жалуются, что оплата картой перестала проходить у многих сразу. С чего начать?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "acquirer status page"
+      ]
+    },
+    {
+      "id": "hard-02",
+      "question": "Ночная отправка денег в банк не прошла. Как её повторить?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "settlement-retry",
+        "cronjob/settlement-cron"
+      ]
+    },
+    {
+      "id": "hard-03",
+      "question": "The app keeps eating memory and its connections get stuck. What is the first thing to try?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "rollout restart"
+      ]
+    },
+    {
+      "id": "hard-04",
+      "question": "A new colleague cannot open any of our internal sites from home. What is missing on the laptop?",
+      "expectedDocument": "onboarding-handbook",
+      "mustContain": [
+        "Tailscale"
+      ]
+    },
+    {
+      "id": "hard-05",
+      "question": "Как долго живёт токен доступа к API магазина?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "sixty minutes"
+      ]
+    },
+    {
+      "id": "hard-06",
+      "question": "We sent the same purchase twice by mistake. Will the customer be charged twice?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "Idempotency-Key"
+      ]
+    },
+    {
+      "id": "hard-07",
+      "question": "Кто во время крупной аварии рассказывает клиентам, что происходит?",
+      "expectedDocument": "incident-process",
+      "mustContain": [
+        "communications lead"
+      ]
+    },
+    {
+      "id": "hard-08",
+      "question": "A fix has to go out right now and nobody is around to approve the usual way. What is allowed?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "hotfix"
+      ]
+    },
+    {
+      "id": "hard-09",
+      "question": "Где лежат пароли сервисов и как часто их меняют?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "vault-rotator",
+        "ninety days"
+      ]
+    },
+    {
+      "id": "hard-10",
+      "question": "How much of the real traffic sees a new version before it is everywhere?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "five percent"
+      ]
+    },
+    {
+      "id": "hard-neg-01",
+      "question": "Какой график отпусков у команды платежей?",
+      "expectedDocument": null,
+      "mustContain": []
+    },
+    {
+      "id": "hard-neg-02",
+      "question": "Can I expense a chair for my home office, and up to what amount?",
+      "expectedDocument": null,
+      "mustContain": []
+    },
+    {
+      "id": "hard-neg-03",
+      "question": "Сколько стоит наша подписка на PagerDuty?",
+      "expectedDocument": null,
+      "mustContain": []
+    },
+    {
+      "id": "hard-neg-04",
+      "question": "Which acquirer do we use for card payments in Brazil?",
+      "expectedDocument": null,
+      "mustContain": []
+    }
+  ]
+}

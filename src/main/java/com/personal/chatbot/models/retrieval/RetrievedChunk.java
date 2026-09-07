@@ -27,4 +27,9 @@ public record RetrievedChunk(
     public boolean isHit() {
         return neighbourOf == null;
     }
+
+    /** The same chunk at a new position, as merging several retrieval passes reranks it (Phase 9a). */
+    public RetrievedChunk withRanking(double fusedScore, int rank) {
+        return new RetrievedChunk(chunkId, text, provenance, vectorScore, textScore, fusedScore, rank, neighbourOf);
+    }
 }

@@ -46,7 +46,6 @@ public class RetrievalService implements Retriever {
     private final RetrievalTraceStore traces;
     private final ChatbotProperties.Retrieval settings;
     private final HitFusion fusion;
-    private final NeighbourExpansion expansion;
     private final MeterRegistry meterRegistry;
 
     public RetrievalService(LuceneIndexStore indexStore, RetrievalTraceStore traces, ChatbotProperties.Retrieval settings,
@@ -55,8 +54,6 @@ public class RetrievalService implements Retriever {
         this.traces = traces;
         this.settings = settings;
         this.fusion = new HitFusion(settings.rrfK());
-        this.expansion = new NeighbourExpansion(
-                (chunkId, each) -> indexStore.expand(chunkId, ResultExpander.Method.SEQUENCE, each), settings.expandNeighbours());
         this.meterRegistry = meterRegistry;
     }
 
@@ -78,12 +75,11 @@ public class RetrievalService implements Retriever {
 
         // Expansion is timed with fusion: both are post-processing of the two facet queries.
         long fusionStart = System.nanoTime();
-        List<RetrievedChunk> hits = expansion.expand(fusion.fuse(mode, vector, lexical, documentFilter, topK));
+        List<RetrievedChunk> hits = neighbourExpansion(query).expand(fusion.fuse(mode, vector, lexical, documentFilter, topK));
         long fusionMs = millisSince(fusionStart);
 
-        double maxVector = hits.stream().map(RetrievedChunk::vectorScore).filter(Objects::nonNull)
-                .mapToDouble(Double::doubleValue).max().orElse(-1);
-        boolean sufficient = !hits.isEmpty() && maxVector >= settings.sufficientCosine();
+        double maxVector = maxVectorScore(hits);
+        boolean sufficient = sufficient(hits, maxVector, settings.sufficientCosine());
         RetrievalResult result = new RetrievalResult(UUID.randomUUID().toString(), text, mode, topK, candidates, hits,
                 sufficient, maxVector, new RetrievalTimings(vectorMs, textMs, fusionMs, millisSince(started)), Instant.now());
         traces.record(result);
@@ -93,6 +89,23 @@ public class RetrievalService implements Retriever {
         log.debug("Retrieval [{}] mode={} '{}' -> {} passages (maxCosine={}, sufficient={}) in {} ms", result.traceId(), mode,
                 text, hits.size(), String.format("%.3f", maxVector), sufficient, result.timings().totalMs());
         return result;
+    }
+
+    /** Best cosine among the hits, or -1 when the vector facet matched nothing. */
+    static double maxVectorScore(List<RetrievedChunk> hits) {
+        return hits.stream().map(RetrievedChunk::vectorScore).filter(Objects::nonNull)
+                .mapToDouble(Double::doubleValue).max().orElse(-1);
+    }
+
+    /** The sufficiency rule, shared with the merged result of an expanded search (Phase 9a). */
+    static boolean sufficient(List<RetrievedChunk> hits, double maxVectorScore, double floor) {
+        return !hits.isEmpty() && maxVectorScore >= floor;
+    }
+
+    private NeighbourExpansion neighbourExpansion(RetrievalQuery query) {
+        int chunksEachSide = query.expandNeighbours() != null ? query.expandNeighbours() : settings.expandNeighbours();
+        return new NeighbourExpansion(
+                (chunkId, each) -> indexStore.expand(chunkId, ResultExpander.Method.SEQUENCE, each), chunksEachSide);
     }
 
     private List<SimilarityResult<Chunk>> vectorSearch(String text, int candidates) {

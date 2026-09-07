@@ -8,8 +8,9 @@ import com.embabel.common.textio.template.TemplateRenderer;
 import java.util.Map;
 
 /**
- * The standing instructions of the assistant: persona and grounding rules, one set per answering
- * branch. They are the same for every question, so they travel as Embabel {@link PromptContributor}s
+ * The standing instructions of the assistant: persona and grounding rules for each answering branch,
+ * plus the rules for the query-widening calls of {@code expandSearch}. They are the same for every
+ * question, so they travel as Embabel {@link PromptContributor}s
  * and land in the system message, while the per-question material (history, evidence, question)
  * stays in the user message built by {@link GroundedAnswerPrompt} (docs/system-plan.md D13).
  *
@@ -24,21 +25,27 @@ public final class GroundingInstructions {
     static final String GROUNDED_ANSWER_TEMPLATE = "grounded-answer";
     static final String STREAMING_ANSWER_TEMPLATE = "grounded-answer-stream";
     static final String AGENTIC_RESEARCH_TEMPLATE = "agentic-research";
+    static final String REWRITE_TEMPLATE = "expand-search-rewrite";
+    static final String HYDE_TEMPLATE = "expand-search-hyde";
 
     private static final String ROLE = "grounding_instructions";
 
     private final PromptContributor groundedAnswer;
     private final PromptContributor streamingAnswer;
     private final PromptContributor agenticResearch;
+    private final PromptContributor queryRewrite;
+    private final PromptContributor hypotheticalPassage;
 
-    public GroundingInstructions(int agenticMaxSearches) {
-        this(strictRenderer(), agenticMaxSearches);
+    public GroundingInstructions(int agenticMaxSearches, int expansionQueries) {
+        this(strictRenderer(), agenticMaxSearches, expansionQueries);
     }
 
-    GroundingInstructions(TemplateRenderer renderer, int agenticMaxSearches) {
+    GroundingInstructions(TemplateRenderer renderer, int agenticMaxSearches, int expansionQueries) {
         this.groundedAnswer = render(renderer, GROUNDED_ANSWER_TEMPLATE, Map.of());
         this.streamingAnswer = render(renderer, STREAMING_ANSWER_TEMPLATE, Map.of());
         this.agenticResearch = render(renderer, AGENTIC_RESEARCH_TEMPLATE, Map.of("maxSearches", agenticMaxSearches));
+        this.queryRewrite = render(renderer, REWRITE_TEMPLATE, Map.of("queries", expansionQueries));
+        this.hypotheticalPassage = render(renderer, HYDE_TEMPLATE, Map.of());
     }
 
     /** Instructions for the deterministic branch asking for a structured draft. */
@@ -54,6 +61,16 @@ public final class GroundingInstructions {
     /** Instructions for the agentic branch, where the model retrieves through the knowledge-base tools. */
     public PromptContributor agenticResearch() {
         return agenticResearch;
+    }
+
+    /** Instructions for the REWRITE expansion strategy: other ways to ask a question that found nothing. */
+    public PromptContributor queryRewrite() {
+        return queryRewrite;
+    }
+
+    /** Instructions for the HYDE expansion strategy: the passage that would answer the question. */
+    public PromptContributor hypotheticalPassage() {
+        return hypotheticalPassage;
     }
 
     /**

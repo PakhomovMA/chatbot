@@ -3,8 +3,8 @@
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
 Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
 
-Current state: **Phase 9c** (agentic RAG) — Chat (streamed, cited answers; deterministic or ToolishRag-driven
-agentic mode), Knowledge Base (upload, live status, re-index, delete) and a Retrieval playground on top of the
+Current state: **Phase 9a + 9c** (condition-driven search widening, agentic RAG) — Chat (streamed, cited
+answers; deterministic or ToolishRag-driven agentic mode), Knowledge Base (upload, live status, re-index, delete) and a Retrieval playground on top of the
 Embabel agent, hybrid retrieval and the Lucene index, with health components, RAG metrics, request
 correlation and optional tracing.
 
@@ -100,7 +100,7 @@ Errors are RFC 9457 problem details.
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/chat` `{conversationId?, message, options?:{topK?, documentIds?, includeDiagnostics?, mode?}}` | Grounded answer: `answer` (Markdown with `[n]` markers), `grounding` (`GROUNDED` / `PARTIAL` / `INSUFFICIENT_EVIDENCE`), `citations[]` with document, section, chunk id and quote, `timings`, `retrievalTraceId` |
-| `POST /api/chat/stream` (same body) | Server-sent events: `status` (`{stage, detail?}`, stages `retrieving` / `researching` / `generating` / `verifying`), `delta` (`{text}`), `final` (`{response}` with the same shape as `POST /api/chat`), or `error` (`{message}`); a `:keep-alive` comment every 15 s while nothing else is sent |
+| `POST /api/chat/stream` (same body) | Server-sent events: `status` (`{stage, detail?}`, stages `retrieving` / `expanding` / `researching` / `generating` / `verifying`), `delta` (`{text}`), `final` (`{response}` with the same shape as `POST /api/chat`), or `error` (`{message}`); a `:keep-alive` comment every 15 s while nothing else is sent |
 | `GET /api/conversations/{id}` / `DELETE` | In-memory conversation history (last 10 turns, 24 h idle TTL) |
 
 The flow is deterministic retrieve → generate → verify (`agents/KnowledgeAssistantAgent`): retrieval never
@@ -115,6 +115,15 @@ system message; history, numbered evidence and the question are assembled in Jav
 
 Streaming uses Embabel's streaming prompt runner when the model supports it and falls back to the
 structured path (one `delta` with the whole answer) otherwise; verification is identical.
+
+**Widening a weak search** (`chatbot.chat.expand-search.strategy`, default `REWRITE`): when the first retrieval's
+best cosine stays under `chatbot.retrieval.sufficient-cosine`, the planner inserts a second pass before drafting
+(`expandSearch`, stage `expanding`). `REWRITE` asks the model for other ways to ask the question, `HYDE` for the
+passage it would expect to find, `NEIGHBOURS` re-reads with a wider window, `NONE` switches the branch off. The
+passes are merged by reciprocal rank and answered as one evidence list; the merged search is its own retrieval
+trace, tagged with the strategy and the queries it used. It runs at most once per question, never for a question
+that retrieved nothing, and a failed model call simply leaves the first pass in place. What each strategy is
+worth, and what it costs on questions the corpus cannot answer: `docs/eval-log.md`.
 
 **Agentic mode** (`options.mode: "AGENTIC"`, or `chatbot.chat.mode`; UI selector "agentic (tools)"): instead of
 one deterministic retrieval, the model researches the question itself through Embabel `ToolishRag` tools built
@@ -132,7 +141,7 @@ tool boundary; the model call already in flight runs to completion. Comparison a
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/retrieval/search` `{query, topK?, mode?, documentIds?}` | Hybrid (default), `VECTOR` or `TEXT` search; hits carry provenance, cosine, BM25 and fused scores |
+| `POST /api/retrieval/search` `{query, topK?, mode?, documentIds?, expandNeighbours?}` | Hybrid (default), `VECTOR` or `TEXT` search; hits carry provenance, cosine, BM25 and fused scores |
 | `GET /api/diagnostics/retrieval?limit=` / `GET /api/diagnostics/retrieval/{traceId}` | Recent retrieval traces (bounded ring buffer) |
 
 The **Retrieval** tab of the UI (`/playground`) runs the same search interactively. Health components

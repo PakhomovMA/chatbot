@@ -45,6 +45,15 @@ public class GroundedAnswerPrompt {
                 + "\n\n" + AnswerLanguages.instruction(languageFor(question))).strip();
     }
 
+    /**
+     * Prompt for the query-widening calls of {@code expandSearch} (Phase 9a): the question alone.
+     * What to do with it is standing instruction, and the answer language does not apply — the model
+     * writes search text here, not an answer.
+     */
+    public String buildForExpansion(String question) {
+        return "Question: " + question.strip();
+    }
+
     /** The language this question is answered in; the fixed replies of the application follow it. */
     public AnswerLanguage languageFor(String question) {
         return AnswerLanguages.resolve(configuredLanguage, question);

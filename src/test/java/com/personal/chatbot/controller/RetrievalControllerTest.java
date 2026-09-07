@@ -77,6 +77,13 @@ class RetrievalControllerTest extends AbstractChatbotIntegrationTest {
                         .content("{\"query\":\"deploy\",\"mode\":\"TEXT\",\"documentIds\":[\"nope\"]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.hits").isEmpty());
+
+        // The playground may ask for neighbours per query; a single search is never a widened one.
+        mockMvc.perform(post("/api/retrieval/search").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"query\":\"systemctl restart payments\",\"topK\":2,\"expandNeighbours\":1}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.hits", Matchers.not(Matchers.empty())))
+                .andExpect(jsonPath("$.expansion").doesNotExist());
     }
 
     @Test
@@ -85,6 +92,9 @@ class RetrievalControllerTest extends AbstractChatbotIntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON));
         mockMvc.perform(post("/api/retrieval/search").contentType(MediaType.APPLICATION_JSON).content("{\"query\":\"x\",\"topK\":500}"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(post("/api/retrieval/search").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"query\":\"x\",\"expandNeighbours\":9}"))
                 .andExpect(status().isBadRequest());
     }
 }

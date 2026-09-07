@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 class GroundingInstructionsTest {
 
-    private final GroundingInstructions instructions = new GroundingInstructions(7);
+    private final GroundingInstructions instructions = new GroundingInstructions(7, 3);
 
     /**
      * Catches template path drift, which the mocked-LLM tests cannot see: the strict renderer
@@ -24,7 +24,9 @@ class GroundingInstructionsTest {
             GroundingInstructions.SHARED_RULES_TEMPLATE,
             GroundingInstructions.GROUNDED_ANSWER_TEMPLATE,
             GroundingInstructions.STREAMING_ANSWER_TEMPLATE,
-            GroundingInstructions.AGENTIC_RESEARCH_TEMPLATE})
+            GroundingInstructions.AGENTIC_RESEARCH_TEMPLATE,
+            GroundingInstructions.REWRITE_TEMPLATE,
+            GroundingInstructions.HYDE_TEMPLATE})
     void everyTemplateResolvesFromTheDefaultPromptsLocation(String template) {
         TemplateRenderer renderer = new JinjavaTemplateRenderer(new JinjaProperties("classpath:/prompts/", ".jinja", true));
         assertThatCode(() -> renderer.load(template)).doesNotThrowAnyException();
@@ -74,7 +76,7 @@ class GroundingInstructionsTest {
     @Test
     void anUnknownTemplateFailsAtConstructionRatherThanAtTheFirstQuestion() {
         TemplateRenderer renderer = new JinjavaTemplateRenderer(new JinjaProperties("classpath:/nowhere/", ".jinja", true));
-        assertThatCode(() -> new GroundingInstructions(renderer, 4))
+        assertThatCode(() -> new GroundingInstructions(renderer, 4, 3))
                 .isInstanceOf(NoSuchTemplateException.class);
     }
 }

@@ -11,6 +11,7 @@ import org.springframework.validation.annotation.Validated;
 
 import com.personal.chatbot.models.chat.AnswerLanguage;
 import com.personal.chatbot.models.chat.AnswerMode;
+import com.personal.chatbot.models.retrieval.ExpansionStrategy;
 import org.springframework.util.unit.DataSize;
 
 import java.nio.file.Path;
@@ -134,6 +135,7 @@ public record ChatbotProperties(
     /**
      * Chat defaults (docs/system-plan.md D10, D12).
      *
+     * @param expandSearch       second retrieval pass when the first one found weak evidence (Phase 9a)
      * @param mode               default answer mode: DETERMINISTIC (retrieve-then-generate) or AGENTIC (ToolishRag, Phase 9c)
      * @param answerLanguage     language of the answer: AUTO follows the question, RU or EN force it
      * @param agenticMaxSearches searches the model is told it may issue in agentic mode
@@ -155,8 +157,31 @@ public record ChatbotProperties(
             @Min(50) @DefaultValue("600") int quoteMaxChars,
             @Min(0) @DefaultValue("10") int historyTurns,
             @Min(1) @DefaultValue("1000") int maxConversations,
-            @DefaultValue("24h") Duration conversationTtl
+            @DefaultValue("24h") Duration conversationTtl,
+            @Valid @DefaultValue ExpandSearch expandSearch
     ) {
+    }
+
+    /**
+     * The {@code expandSearch} branch of the agent (docs/system-plan.md Phase 9a): when the first
+     * retrieval's best cosine stays under {@code retrieval.sufficient-cosine}, search once more with a
+     * widened query and answer from the merged evidence. NEIGHBOURS widens the reading window and costs
+     * nothing extra; REWRITE and HYDE cost one model call, paid only on questions the corpus answers badly.
+     *
+     * <p>REWRITE is the default: on the eval corpus it is the only strategy that lifted a weak question
+     * above the floor without costing recall, and it fires on few questions (docs/eval-log.md).
+     *
+     * @param strategy how the extra queries are produced, NONE to keep one retrieval per question
+     * @param queries  how many rewrites to ask for (REWRITE only; HYDE and NEIGHBOURS search once)
+     */
+    public record ExpandSearch(
+            @NotNull @DefaultValue("REWRITE") ExpansionStrategy strategy,
+            @Min(1) @DefaultValue("3") int queries
+    ) {
+
+        public boolean enabled() {
+            return strategy != ExpansionStrategy.NONE;
+        }
     }
 
     public record Ollama(

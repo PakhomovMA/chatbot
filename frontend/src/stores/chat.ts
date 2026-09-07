@@ -18,6 +18,7 @@ export interface ChatMessage {
 
 const STAGE_LABELS: Record<string, string> = {
   retrieving: 'Searching the knowledge base…',
+  expanding: 'Searching again with a wider query…',
   researching: 'Researching with the search tools…',
   generating: 'Drafting an answer…',
   verifying: 'Verifying citations…',

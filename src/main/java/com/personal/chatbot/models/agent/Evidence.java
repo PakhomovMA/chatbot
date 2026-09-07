@@ -20,4 +20,9 @@ public record Evidence(UserQuestion question, RetrievalResult retrieval) {
     public boolean sufficientByScore() {
         return retrieval.evidenceSufficient();
     }
+
+    /** Whether this evidence already merges a widened second search (docs/system-plan.md Phase 9a). */
+    public boolean expanded() {
+        return retrieval.expanded();
+    }
 }

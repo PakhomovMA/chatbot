@@ -181,6 +181,10 @@ class RetrievalServiceTest {
             assertThat(neighbour.rank()).isEqualTo(hit.rank());
         });
         assertThat(expanded).extracting(RetrievedChunk::chunkId).doesNotHaveDuplicates();
+
+        // The width is also a per-query option (Phase 9a needs it per pass, the playground exposes it).
+        assertThat(service.search(query.withExpandNeighbours(1)).hits()).isEqualTo(expanded);
+        assertThat(expanding.search(query.withExpandNeighbours(0)).hits()).isEqualTo(plain);
     }
 
     @Test

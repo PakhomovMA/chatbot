@@ -5,6 +5,7 @@ import com.personal.chatbot.models.embedding.EmbeddingFingerprint;
 import com.personal.chatbot.models.index.IndexManifest;
 import com.personal.chatbot.models.knowledge.Document;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
+import com.personal.chatbot.models.retrieval.ExpansionStrategy;
 import com.personal.chatbot.models.retrieval.RetrievalMode;
 import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
@@ -20,6 +21,7 @@ import com.personal.chatbot.service.parsing.DocumentParser;
 import com.personal.chatbot.service.parsing.ProvenanceChunkTransformer;
 import com.personal.chatbot.service.retrieval.RetrievalService;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
+import com.personal.chatbot.service.retrieval.SearchExpander;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -66,6 +68,8 @@ class RagEvalTest {
     /** The production evidence budget (chatbot.chat.evidence-char-budget), so "in budget" means what the model sees. */
     private static final int EVIDENCE_CHAR_BUDGET = 6000;
     private static final int NDCG_K = 10;
+    /** The production default of chatbot.chat.expand-search.queries. */
+    private static final int EXPANSION_QUERIES = 3;
 
     /** @param expectedDocument null marks a negative question: nothing in the corpus answers it. */
     record Question(String id, String question, @Nullable String expectedDocument, List<String> mustContain) {
@@ -112,6 +116,26 @@ class RagEvalTest {
                             double evidenceChars, double p50Ms) {
     }
 
+    /**
+     * What the {@code expandSearch} branch does to a question set (docs/system-plan.md Phase 9a).
+     * NONE is the baseline: one retrieval per question, the behaviour before this phase.
+     *
+     * @param forced         the branch was run on every question, not only where the condition fired: what the
+     *                       strategy is worth as retrieval, separated from how often the condition is right
+     * @param triggered      positives the branch fired on
+     * @param recovered      of those, how many were under the floor before and above it after the widened pass
+     * @param recallAt5      share of positives with a relevant chunk in the first five hits
+     * @param answerCoverage share of positives whose expected phrase is in some returned passage
+     * @param answerInBudget the same, counting only passages that fit the prompt's evidence budget
+     * @param negSufficient  share of negatives the merged evidence claims to answer (must stay at zero)
+     * @param p50Ms          median wall time per question, model call included
+     * @param modelP50Ms     median wall time of the query-writing model call, zero for the strategies without one
+     */
+    record StrategySummary(String questionSet, ExpansionStrategy strategy, boolean forced, int positives, int negatives,
+                           int triggered, int recovered, double recallAt5, double mrr, double answerCoverage,
+                           double answerInBudget, double negSufficient, double p50Ms, double modelP50Ms) {
+    }
+
     @TempDir
     static Path dir;
 
@@ -123,8 +147,14 @@ class RagEvalTest {
     private PromptedEmbeddingService embeddings;
     private LuceneIndexStore store;
     private RetrievalService retrieval;
+    private ChatbotProperties.Retrieval retrievalSettings;
     private QuestionSet questionSet;
     private Map<String, String> documentIdsByKey;
+
+    private static QuestionSet questionSet(String file) throws IOException {
+        return JsonMapper.builder().build()
+                .readValue(Files.readString(Path.of("src/test/resources/eval", file)), QuestionSet.class);
+    }
 
     static Path modelDir() {
         String override = System.getenv("CHATBOT_MODEL_DIR");
@@ -143,11 +173,10 @@ class RagEvalTest {
         store = new LuceneIndexStore(dir.resolve("index"), new EmbabelEmbeddingServiceAdapter(embeddings), fingerprint,
                 new IndexManifest.Chunker(chunkSize, overlap, ProvenanceChunkTransformer.TRANSFORMER_VERSION), 16,
                 new ProvenanceChunkTransformer()).open();
-        var retrievalSettings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, 0, 500);
+        retrievalSettings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, 0, 500);
         retrieval = new RetrievalService(store, new RetrievalTraceStore(500), retrievalSettings, new SimpleMeterRegistry());
 
-        JsonMapper mapper = JsonMapper.builder().build();
-        questionSet = mapper.readValue(Files.readString(Path.of("src/test/resources/eval/questions.json")), QuestionSet.class);
+        questionSet = questionSet("questions.json");
         documentIdsByKey = new LinkedHashMap<>();
         DocumentParser parser = new DocumentParser();
         long started = System.nanoTime();
@@ -268,6 +297,143 @@ class RagEvalTest {
         return new ExpansionSummary(expandNeighbours, recallHits / positives, reciprocalRanks / positives,
                 covered / positives, coveredInBudget / positives, passages / positives, passagesInBudget / positives,
                 hitsInBudget / positives, chars / positives, percentile(latencies, 0.5));
+    }
+
+    /**
+     * Phase 9a: what each {@code expandSearch} strategy is worth. The branch fires on the questions the
+     * first pass answers badly, so it is measured on two sets: the golden questions, where it should
+     * almost never fire, and the hard set, which is written in user words rather than documentation
+     * words. Reported, not asserted — the default strategy follows from these numbers, and the
+     * model-driven strategies need Ollama, which the gate does not require.
+     */
+    @Test
+    void expandSearchStrategies() throws IOException {
+        List<Map.Entry<String, QuestionSet>> sets = List.of(
+                Map.entry("golden", questionSet), Map.entry("hard", questionSet("questions-hard.json")));
+        boolean withModel = EvalQueryWriter.ollamaAvailable();
+        if (!withModel) {
+            log.warn("Ollama is not reachable at {}: measuring the strategies that need no model call only",
+                    EvalQueryWriter.baseUrl());
+        }
+        List<StrategySummary> summaries = new ArrayList<>();
+        try (EvalQueryWriter writer = withModel
+                ? new EvalQueryWriter(System.getProperty("eval.llm", "qwen3:14b"), 0.1, EXPANSION_QUERIES) : null) {
+            for (Map.Entry<String, QuestionSet> set : sets) {
+                for (ExpansionStrategy strategy : ExpansionStrategy.values()) {
+                    if (writer == null && needsModel(strategy)) {
+                        continue;
+                    }
+                    summaries.add(measureStrategy(set.getKey(), set.getValue(), strategy, false, writer));
+                }
+            }
+            // The condition fires on few questions, which says little about the strategies themselves;
+            // the hard set is therefore also measured with the branch forced on every question.
+            for (ExpansionStrategy strategy : ExpansionStrategy.values()) {
+                if (strategy != ExpansionStrategy.NONE && (writer != null || !needsModel(strategy))) {
+                    summaries.add(measureStrategy("hard", questionSet("questions-hard.json"), strategy, true, writer));
+                }
+            }
+        }
+        Path reports = Path.of("build/reports/rag-eval");
+        Files.createDirectories(reports);
+        JsonMapper mapper = JsonMapper.builder().enable(SerializationFeature.INDENT_OUTPUT).build();
+        Files.writeString(reports.resolve("expand-search-" + DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+                .format(java.time.LocalDateTime.now()) + ".json"), mapper.writeValueAsString(summaries));
+        for (StrategySummary summary : summaries) {
+            log.info(String.format(Locale.ROOT,
+                    "%-6s %-10s%s recall@5=%.3f mrr=%.3f answer=%.3f inBudget=%.3f fired=%d/%d recovered=%d negSufficient=%.2f p50=%.0fms (model %.0fms)",
+                    summary.questionSet(), summary.strategy(), summary.forced() ? " forced" : "       ", summary.recallAt5(), summary.mrr(),
+                    summary.answerCoverage(), summary.answerInBudget(), summary.triggered(), summary.positives(),
+                    summary.recovered(), summary.negSufficient(), summary.p50Ms(), summary.modelP50Ms()));
+        }
+    }
+
+    private static boolean needsModel(ExpansionStrategy strategy) {
+        return strategy == ExpansionStrategy.REWRITE || strategy == ExpansionStrategy.HYDE;
+    }
+
+    private StrategySummary measureStrategy(String setName, QuestionSet questions, ExpansionStrategy strategy,
+                                            boolean forced, @Nullable EvalQueryWriter writer) {
+        SearchExpander expander = new SearchExpander(retrieval, new RetrievalTraceStore(500), retrievalSettings);
+        GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(EVIDENCE_CHAR_BUDGET, 0, AnswerLanguage.EN);
+        int positives = 0;
+        int negatives = 0;
+        int triggered = 0;
+        int recovered = 0;
+        int negativeSufficient = 0;
+        double recallHits = 0;
+        double reciprocalRanks = 0;
+        double covered = 0;
+        double coveredInBudget = 0;
+        List<Long> latencies = new ArrayList<>();
+        List<Long> modelLatencies = new ArrayList<>();
+        for (Question question : questions.questions()) {
+            RetrievalQuery query = new RetrievalQuery(question.question(), NDCG_K, RetrievalMode.HYBRID, null);
+            long started = System.nanoTime();
+            RetrievalResult result = retrieval.search(query);
+            boolean weakBefore = !result.evidenceSufficient();
+            double cosineBefore = result.maxVectorScore();
+            boolean fired = strategy != ExpansionStrategy.NONE
+                    && (forced ? !result.hits().isEmpty() : expander.worthExpanding(result));
+            if (fired) {
+                long modelMs = 0;
+                List<String> extra = switch (strategy) {
+                    case NEIGHBOURS -> List.of(question.question());
+                    case REWRITE -> writer.rewrite(question.question(), EXPANSION_QUERIES);
+                    case HYDE -> writer.hypothetical(question.question());
+                    case NONE -> List.of();
+                };
+                if (needsModel(strategy)) {
+                    modelMs = writer.lastCallMs();
+                    modelLatencies.add(modelMs);
+                }
+                result = expander.expand(query, result, strategy, extra, modelMs);
+                log.info(String.format(Locale.ROOT, "[%s %s%s] %s widened with %d queries: cosine %.3f -> %.3f%s",
+                        setName, strategy, forced ? " forced" : "", question.id(), result.expansion().queries().size(),
+                        cosineBefore, result.maxVectorScore(), weakBefore && result.evidenceSufficient() ? " (now sufficient)" : ""));
+            }
+            long tookMs = (System.nanoTime() - started) / 1_000_000;
+            latencies.add(tookMs);
+            if (question.isNegative()) {
+                negatives++;
+                if (result.evidenceSufficient()) {
+                    negativeSufficient++;
+                    log.warn("[{} {}] {} negative claims sufficient evidence (cosine {})", setName, strategy,
+                            question.id(), String.format(Locale.ROOT, "%.3f", result.maxVectorScore()));
+                }
+                continue;
+            }
+            positives++;
+            if (fired) {
+                triggered++;
+                if (weakBefore && result.evidenceSufficient()) {
+                    recovered++;
+                }
+            }
+            List<RetrievedChunk> all = result.hits();
+            int firstRelevant = all.stream().filter(RetrievedChunk::isHit).filter(hit -> isRelevant(hit, question))
+                    .mapToInt(RetrievedChunk::rank).min().orElse(-1);
+            if (firstRelevant > 0) {
+                reciprocalRanks += 1.0 / firstRelevant;
+                if (firstRelevant <= RECALL_K) {
+                    recallHits++;
+                }
+            } else {
+                log.info("[{} {}] {} miss: '{}'", setName, strategy, question.id(), question.question());
+            }
+            if (all.stream().anyMatch(hit -> isRelevant(hit, question))) {
+                covered++;
+            }
+            if (all.subList(0, prompt.includedHits(all)).stream().anyMatch(hit -> isRelevant(hit, question))) {
+                coveredInBudget++;
+            }
+        }
+        latencies.sort(null);
+        modelLatencies.sort(null);
+        return new StrategySummary(setName, strategy, forced, positives, negatives, triggered, recovered,
+                recallHits / positives, reciprocalRanks / positives, covered / positives, coveredInBudget / positives,
+                negatives == 0 ? 0 : (double) negativeSufficient / negatives, percentile(latencies, 0.5),
+                percentile(modelLatencies, 0.5));
     }
 
     private ModeSummary evaluate(RetrievalMode mode, List<QuestionOutcome> outcomes) {

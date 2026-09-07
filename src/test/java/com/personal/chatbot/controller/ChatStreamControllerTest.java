@@ -5,6 +5,7 @@ import com.embabel.agent.core.support.LlmInteraction;
 import com.jayway.jsonpath.JsonPath;
 import com.personal.chatbot.models.agent.AgenticDraft;
 import com.personal.chatbot.models.agent.GroundedAnswerDraft;
+import com.personal.chatbot.models.agent.RewrittenQueries;
 import com.personal.chatbot.models.chat.ChatRequest;
 import com.personal.chatbot.models.chat.ChatStreamEvent;
 import com.personal.chatbot.service.chat.ChatService;
@@ -60,6 +61,17 @@ class ChatStreamControllerTest extends AbstractChatbotIntegrationTest {
     private static String documentId;
 
     record SseEvent(String name, String data) {
+    }
+
+    /**
+     * The fake embedder scores everything below the sufficiency floor, so the default expandSearch
+     * strategy fires on every question here (Phase 9a). The rewrite is stubbed as "nothing better to
+     * try", which leaves the evidence and the event contract as they were, plus the extra stage.
+     */
+    @BeforeEach
+    void noRewriteToOffer() {
+        whenCreateObject(p -> p.startsWith("Question:"), RewrittenQueries.class)
+                .thenReturn(new RewrittenQueries(List.of()));
     }
 
     @BeforeEach
@@ -119,7 +131,8 @@ class ChatStreamControllerTest extends AbstractChatbotIntegrationTest {
         assertThat(events).extracting(SseEvent::name)
                 .containsSubsequence("status", "status", "delta", "delta", "delta", "status", "final");
         assertThat(events).filteredOn(e -> e.name().equals("status")).extracting(SseEvent::data)
-                .containsExactly("{\"stage\":\"retrieving\"}", "{\"stage\":\"generating\"}", "{\"stage\":\"verifying\"}");
+                .containsExactly("{\"stage\":\"retrieving\"}", "{\"stage\":\"expanding\"}",
+                        "{\"stage\":\"generating\"}", "{\"stage\":\"verifying\"}");
         String streamed = events.stream().filter(e -> e.name().equals("delta"))
                 .map(e -> (String) JsonPath.read(e.data(), "$.text")).reduce("", String::concat);
         assertThat(streamed).isEqualTo("Run `systemctl restart payments` on the host [1]. Unrelated claim [9].");
@@ -154,8 +167,9 @@ class ChatStreamControllerTest extends AbstractChatbotIntegrationTest {
                 .thenReturn(new GroundedAnswerDraft("Deploy the previous image tag [1].", List.of(1), true, null));
 
         List<SseEvent> events = streamChat("{\"message\":\"How do I roll back?\"}");
-        assertThat(events).extracting(SseEvent::name).containsExactly("status", "status", "delta", "status", "final");
-        assertThat((String) JsonPath.read(events.get(2).data(), "$.text")).isEqualTo("Deploy the previous image tag [1].");
+        assertThat(events).extracting(SseEvent::name)
+                .containsExactly("status", "status", "status", "delta", "status", "final");
+        assertThat((String) JsonPath.read(events.get(3).data(), "$.text")).isEqualTo("Deploy the previous image tag [1].");
         assertThat((String) JsonPath.read(events.getLast().data(), "$.response.grounding")).isIn("GROUNDED", "PARTIAL");
     }
 

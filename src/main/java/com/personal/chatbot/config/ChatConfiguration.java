@@ -3,11 +3,13 @@ package com.personal.chatbot.config;
 import com.personal.chatbot.service.chat.AgenticResearcher;
 import com.personal.chatbot.service.chat.AnswerDrafter;
 import com.personal.chatbot.service.chat.ConversationStore;
+import com.personal.chatbot.service.chat.EvidenceExpander;
 import com.personal.chatbot.service.chat.GroundedAnswerPrompt;
 import com.personal.chatbot.service.chat.GroundingInstructions;
 import com.personal.chatbot.service.chat.GroundingVerifier;
 import com.personal.chatbot.service.index.LockedSearchOperations;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
+import com.personal.chatbot.service.retrieval.SearchExpander;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -30,7 +32,7 @@ class ChatConfiguration {
 
     @Bean
     GroundingInstructions groundingInstructions(ChatbotProperties.Chat chat) {
-        return new GroundingInstructions(chat.agenticMaxSearches());
+        return new GroundingInstructions(chat.agenticMaxSearches(), chat.expandSearch().queries());
     }
 
     @Bean
@@ -42,6 +44,13 @@ class ChatConfiguration {
     AnswerDrafter answerDrafter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
                                 ChatbotProperties.Chat chat, MeterRegistry meterRegistry) {
         return new AnswerDrafter(prompt, instructions, chat, meterRegistry);
+    }
+
+    @Bean
+    EvidenceExpander evidenceExpander(SearchExpander expander, GroundedAnswerPrompt prompt,
+                                      GroundingInstructions instructions, ChatbotProperties.Chat chat,
+                                      MeterRegistry meterRegistry) {
+        return new EvidenceExpander(expander, prompt, instructions, chat, meterRegistry);
     }
 
     @Bean
