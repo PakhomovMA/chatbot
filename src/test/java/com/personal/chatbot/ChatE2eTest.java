@@ -1,0 +1,127 @@
+package com.personal.chatbot;
+
+import com.personal.chatbot.models.chat.ChatRequest;
+import com.personal.chatbot.models.chat.ChatResponse;
+import com.personal.chatbot.models.chat.Grounding;
+import com.personal.chatbot.models.knowledge.DocumentStatus;
+import com.personal.chatbot.service.chat.ChatService;
+import com.personal.chatbot.service.knowledge.DocumentRegistry;
+import com.personal.chatbot.service.knowledge.DocumentService;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
+
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
+import java.util.Locale;
+import java.util.stream.Stream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+/**
+ * End-to-end grounded answers with the real stack: Ollama qwen3:14b + EmbeddingGemma ONNX + Lucene
+ * (docs/system-plan.md §11, §14 Phase 5). Run with {@code ./gradlew test -PincludeTags=e2e}.
+ */
+@Tag("e2e")
+@SpringBootTest
+class ChatE2eTest {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatE2eTest.class);
+
+    record Golden(String question, String expectedDocumentKey, List<String> mustContain) {
+    }
+
+    private static final List<Golden> GOLDEN = List.of(
+            new Golden("How do I restart the payments service?", "payments-runbook", List.of("rollout restart")),
+            new Golden("Where are secrets stored and how often are they rotated?", "deployment-guide", List.of("ninety days", "90 days")),
+            new Golden("Which header prevents duplicate orders?", "api-reference", List.of("Idempotency-Key")),
+            new Golden("How quickly must the primary on-call respond to a page?", "onboarding-handbook", List.of("fifteen minutes", "15 minutes")),
+            new Golden("How do I declare an incident?", "incident-process", List.of("/incident declare")));
+
+    @TempDir
+    static Path dataDir;
+
+    @DynamicPropertySource
+    static void realStackInTempDir(DynamicPropertyRegistry registry) {
+        registry.add("chatbot.data-dir", () -> dataDir.toString());
+        registry.add("chatbot.index.in-memory", () -> "true");
+        registry.add("chatbot.embedding.onnx.model-dir", () -> modelDir().toString());
+        registry.add("server.port", () -> "0");
+    }
+
+    static Path modelDir() {
+        String override = System.getenv("CHATBOT_MODEL_DIR");
+        return override != null ? Path.of(override)
+                : Path.of(System.getProperty("user.home"), ".chatbot", "models", "embeddinggemma-300m");
+    }
+
+    @BeforeAll
+    static void requireLocalStack() {
+        assumeTrue(Files.isRegularFile(modelDir().resolve("model.onnx")), "EmbeddingGemma ONNX files not present");
+        assumeTrue(ollamaHasModel("qwen3:14b"), "Ollama with qwen3:14b not reachable");
+    }
+
+    private static boolean ollamaHasModel(String name) {
+        try (HttpClient client = HttpClient.newHttpClient()) {
+            HttpResponse<String> response = client.send(HttpRequest.newBuilder(URI.create("http://localhost:11434/api/tags"))
+                    .timeout(Duration.ofSeconds(3)).build(), HttpResponse.BodyHandlers.ofString());
+            return response.statusCode() == 200 && response.body().contains("\"" + name + "\"");
+        } catch (IOException | InterruptedException e) {
+            return false;
+        }
+    }
+
+    @Autowired
+    private DocumentService documents;
+    @Autowired
+    private DocumentRegistry registry;
+    @Autowired
+    private ChatService chat;
+
+    @Test
+    void goldenQuestionsGetGroundedAnswersWithCitations() throws IOException {
+        try (Stream<Path> docs = Files.list(Path.of("src/test/resources/eval/docs"))) {
+            for (Path file : docs.filter(p -> p.toString().endsWith(".md")).sorted().toList()) {
+                documents.upload(new DocumentService.Upload(file.getFileName().toString(), "text/markdown", Files.size(file),
+                        Files.newInputStream(file), file.getFileName().toString().replace(".md", "")));
+            }
+        }
+        await().atMost(Duration.ofMinutes(2)).untilAsserted(() ->
+                assertThat(registry.findAll()).isNotEmpty().allMatch(d -> d.status() == DocumentStatus.READY));
+
+        int grounded = 0;
+        for (Golden golden : GOLDEN) {
+            long started = System.nanoTime();
+            ChatResponse response = chat.chat(new ChatRequest(null, golden.question(), null));
+            long millis = (System.nanoTime() - started) / 1_000_000;
+            String answer = response.answer().toLowerCase(Locale.ROOT);
+            boolean mentions = golden.mustContain().stream().anyMatch(m -> answer.contains(m.toLowerCase(Locale.ROOT)));
+            log.info("Q: {}\n   -> {} in {} ms ({} citations, retrieval {} ms, llm {} ms): {}", golden.question(),
+                    response.grounding(), millis, response.citations().size(), response.timings().retrievalMs(),
+                    response.timings().llmMs(), response.answer().replace('\n', ' '));
+            assertThat(response.citations()).as("citations for '%s'", golden.question()).isNotEmpty();
+            assertThat(response.citations()).anyMatch(c -> c.documentTitle().equals(golden.expectedDocumentKey()));
+            assertThat(mentions).as("answer to '%s' should mention %s but was: %s", golden.question(), golden.mustContain(), response.answer()).isTrue();
+            if (response.grounding() == Grounding.GROUNDED) {
+                grounded++;
+            }
+        }
+        assertThat(grounded).as("grounded answers out of %d", GOLDEN.size()).isGreaterThanOrEqualTo(GOLDEN.size() - 1);
+    }
+}

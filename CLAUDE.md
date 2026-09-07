@@ -54,8 +54,8 @@ Never:
 - Jackson 3: import `tools.jackson.*`, not `com.fasterxml.jackson.*` (annotations excepted).
 - Spring Boot 4 names: `spring-boot-starter-webmvc`, `@MockitoBean` (not `@MockBean`),
   `org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc`.
-- Spring tests that boot the context extend `EmbabelMockitoIntegrationTest` with `@ActiveProfiles("test")`;
-  the test profile disables Ollama discovery and mocks `LlmOperations`.
+- Spring tests that boot the context extend `EmbabelMockitoIntegrationTest` with `@ActiveProfiles("hermetic")`;
+  the `hermetic` profile disables Ollama discovery and mocks `LlmOperations`. Never name a Spring profile `test`: Embabel disables `@Agent` auto-registration under it.
 - Ollama models are addressed by their raw name (`qwen3:14b`), e.g. `embabel.models.default-llm`.
 - Docs (`docs/*.md`) in Russian with English terms; code, comments, commit messages in English.
 - Prefer capability descriptions over class names in docs; name a class only when it is architecturally significant.

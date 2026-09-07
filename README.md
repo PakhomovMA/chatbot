@@ -3,10 +3,10 @@
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
 Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
 
-Current state: **Phase 4** (retrieval) — uploaded documents are parsed (Tika), chunked, embedded with
-EmbeddingGemma and indexed into an embedded Lucene index; hybrid retrieval (vector + BM25, reciprocal
-rank fusion) is exposed for diagnostics and measured against a golden question set. Chat is not
-implemented yet.
+Current state: **Phase 5** (grounded chat) — uploaded documents are parsed (Tika), chunked, embedded with
+EmbeddingGemma and indexed into an embedded Lucene index; hybrid retrieval feeds an Embabel agent that
+drafts an answer with `qwen3:14b` and verifies every citation against the retrieved evidence. No UI or
+streaming yet.
 
 ## Prerequisites
 
@@ -58,9 +58,10 @@ java --enable-native-access=ALL-UNNAMED -jar build/libs/chatbot-0.0.1-SNAPSHOT.j
 ./gradlew test -PincludeTags=e2e     # tests that need a running Ollama
 ```
 
-Test tiers are JUnit tags: `model`, `eval`, `e2e`, `ui` (excluded by default). The default `test`
-profile (`src/test/resources/application-test.yaml`) disables Ollama discovery and mocks LLM calls
-via Embabel's `EmbabelMockitoIntegrationTest`.
+Test tiers are JUnit tags: `model`, `eval`, `e2e`, `ui` (excluded by default). The `hermetic` Spring
+profile (`src/test/resources/application-hermetic.yaml`) disables Ollama discovery and mocks LLM calls
+via Embabel's `EmbabelMockitoIntegrationTest` (the profile is deliberately not called `test`: Embabel
+skips `@Agent` registration under that name).
 
 ## Document API
 
@@ -79,6 +80,18 @@ via Embabel's `EmbabelMockitoIntegrationTest`.
 
 Accepted types: md, markdown, txt, html, htm, pdf, docx; max 20 MB (`chatbot.knowledge.*`).
 Errors are RFC 9457 problem details.
+
+## Chat API
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/chat` `{conversationId?, message, options?:{topK?, documentIds?, includeDiagnostics?}}` | Grounded answer: `answer` (Markdown with `[n]` markers), `grounding` (`GROUNDED` / `PARTIAL` / `INSUFFICIENT_EVIDENCE`), `citations[]` with document, section, chunk id and quote, `timings`, `retrievalTraceId` |
+| `GET /api/conversations/{id}` / `DELETE` | In-memory conversation history (last 10 turns, 24 h idle TTL) |
+
+The flow is deterministic retrieve → generate → verify (`agents/KnowledgeAssistantAgent`): retrieval never
+involves the model, the model only sees numbered evidence passages, and `[n]` markers that do not point at
+a shown passage are removed before the answer is returned. A question with no retrieved evidence is answered
+without calling the model. Prompt: `src/main/resources/prompts/grounded-answer.md`; tuning: `chatbot.chat.*`.
 
 ## Retrieval and diagnostics
 

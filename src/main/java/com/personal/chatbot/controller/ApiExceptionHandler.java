@@ -1,5 +1,6 @@
 package com.personal.chatbot.controller;
 
+import com.personal.chatbot.exceptions.ConversationNotFoundException;
 import com.personal.chatbot.exceptions.DocumentNotFoundException;
 import com.personal.chatbot.exceptions.IndexUnavailableException;
 import com.personal.chatbot.exceptions.InvalidUploadException;
@@ -38,6 +39,13 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, e.getMessage());
         problem.setTitle("Upload rejected");
         problem.setProperty("reason", e.reason().name());
+        return problem;
+    }
+
+    @ExceptionHandler(ConversationNotFoundException.class)
+    ProblemDetail conversationNotFound(ConversationNotFoundException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+        problem.setTitle("Conversation not found");
         return problem;
     }
 

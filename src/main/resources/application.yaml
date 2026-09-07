@@ -48,6 +48,13 @@ chatbot:
     min-text-score: 0.0                  # BM25 is corpus-relative: rank only
     sufficient-cosine: 0.3               # calibrated on the eval set (docs/eval-log.md): negatives max 0.22, positives min 0.32
     trace-buffer-size: 200
+  chat:
+    temperature: 0.1
+    evidence-char-budget: 6000           # evidence passages shown to the model (§6.7)
+    quote-max-chars: 600
+    history-turns: 10                    # in-memory conversation memory (D12)
+    max-conversations: 1000
+    conversation-ttl: 24h
 
 spring.servlet.multipart:
   max-file-size: 20MB

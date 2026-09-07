@@ -164,7 +164,9 @@ public class LuceneIndexStore implements AutoCloseable {
         lock.writeLock().lock();
         try {
             LuceneSearchOperations ops = requireWritable();
-            ops.deleteRootAndDescendants(document.getUri());
+            if (ops.findContentRootByUri(document.getUri()) != null) {
+                ops.deleteRootAndDescendants(document.getUri());
+            }
             EmbeddingAudit.Result<List<String>> result;
             try {
                 result = EmbeddingAudit.record(() -> ops.writeAndChunkDocument(document));

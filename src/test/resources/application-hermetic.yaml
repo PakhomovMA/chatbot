@@ -1,4 +1,4 @@
-# Test profile: no Ollama, no model files. LLM access is mocked by EmbabelMockitoIntegrationTest,
+# "hermetic" test profile: no Ollama, no model files. (Not named "test": Embabel skips @Agent registration under a profile called "test".) LLM access is mocked by EmbabelMockitoIntegrationTest,
 # embeddings come from FakeEmbeddingConfiguration (provider "fake" creates no main-code bean).
 chatbot:
   data-dir: ${java.io.tmpdir}/chatbot-test

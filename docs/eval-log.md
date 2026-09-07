@@ -59,3 +59,22 @@ Cosine лучшего hit-а (HYBRID): позитивы min 0.341, p10 0.389, м
 - Добавить негативы «около темы» (вопросы про платежи, ответа на которые нет), чтобы проверить порог 0.3.
 - q8-квантование модели (`model_quantized`) против fp32 по тем же метрикам.
 - `expandNeighbours` и dedup перекрывающихся чанков (Phase 9).
+
+## 2026-09-07 — Phase 5, e2e grounded answers (Ollama `qwen3:14b`, thinking off, temperature 0.1)
+
+`./gradlew test -PincludeTags=e2e` (`ChatE2eTest`): 5 golden-вопросов на реальном стеке (ONNX embeddings,
+Lucene in-memory, Ollama). Все 5 — `GROUNDED`, по одной проверенной цитате, ответы содержат ожидаемые
+идентификаторы/команды дословно. Структурированный вывод (`GroundedAnswerDraft`) qwen3:14b вернул с первой
+попытки во всех случаях.
+
+| Вопрос | Grounding | Всего | Retrieval | LLM |
+|---|---|---|---|---|
+| How do I restart the payments service? | GROUNDED | 35.5 s | 68 ms | 35.5 s |
+| Where are secrets stored and how often are they rotated? | GROUNDED | 17.8 s | 196 ms | 17.6 s |
+| Which header prevents duplicate orders? | GROUNDED | 16.6 s | 32 ms | 16.6 s |
+| How quickly must the primary on-call respond to a page? | GROUNDED | 14.4 s | 51 ms | 14.3 s |
+| How do I declare an incident? | GROUNDED | 18.2 s | 46 ms | 18.1 s |
+
+Латентность целиком определяется генерацией (14B на локальной машине, до ~8 passages ≈ 6k символов в
+промпте). Первый вопрос дольше из-за прогрева модели. Направления: streaming (Phase 7) для воспринимаемой
+скорости, меньший `evidence-char-budget` или `top-k` для коротких вопросов, квантование модели.

@@ -12,6 +12,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.util.unit.DataSize;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Set;
 
 /**
@@ -29,7 +30,8 @@ public record ChatbotProperties(
         @Valid @DefaultValue Knowledge knowledge,
         @Valid @DefaultValue Index index,
         @Valid @DefaultValue Ingestion ingestion,
-        @Valid @DefaultValue Retrieval retrieval
+        @Valid @DefaultValue Retrieval retrieval,
+        @Valid @DefaultValue Chat chat
 ) {
 
     /**
@@ -122,6 +124,26 @@ public record ChatbotProperties(
             @DefaultValue("0.0") double minTextScore,
             @DefaultValue("0.3") double sufficientCosine,
             @Min(1) @DefaultValue("200") int traceBufferSize
+    ) {
+    }
+
+    /**
+     * Chat defaults (docs/system-plan.md D10, D12).
+     *
+     * @param temperature        sampling temperature for the grounded answer
+     * @param evidenceCharBudget maximum characters of evidence passages placed in the prompt
+     * @param quoteMaxChars      maximum length of a citation quote in the response
+     * @param historyTurns       turns of conversation history kept and shown to the model
+     * @param maxConversations   conversations kept in memory before the least recently used is dropped
+     * @param conversationTtl    idle time after which a conversation is forgotten
+     */
+    public record Chat(
+            @DefaultValue("0.1") double temperature,
+            @Min(500) @DefaultValue("6000") int evidenceCharBudget,
+            @Min(50) @DefaultValue("600") int quoteMaxChars,
+            @Min(0) @DefaultValue("10") int historyTurns,
+            @Min(1) @DefaultValue("1000") int maxConversations,
+            @DefaultValue("24h") Duration conversationTtl
     ) {
     }
 

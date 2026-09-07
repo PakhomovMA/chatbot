@@ -73,7 +73,8 @@ class RetrievalServiceTest {
                 new ChatbotProperties.Knowledge(DataSize.ofMegabytes(1), Set.of("md")),
                 new ChatbotProperties.Index(null, true, 400, 50, 8),
                 new ChatbotProperties.Ingestion(true, true),
-                new ChatbotProperties.Retrieval(5, 3, 60, -1.0, 0.0, sufficientCosine, 50));
+                new ChatbotProperties.Retrieval(5, 3, 60, -1.0, 0.0, sufficientCosine, 50),
+                new ChatbotProperties.Chat(0.1, 6000, 600, 10, 1000, java.time.Duration.ofHours(24)));
     }
 
     private NavigableDocument parsed(String id, String title, String markdown) throws Exception {
