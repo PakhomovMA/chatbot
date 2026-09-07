@@ -50,6 +50,7 @@ chatbot:
     trace-buffer-size: 200
   chat:
     mode: DETERMINISTIC                  # or AGENTIC: the model searches via Embabel ToolishRag tools (Phase 9c)
+    answer-language: AUTO                # AUTO = language of the question (RU detected by script); RU or EN force it
     agentic-max-searches: 4
     agentic-min-cosine: 0.2
     temperature: 0.1

@@ -35,7 +35,7 @@ class GroundingInstructionsTest {
         assertThat(instructions.groundedAnswer().contribution())
                 .contains("You are a knowledge assistant for a team's internal documentation")
                 .contains("Do not guess")
-                .contains("Answer in the language of the question")
+                .contains("Write the answer in the language named at the end of the user message")
                 .contains("the numbered evidence passages");
         assertThat(instructions.streamingAnswer().contribution())
                 .contains("You are a knowledge assistant for a team's internal documentation")

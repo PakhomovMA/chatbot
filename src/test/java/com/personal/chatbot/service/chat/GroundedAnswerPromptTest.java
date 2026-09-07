@@ -1,5 +1,6 @@
 package com.personal.chatbot.service.chat;
 
+import com.personal.chatbot.models.chat.AnswerLanguage;
 import com.personal.chatbot.models.chat.ConversationTurn;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import org.junit.jupiter.api.Test;
@@ -11,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class GroundedAnswerPromptTest {
 
-    private final GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(155, 2);
+    private final GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(155, 2, AnswerLanguage.AUTO);
 
     @Test
     void agenticPromptCarriesHistoryAndQuestionButNoEvidenceBlock() {
@@ -20,7 +21,8 @@ class GroundedAnswerPromptTest {
                 .contains(GroundedAnswerPrompt.HISTORY_HEADER)
                 .contains("User: earlier")
                 .doesNotContain("Evidence passages:")
-                .endsWith("Question: How?");
+                .contains("Question: How?")
+                .endsWith("Write the answer in English, even if the passages are in another language.");
     }
 
     @Test
@@ -41,10 +43,27 @@ class GroundedAnswerPromptTest {
                 .contains(GroundedAnswerPrompt.HISTORY_HEADER)
                 .contains("User: previous question with newline\nAssistant: previous answer")
                 .doesNotContain("old question")
-                .endsWith("Question: How do I restart?");
+                .contains("Question: How do I restart?")
+                .endsWith("Write the answer in English, even if the passages are in another language.");
         assertThat(prompt.build("q", List.of(), hits))
                 .doesNotContain(GroundedAnswerPrompt.HISTORY_HEADER)
                 .startsWith("Evidence passages:");
+    }
+
+    @Test
+    void theLanguageInstructionClosesThePromptAndFollowsTheQuestion() {
+        List<RetrievedChunk> hits = List.of(GroundingVerifierTest.hit(1, "Run systemctl restart payments."));
+        // Evidence in English, question in Russian: the last line has to pull the model back.
+        assertThat(prompt.build("Как перезапустить сервис payments?", List.of(), hits))
+                .endsWith("Write the answer in Russian, even if the passages are in another language.");
+        assertThat(prompt.buildForAgentic("Где хранятся секреты?", List.of()))
+                .endsWith("Write the answer in Russian, even if the passages are in another language.");
+        assertThat(prompt.languageFor("Как перезапустить сервис payments?")).isEqualTo(AnswerLanguage.RU);
+
+        GroundedAnswerPrompt forced = new GroundedAnswerPrompt(155, 2, AnswerLanguage.EN);
+        assertThat(forced.build("Как перезапустить сервис payments?", List.of(), hits))
+                .endsWith("Write the answer in English, even if the passages are in another language.");
+        assertThat(forced.languageFor("Как перезапустить сервис payments?")).isEqualTo(AnswerLanguage.EN);
     }
 
     @Test

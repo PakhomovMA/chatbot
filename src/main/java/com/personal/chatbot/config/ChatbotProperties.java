@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
+import com.personal.chatbot.models.chat.AnswerLanguage;
 import com.personal.chatbot.models.chat.AnswerMode;
 import org.springframework.util.unit.DataSize;
 
@@ -132,6 +133,7 @@ public record ChatbotProperties(
      * Chat defaults (docs/system-plan.md D10, D12).
      *
      * @param mode               default answer mode: DETERMINISTIC (retrieve-then-generate) or AGENTIC (ToolishRag, Phase 9c)
+     * @param answerLanguage     language of the answer: AUTO follows the question, RU or EN force it
      * @param agenticMaxSearches searches the model is told it may issue in agentic mode
      * @param agenticMinCosine   vector noise floor for the agentic search tools (plain cosine)
      * @param temperature        sampling temperature for the grounded answer
@@ -143,6 +145,7 @@ public record ChatbotProperties(
      */
     public record Chat(
             @DefaultValue("DETERMINISTIC") AnswerMode mode,
+            @DefaultValue("AUTO") AnswerLanguage answerLanguage,
             @Min(1) @DefaultValue("4") int agenticMaxSearches,
             @DefaultValue("0.2") double agenticMinCosine,
             @DefaultValue("0.1") double temperature,

@@ -10,6 +10,8 @@ import com.personal.chatbot.models.agent.AnswerStreamSink;
 import com.personal.chatbot.models.agent.Evidence;
 import com.personal.chatbot.models.agent.GroundedAnswerDraft;
 import com.personal.chatbot.models.agent.UserQuestion;
+import com.personal.chatbot.models.chat.AnswerLanguage;
+import com.personal.chatbot.utils.AnswerLanguages;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.jspecify.annotations.Nullable;
@@ -23,8 +25,6 @@ import java.util.concurrent.TimeUnit;
  * so the verifier cannot tell them apart.
  */
 public class AnswerDrafter {
-
-    static final String NO_EVIDENCE_ANSWER = "I could not find anything about this in the knowledge base.";
 
     private final GroundedAnswerPrompt prompt;
     private final GroundingInstructions instructions;
@@ -73,8 +73,11 @@ public class AnswerDrafter {
         return prompt.includedHits(evidence.hits());
     }
 
+    /** Written by the application, not by the model, so it follows the question's language itself. */
     private GroundedAnswerDraft noEvidence(UserQuestion question) {
-        GroundedAnswerDraft draft = GroundedAnswerDraft.insufficient(NO_EVIDENCE_ANSWER, "No relevant passages were retrieved.");
+        AnswerLanguage language = prompt.languageFor(question.question());
+        GroundedAnswerDraft draft = GroundedAnswerDraft.insufficient(
+                AnswerLanguages.noEvidenceAnswer(language), AnswerLanguages.noEvidenceNote(language));
         AnswerStreamSink sink = question.stream();
         if (sink != null) {
             sink.stage(AnswerStages.GENERATING);

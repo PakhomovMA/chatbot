@@ -25,7 +25,7 @@ class ChatConfiguration {
 
     @Bean
     GroundedAnswerPrompt groundedAnswerPrompt(ChatbotProperties.Chat chat) {
-        return new GroundedAnswerPrompt(chat.evidenceCharBudget(), chat.historyTurns());
+        return new GroundedAnswerPrompt(chat.evidenceCharBudget(), chat.historyTurns(), chat.answerLanguage());
     }
 
     @Bean

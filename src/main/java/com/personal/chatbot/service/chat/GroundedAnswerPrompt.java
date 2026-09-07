@@ -1,7 +1,9 @@
 package com.personal.chatbot.service.chat;
 
+import com.personal.chatbot.models.chat.AnswerLanguage;
 import com.personal.chatbot.models.chat.ConversationTurn;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
+import com.personal.chatbot.utils.AnswerLanguages;
 import com.personal.chatbot.utils.Texts;
 
 import java.util.List;
@@ -11,6 +13,9 @@ import java.util.List;
  * evidence passages with provenance and the question itself. The standing rules live apart, in
  * {@link GroundingInstructions}. Evidence is cut off at a character budget so a local model never
  * receives more context than it can use (docs/system-plan.md §6.7).
+ *
+ * <p>The prompt ends with the answer language, resolved per question: it is the last thing the model
+ * reads, after evidence that is often in another language.
  */
 public class GroundedAnswerPrompt {
 
@@ -18,22 +23,31 @@ public class GroundedAnswerPrompt {
 
     private final int evidenceCharBudget;
     private final int historyTurns;
+    private final AnswerLanguage configuredLanguage;
 
-    public GroundedAnswerPrompt(int evidenceCharBudget, int historyTurns) {
+    public GroundedAnswerPrompt(int evidenceCharBudget, int historyTurns, AnswerLanguage configuredLanguage) {
         this.evidenceCharBudget = evidenceCharBudget;
         this.historyTurns = historyTurns;
+        this.configuredLanguage = configuredLanguage;
     }
 
     /** Prompt for the deterministic branch; the structured and the streaming draft share it. */
     public String build(String question, List<ConversationTurn> history, List<RetrievedChunk> hits) {
         return (renderHistory(history)
                 + "\nEvidence passages:\n" + renderEvidence(hits)
-                + "\n\nQuestion: " + question.strip()).strip();
+                + "\n\nQuestion: " + question.strip()
+                + "\n\n" + AnswerLanguages.instruction(languageFor(question))).strip();
     }
 
     /** Prompt for agentic research: no evidence block, the model searches through tools. */
     public String buildForAgentic(String question, List<ConversationTurn> history) {
-        return (renderHistory(history) + "\nQuestion: " + question.strip()).strip();
+        return (renderHistory(history) + "\nQuestion: " + question.strip()
+                + "\n\n" + AnswerLanguages.instruction(languageFor(question))).strip();
+    }
+
+    /** The language this question is answered in; the fixed replies of the application follow it. */
+    public AnswerLanguage languageFor(String question) {
+        return AnswerLanguages.resolve(configuredLanguage, question);
     }
 
     /** Number of hits that fit into the budget; the prompt and the citations must agree on this. */
