@@ -11,6 +11,7 @@ import com.embabel.agent.rag.tools.SearchDefaults;
 import com.embabel.agent.rag.tools.ToolishRag;
 import com.embabel.common.ai.model.LlmOptions;
 import com.personal.chatbot.config.ChatbotProperties;
+import com.personal.chatbot.exceptions.ChatCancelledException;
 import com.personal.chatbot.models.agent.AgenticDraft;
 import com.personal.chatbot.models.agent.AnswerStreamSink;
 import com.personal.chatbot.models.agent.Evidence;
@@ -40,6 +41,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 /**
  * The knowledge assistant (docs/system-plan.md §7, D10, D11, Phase 9c). Two ways to reach the goal,
@@ -150,11 +153,17 @@ public class KnowledgeAssistantAgent {
         StreamingPromptRunner.Streaming streaming = (StreamingPromptRunner.Streaming) runner.streaming();
         streaming.withPrompt(prompt.buildForStreaming(question.question(), question.history(), evidence.hits()))
                 .generateStream()
+                // Cancelling the Flux closes the streaming call to the model, so an abandoned request
+                // stops costing tokens as soon as the client disconnect is noticed.
+                .takeWhile(_ -> !sink.cancelled())
                 .doOnNext(fragment -> {
                     text.append(fragment);
                     sink.delta(fragment);
                 })
                 .blockLast();
+        if (sink.cancelled()) {
+            throw new ChatCancelledException(question.messageId());
+        }
         return StreamedDraftParser.parse(text.toString());
     }
 
@@ -169,7 +178,16 @@ public class KnowledgeAssistantAgent {
     public AgenticResearch researchIteratively(UserQuestion question, OperationContext context) {
         question.notifyStage(STAGE_RESEARCHING);
         long started = System.nanoTime();
-        EvidenceCollector collector = new EvidenceCollector();
+        AnswerStreamSink sink = question.stream();
+        BooleanSupplier cancelled = sink != null ? sink::cancelled : () -> false;
+        AtomicInteger searches = new AtomicInteger();
+        // Narrate every tool call to a streaming client: the tool loop is otherwise silent for as long
+        // as the model takes, and the final answer arrives in one piece (no token streaming here).
+        EvidenceCollector collector = new EvidenceCollector(step -> {
+            if (sink != null) {
+                sink.stage(STAGE_RESEARCHING, "search %d: \"%s\" (%d passages)".formatted(searches.incrementAndGet(), step.query(), step.results()));
+            }
+        });
         ToolishRag rag = new ToolishRag(REFERENCE_NAME,
                 "Search tools over the team's internal documentation. Use them to find passages before answering.",
                 indexStore.searchOperations())
@@ -182,13 +200,16 @@ public class KnowledgeAssistantAgent {
             // two different prefixes; register the flat tool list and the prompt contribution explicitly.
             draft = context.ai()
                     .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()))
-                    .withTools(rag.tools())
+                    .withTools(CancellableTool.wrapAll(rag.tools(), cancelled, question.messageId()))
                     .withPromptContributor(rag)
                     .creating(AgenticDraft.class)
                     .fromPrompt(prompt.buildForAgentic(question.question(), question.history(), settings.agenticMaxSearches()));
         } finally {
             Timer.builder("chatbot.llm").tag("operation", "research-agentic").register(meterRegistry)
                     .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
+        }
+        if (cancelled.getAsBoolean()) {
+            throw new ChatCancelledException(question.messageId());
         }
         List<RetrievedChunk> seen = collector.chunks();
         long totalMs = (System.nanoTime() - started) / 1_000_000;
@@ -198,13 +219,13 @@ public class KnowledgeAssistantAgent {
                 RetrievalMode.HYBRID, seen.size(), collector.steps().size(), seen, !seen.isEmpty(), maxCosine,
                 new RetrievalTimings(0, 0, 0, totalMs), Instant.now());
         traces.record(trace);
-        AnswerStreamSink sink = question.stream();
+        GroundedAnswerDraft numbered = AgenticDraftMapper.toNumbered(draft, collector);
         if (sink != null) {
-            sink.delta(draft.answer() != null ? draft.answer().replaceAll("\\{\\{\\s*chunk\\s*:[^}]*}}", "").strip() : "");
+            sink.delta(numbered.answer()); // the whole answer at once, with [n] markers like the deterministic stream
         }
         log.info("Agentic research for [{}]: {} searches, {} distinct chunks, sufficient={}", question.messageId(),
                 collector.steps().size(), seen.size(), draft.evidenceSufficient());
-        return new AgenticResearch(new Evidence(question, trace), AgenticDraftMapper.toNumbered(draft, collector));
+        return new AgenticResearch(new Evidence(question, trace), numbered);
     }
 
     /**

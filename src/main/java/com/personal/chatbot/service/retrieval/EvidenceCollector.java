@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * {@link ResultsListener} for agentic retrieval (Phase 9c): records every chunk the model was shown
@@ -30,11 +31,22 @@ public final class EvidenceCollector implements ResultsListener {
     private final Map<String, RetrievedChunk> chunks = new LinkedHashMap<>();
     private final List<SearchStep> steps = new ArrayList<>();
     private final Object lock = new Object();
+    private final Consumer<SearchStep> onStep;
+
+    public EvidenceCollector() {
+        this(_ -> { });
+    }
+
+    /** @param onStep progress callback invoked after every tool invocation (used for streaming status) */
+    public EvidenceCollector(Consumer<SearchStep> onStep) {
+        this.onStep = onStep;
+    }
 
     @Override
     public void onResultsEvent(ResultsEvent event) {
+        SearchStep step = new SearchStep(event.getQuery(), event.getResults().size(), event.getRunningTime().toMillis());
         synchronized (lock) {
-            steps.add(new SearchStep(event.getQuery(), event.getResults().size(), event.getRunningTime().toMillis()));
+            steps.add(step);
             for (SimilarityResult<?> result : event.getResults()) {
                 if (result.getMatch() instanceof Chunk chunk && !chunks.containsKey(chunk.getId())) {
                     chunks.put(chunk.getId(), new RetrievedChunk(chunk.getId(), RetrievalService.originalText(chunk),
@@ -44,6 +56,7 @@ public final class EvidenceCollector implements ResultsListener {
             log.debug("Agentic search '{}' returned {} results ({} distinct chunks so far)", event.getQuery(),
                     event.getResults().size(), chunks.size());
         }
+        onStep.accept(step);
     }
 
     /** Chunks in the order the model first saw them; {@code rank} is that order. */

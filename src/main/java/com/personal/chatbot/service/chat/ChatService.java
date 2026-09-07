@@ -4,6 +4,7 @@ import com.embabel.agent.api.invocation.AgentInvocation;
 import com.embabel.agent.core.AgentPlatform;
 import com.personal.chatbot.config.ChatbotProperties;
 import com.personal.chatbot.models.chat.AnswerMode;
+import com.personal.chatbot.exceptions.ChatCancelledException;
 import com.personal.chatbot.exceptions.ConversationNotFoundException;
 import com.personal.chatbot.models.agent.AnswerStreamSink;
 import com.personal.chatbot.models.agent.GroundedAnswer;
@@ -29,6 +30,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -68,10 +70,18 @@ public class ChatService {
      * {@code final} event carrying the verified response (or {@code error}). Blocks until finished.
      */
     public void stream(ChatRequest request, Consumer<ChatStreamEvent> listener) {
+        stream(request, listener, () -> false);
+    }
+
+    /**
+     * @param cancelled reports that the listener is gone; the agent then abandons the run at the next
+     *                  model or tool boundary and no terminal event is emitted
+     */
+    public void stream(ChatRequest request, Consumer<ChatStreamEvent> listener, BooleanSupplier cancelled) {
         AnswerStreamSink sink = new AnswerStreamSink() {
             @Override
-            public void stage(String stage) {
-                listener.accept(new ChatStreamEvent.Status(stage));
+            public void stage(String stage, @Nullable String detail) {
+                listener.accept(new ChatStreamEvent.Status(stage, detail));
             }
 
             @Override
@@ -80,10 +90,19 @@ public class ChatService {
                     listener.accept(new ChatStreamEvent.Delta(text));
                 }
             }
+
+            @Override
+            public boolean cancelled() {
+                return cancelled.getAsBoolean();
+            }
         };
         try {
             listener.accept(new ChatStreamEvent.Final(run(request, sink)));
-        } catch (RuntimeException e) {
+        } catch (Exception e) { // Embabel (Kotlin) can surface checked exceptions such as ExecutionException
+            if (ChatCancelledException.isCancellation(e) || cancelled.getAsBoolean()) {
+                log.info("Streaming chat abandoned: the client went away ({})", rootMessage(e));
+                return;
+            }
             log.error("Streaming chat failed", e);
             listener.accept(new ChatStreamEvent.Error("The assistant could not answer: " + rootMessage(e)));
         }

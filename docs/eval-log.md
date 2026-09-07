@@ -129,3 +129,36 @@ Lucene in-memory, Ollama). Все 5 — `GROUNDED`, по одной провер
 Вывод: default остаётся `DETERMINISTIC`; `AGENTIC` — feature flag для сложных вопросов (multi-hop,
 сравнение документов), где ожидается несколько поисков. Следующие измерения: вопросы, требующие 2+ поисков;
 `agentic-max-searches`; более сильная модель для tool use.
+
+## 2026-09-07 — Phase 9c follow-up: таймаут tool loop и «зависание» agentic + stream
+
+Симптом: статья 21 KB (`GLM-5.3.md`), вопрос на русском, режим AGENTIC + stream. UI показывал
+«BodyStreamBuffer was aborted», повтор висел на «Researching…» без единого события.
+
+Причина (по логу Ollama и thread dump): Embabel оборачивает весь `createObject()` — а в agentic-режиме это
+оба хода модели плюс tool calls — в `llm-operations.prompts.default-timeout` = 60 s. Реальная стоимость на
+`qwen3:14b` (Apple Silicon, thinking off):
+
+| Шаг | Токены | Время |
+|---|---|---|
+| ход 1: решение о поиске (prompt 1169) | prompt eval 117 tok/s, 42 tok ответа | ~13 s холодный, ~3 s с кэшем |
+| `vectorSearch(topK=5)` | — | < 1 s |
+| ход 2: ответ по 5 пассажам (prompt 2290) | prompt eval ~10 s + 629 tok ответа при 12 tok/s | ~61 s |
+
+Итого ~75 s > 60 s → `TimeoutException` → data-binding retry (`max-attempts` 10, backoff 30 ms) запускает
+tool loop с нуля; Ollama при этом доделывает брошенные запросы (11 одинаковых циклов в логе). Один вопрос
+= до 10 минут работы, второй запрос встаёт в очередь единственного слота Ollama.
+
+Исправления:
+
+- `embabel.agent.platform.llm-operations.prompts.default-timeout: 10m`, `data-binding.max-attempts: 2`;
+  реальный ограничитель tool loop — `agentic-max-searches` и лимит итераций Embabel.
+- SSE: keep-alive комментарий каждые 15 s; каждый tool call приходит как `status{stage=researching, detail}`
+  (через callback `EvidenceCollector`), ответ agentic-режима — один `delta` с `[n]`-маркерами.
+- Отмена: обрыв клиента замечается по неудачной записи heartbeat; деterministic stream закрывает Flux
+  (и HTTP-стрим к Ollama), agentic loop прерывается перед следующим tool call (`CancellableTool`,
+  `ChatCancelledException` как `ToolControlFlowSignal`, чтобы Embabel не делал retry). Текущую генерацию
+  non-streaming `createObject` прервать нельзя — она дорабатывает до конца.
+
+Вывод для eval: русскоязычные ответы примерно вдвое дороже английских по токенам; при `evidence-char-budget`
+6000 и длинных статьях ход 2 упирается в скорость генерации, а не в retrieval.

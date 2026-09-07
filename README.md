@@ -100,7 +100,7 @@ Errors are RFC 9457 problem details.
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/chat` `{conversationId?, message, options?:{topK?, documentIds?, includeDiagnostics?, mode?}}` | Grounded answer: `answer` (Markdown with `[n]` markers), `grounding` (`GROUNDED` / `PARTIAL` / `INSUFFICIENT_EVIDENCE`), `citations[]` with document, section, chunk id and quote, `timings`, `retrievalTraceId` |
-| `POST /api/chat/stream` (same body) | Server-sent events: `status` (`retrieving` / `generating` / `verifying`), `delta` (`{text}`), `final` (`{response}` with the same shape as `POST /api/chat`), or `error` (`{message}`) |
+| `POST /api/chat/stream` (same body) | Server-sent events: `status` (`{stage, detail?}`, stages `retrieving` / `researching` / `generating` / `verifying`), `delta` (`{text}`), `final` (`{response}` with the same shape as `POST /api/chat`), or `error` (`{message}`); a `:keep-alive` comment every 15 s while nothing else is sent |
 | `GET /api/conversations/{id}` / `DELETE` | In-memory conversation history (last 10 turns, 24 h idle TTL) |
 
 The flow is deterministic retrieve → generate → verify (`agents/KnowledgeAssistantAgent`): retrieval never
@@ -115,8 +115,13 @@ falls back to the structured path (one `delta` with the whole answer) otherwise;
 one deterministic retrieval, the model researches the question itself through Embabel `ToolishRag` tools built
 from the Lucene store (`knowledge_base_vectorSearch`, `knowledge_base_textSearch`, `knowledge_base_broadenChunk`,
 `knowledge_base_zoomOut`, prompt `prompts/agentic-research.md`). Every passage the tools return is recorded and
-becomes the evidence the citations are verified against, so grounding rules are the same. Comparison and
-caveats: `docs/eval-log.md`.
+becomes the evidence the citations are verified against, so grounding rules are the same. Agentic mode does not
+stream tokens: the stream narrates each tool call as a `status` detail and then delivers the answer as one
+`delta`. Budget: the whole tool loop is one Embabel LLM operation, bounded by
+`embabel.agent.platform.llm-operations.prompts.default-timeout` (10 min here; the 60 s default made a local
+14B model time out and retry the loop from scratch) and by `chatbot.chat.agentic-max-searches`. A client that
+disconnects (Stop, closed tab) is noticed at the next heartbeat and the run is abandoned at the next model or
+tool boundary; the model call already in flight runs to completion. Comparison and caveats: `docs/eval-log.md`.
 
 ## Retrieval and diagnostics
 

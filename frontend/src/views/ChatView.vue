@@ -39,7 +39,10 @@ watch(() => chat.selectedMessageId, () => (highlighted.value = undefined))
         <p v-if="!chat.messages.length" class="muted">Ask a question about the documents in the knowledge base. Answers cite the passages they rely on.</p>
         <MessageBubble v-for="m in chat.messages" :key="m.id" :message="m" :selected="m.id === chat.selectedMessageId"
                        @select="chat.select" @citation="onCitation" />
-        <div v-if="chat.pending" class="bubble assistant typing">{{ chat.stageLabel ?? 'Working…' }}</div>
+        <div v-if="chat.pending" class="bubble assistant typing">
+          {{ chat.stageLabel ?? 'Working…' }}
+          <div v-if="chat.stageDetail" class="small muted">{{ chat.stageDetail }}</div>
+        </div>
       </div>
       <form class="composer" @submit.prevent="send">
         <textarea v-model="draft" placeholder="Ask about the knowledge base… (Enter to send, Shift+Enter for a new line)" rows="2"
@@ -51,6 +54,8 @@ watch(() => chat.selectedMessageId, () => (highlighted.value = undefined))
         <label class="small muted" title="AGENTIC: the model searches the knowledge base itself with Embabel ToolishRag tools">
           <select v-model="chat.mode" :disabled="chat.pending"><option value="DETERMINISTIC">retrieve → answer</option><option value="AGENTIC">agentic (tools)</option></select>
         </label>
+        <span v-if="chat.mode === 'AGENTIC' && chat.streamingEnabled" class="small muted"
+              title="The tool loop runs to completion before the answer is available">agentic mode shows each search as it runs; the answer arrives in one piece</span>
       </form>
     </div>
     <CitationPanel :citations="chat.selectedMessage?.citations ?? []" :highlighted="highlighted" />

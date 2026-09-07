@@ -1,7 +1,13 @@
 package com.personal.chatbot.controller;
 
+import com.embabel.agent.api.tool.Tool;
+import com.embabel.agent.core.support.LlmInteraction;
 import com.jayway.jsonpath.JsonPath;
+import com.personal.chatbot.models.agent.AgenticDraft;
 import com.personal.chatbot.models.agent.GroundedAnswerDraft;
+import com.personal.chatbot.models.chat.ChatRequest;
+import com.personal.chatbot.models.chat.ChatStreamEvent;
+import com.personal.chatbot.service.chat.ChatService;
 import com.personal.chatbot.support.AbstractChatbotIntegrationTest;
 import com.personal.chatbot.support.TestDocuments;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,6 +27,9 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -45,6 +54,8 @@ class ChatStreamControllerTest extends AbstractChatbotIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+    @Autowired
+    private ChatService chatService;
 
     private static String documentId;
 
@@ -159,5 +170,50 @@ class ChatStreamControllerTest extends AbstractChatbotIntegrationTest {
     void validationErrorsAreNotStreamed() throws Exception {
         mockMvc.perform(post("/api/chat/stream").contentType(MediaType.APPLICATION_JSON).content("{\"message\":\" \"}"))
                 .andExpect(status().isBadRequest());
+    }
+
+    /** Agentic mode (Phase 9c follow-up): every tool call is narrated as a status detail; the answer arrives whole. */
+    @Test
+    void agenticStreamNarratesEachSearchAndDeliversTheAnswerInOnePiece() throws Exception {
+        whenCreateObject(p -> p.contains("Question: How do I restart payments in agentic mode?")
+                && p.contains("knowledge_base_vectorSearch"), AgenticDraft.class)
+                .thenAnswer(invocation -> {
+                    LlmInteraction interaction = invocation.getArgument(1);
+                    Tool vectorSearch = interaction.getTools().stream()
+                            .filter(t -> t.getDefinition().getName().equals("knowledge_base_vectorSearch")).findFirst().orElseThrow();
+                    String output = vectorSearch.call("{\"query\":\"restart payments\",\"topK\":3}").toString();
+                    Matcher matcher = Pattern.compile("chunkId: (\\S+)").matcher(output);
+                    assertThat(matcher.find()).as("tool output lists chunk ids: %s", output).isTrue();
+                    return new AgenticDraft("Run `systemctl restart payments` {{chunk:" + matcher.group(1) + "}}.", List.of(matcher.group(1)), true, null);
+                });
+
+        List<SseEvent> events = streamChat("{\"message\":\"How do I restart payments in agentic mode?\",\"options\":{\"mode\":\"AGENTIC\"}}");
+
+        assertThat(events).extracting(SseEvent::name).containsSubsequence("status", "status", "delta", "status", "final");
+        List<String> statuses = events.stream().filter(e -> e.name().equals("status")).map(SseEvent::data).toList();
+        assertThat(statuses).hasSize(3);
+        assertThat(statuses.getFirst()).isEqualTo("{\"stage\":\"researching\"}");
+        assertThat(statuses.get(1)).matches("\\{\"stage\":\"researching\",\"detail\":\"search 1: \\\\\"restart payments\\\\\" \\(\\d+ passages\\)\"}");
+        assertThat(statuses.getLast()).isEqualTo("{\"stage\":\"verifying\"}");
+        assertThat(events).filteredOn(e -> e.name().equals("delta")).hasSize(1)
+                .first().satisfies(delta -> assertThat((String) JsonPath.read(delta.data(), "$.text")).isEqualTo("Run `systemctl restart payments` [1]."));
+        SseEvent last = events.getLast();
+        assertThat((String) JsonPath.read(last.data(), "$.response.answer")).isEqualTo("Run `systemctl restart payments` [1].");
+        assertThat((String) JsonPath.read(last.data(), "$.response.grounding")).isEqualTo("GROUNDED");
+    }
+
+    /** A client that went away cancels the streamed generation and gets neither a final nor an error event. */
+    @Test
+    void abandonedStreamStopsTheModelAndEmitsNoTerminalEvent() {
+        supportsStreaming(true);
+        whenGenerateStream(p -> p.contains("Question: How do I restart the payment service?"))
+                .thenReturn(Flux.just("Run `systemctl restart payments` ", "on the host [1]."));
+        List<ChatStreamEvent> events = new CopyOnWriteArrayList<>();
+
+        chatService.stream(new ChatRequest(null, "How do I restart the payment service?", null), events::add, () -> true);
+
+        assertThat(events).noneMatch(e -> e instanceof ChatStreamEvent.Final || e instanceof ChatStreamEvent.Error);
+        assertThat(events).filteredOn(ChatStreamEvent.Delta.class::isInstance).isEmpty();
+        assertThat(events).filteredOn(ChatStreamEvent.Status.class::isInstance).isNotEmpty();
     }
 }

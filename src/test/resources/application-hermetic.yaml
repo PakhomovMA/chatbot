@@ -6,6 +6,9 @@ chatbot:
     provider: fake
   index:
     in-memory: true
+  chat:
+    # Tests choose the answer mode per request; the default must not follow the developer's application.yaml.
+    mode: DETERMINISTIC
 
 embabel:
   agent:

@@ -86,6 +86,15 @@ management:
       show-details: always
   # Embabel tracing is wired but off by default; enable with SPRING_PROFILES_ACTIVE=observability.
 
+# One createObject() call wraps the whole tool loop in agentic mode (two model turns + searches); with a
+# local 14B model a long answer alone takes ~1 min, so the Embabel default (60 s, then 10 full retries)
+# turned every such request into a 10-minute retry storm. The loop is bounded by agentic-max-searches.
+embabel.agent.platform.llm-operations:
+  prompts:
+    default-timeout: 10m
+  data-binding:
+    max-attempts: 2
+
 embabel.agent.platform.observability:
   tracing-enabled: false
   metrics-enabled: true

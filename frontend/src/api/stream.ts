@@ -2,14 +2,15 @@ import type { ChatRequest, ChatResponse } from './types'
 import { ApiError } from './client'
 
 export type ChatStreamEvent =
-  | { type: 'status'; stage: string }
+  | { type: 'status'; stage: string; detail?: string }
   | { type: 'delta'; text: string }
   | { type: 'final'; response: ChatResponse }
   | { type: 'error'; message: string }
 
 /**
  * Streams `POST /api/chat/stream` (server-sent events over fetch, since EventSource cannot POST).
- * Resolves with the final response; rejects on transport errors or an `error` event.
+ * Resolves with the final response; rejects on transport errors or an `error` event. Comment blocks
+ * (`:keep-alive`, sent by the server through silent phases) carry no data and are skipped.
  */
 export async function streamChat(body: ChatRequest, onEvent: (event: ChatStreamEvent) => void, signal?: AbortSignal): Promise<ChatResponse> {
   const response = await fetch('/api/chat/stream', {
@@ -45,7 +46,7 @@ export async function streamChat(body: ChatRequest, onEvent: (event: ChatStreamE
     const payload = JSON.parse(data.join('\n'))
     switch (name) {
       case 'status':
-        onEvent({ type: 'status', stage: payload.stage })
+        onEvent({ type: 'status', stage: payload.stage, detail: payload.detail ?? undefined })
         break
       case 'delta':
         onEvent({ type: 'delta', text: payload.text })

@@ -29,6 +29,8 @@ export const useChatStore = defineStore('chat', {
     messages: [] as ChatMessage[],
     pending: false,
     stage: undefined as string | undefined,
+    /** Progress inside the stage, e.g. the search the model just ran in agentic mode. */
+    stageDetail: undefined as string | undefined,
     streamingEnabled: true,
     mode: 'DETERMINISTIC' as AnswerMode,
     error: undefined as string | undefined,
@@ -49,7 +51,8 @@ export const useChatStore = defineStore('chat', {
       if (!message || this.pending) return
       this.error = undefined
       this.pending = true
-      this.stage = 'retrieving'
+      this.stage = this.mode === 'AGENTIC' ? 'researching' : 'retrieving'
+      this.stageDetail = undefined
       this.messages.push({ id: `u-${Date.now()}`, role: 'user', content: message, citations: [] })
       const draftId = `a-${Date.now()}`
       try {
@@ -72,6 +75,7 @@ export const useChatStore = defineStore('chat', {
       } finally {
         this.pending = false
         this.stage = undefined
+        this.stageDetail = undefined
         this.abort = undefined
       }
     },
@@ -83,6 +87,7 @@ export const useChatStore = defineStore('chat', {
           switch (event.type) {
             case 'status':
               this.stage = event.stage
+              this.stageDetail = event.detail
               break
             case 'delta': {
               const draft = this.messages.find((m) => m.id === draftId)
