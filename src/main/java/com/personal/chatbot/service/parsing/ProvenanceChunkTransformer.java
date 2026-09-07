@@ -47,8 +47,8 @@ public final class ProvenanceChunkTransformer implements ChunkTransformer {
     /** Embabel's metadata key backing {@code Chunk.uri}. */
     public static final String URL = "url";
 
-    static final String PATH_SEPARATOR = " › ";
-    static final String LIST_SEPARATOR = ", ";
+    public static final String PATH_SEPARATOR = " › ";
+    public static final String LIST_SEPARATOR = ", ";
     private static final int MAX_LISTED_SECTIONS = 5;
     private static final int PROBE_LENGTH = 80;
 

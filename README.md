@@ -3,9 +3,10 @@
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
 Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
 
-Current state: **Phase 3** (ingestion + Lucene index) — uploaded documents are parsed (Tika),
-chunked, embedded with EmbeddingGemma and indexed into an embedded Lucene index that survives
-restarts. Retrieval API and chat are not implemented yet.
+Current state: **Phase 4** (retrieval) — uploaded documents are parsed (Tika), chunked, embedded with
+EmbeddingGemma and indexed into an embedded Lucene index; hybrid retrieval (vector + BM25, reciprocal
+rank fusion) is exposed for diagnostics and measured against a golden question set. Chat is not
+implemented yet.
 
 ## Prerequisites
 
@@ -78,6 +79,19 @@ via Embabel's `EmbabelMockitoIntegrationTest`.
 
 Accepted types: md, markdown, txt, html, htm, pdf, docx; max 20 MB (`chatbot.knowledge.*`).
 Errors are RFC 9457 problem details.
+
+## Retrieval and diagnostics
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/retrieval/search` `{query, topK?, mode?, documentIds?}` | Hybrid (default), `VECTOR` or `TEXT` search; hits carry provenance, cosine, BM25 and fused scores |
+| `GET /api/diagnostics/retrieval?limit=` / `GET /api/diagnostics/retrieval/{traceId}` | Recent retrieval traces (bounded ring buffer) |
+
+Retrieval is deterministic: vector k-NN and BM25 candidates are fused with reciprocal rank fusion
+(`chatbot.retrieval.*`). `evidenceSufficient` is true when the best cosine clears the calibrated
+floor (`sufficient-cosine`, 0.3). Quality is measured with `./gradlew ragEval` against
+`src/test/resources/eval` (needs the ONNX model files); results and the calibration history live in
+[`docs/eval-log.md`](docs/eval-log.md).
 
 ## Ingestion and index
 

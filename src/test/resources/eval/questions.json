@@ -1,0 +1,347 @@
+{
+  "description": "Golden questions for retrieval evaluation. A hit is relevant when it belongs to expectedDocument and its text contains at least one of mustContain (case- and whitespace-insensitive). Questions without expectedDocument are negatives: the corpus does not answer them and retrieval must not report sufficient evidence.",
+  "questions": [
+    {
+      "id": "run-01",
+      "question": "How do I restart the payments service?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "rollout restart"
+      ]
+    },
+    {
+      "id": "run-02",
+      "question": "When must I not restart all payment replicas at once?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "settlement window"
+      ]
+    },
+    {
+      "id": "run-03",
+      "question": "What command rolls back a payments release?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "--rollback"
+      ]
+    },
+    {
+      "id": "run-04",
+      "question": "What threshold triggers the PaymentsHighDeclineRate alert?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "8 percent"
+      ]
+    },
+    {
+      "id": "run-05",
+      "question": "How do I retry a failed settlement batch?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "settlement-retry",
+        "cronjob/settlement-cron"
+      ]
+    },
+    {
+      "id": "run-06",
+      "question": "What is the point-in-time recovery retention for the payments database?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "fourteen days"
+      ]
+    },
+    {
+      "id": "run-07",
+      "question": "Which feature flag forces 3-D Secure?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "3ds_enforced"
+      ]
+    },
+    {
+      "id": "run-08",
+      "question": "At what time are settlement batches sent to the acquirer?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "02:15"
+      ]
+    },
+    {
+      "id": "dep-01",
+      "question": "How much production traffic does the canary receive and for how long?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "five percent"
+      ]
+    },
+    {
+      "id": "dep-02",
+      "question": "What makes the canary abort automatically?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "0.5 percentage points"
+      ]
+    },
+    {
+      "id": "dep-03",
+      "question": "Where are secrets stored and how often are they rotated?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "ninety days"
+      ]
+    },
+    {
+      "id": "dep-04",
+      "question": "What is the minimum coverage for the build stage to pass?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "70 percent"
+      ]
+    },
+    {
+      "id": "dep-05",
+      "question": "How are destructive database schema changes handled?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "two releases"
+      ]
+    },
+    {
+      "id": "dep-06",
+      "question": "How do I ship an emergency hotfix?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "hotfix"
+      ]
+    },
+    {
+      "id": "dep-07",
+      "question": "How often is the staging environment refreshed?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "Monday"
+      ]
+    },
+    {
+      "id": "dep-08",
+      "question": "What is the minimum number of production replicas?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "below two"
+      ]
+    },
+    {
+      "id": "api-01",
+      "question": "How long do API access tokens last?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "sixty minutes"
+      ]
+    },
+    {
+      "id": "api-02",
+      "question": "What is the API rate limit per minute?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "600 requests"
+      ]
+    },
+    {
+      "id": "api-03",
+      "question": "Which header prevents duplicate orders?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "Idempotency-Key"
+      ]
+    },
+    {
+      "id": "api-04",
+      "question": "What happens when I cancel an order that has already shipped?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "ORDER_ALREADY_SHIPPED"
+      ]
+    },
+    {
+      "id": "api-05",
+      "question": "How are webhook deliveries signed?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "HMAC-SHA256"
+      ]
+    },
+    {
+      "id": "api-06",
+      "question": "How long does a deprecated API version keep working?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "twelve months"
+      ]
+    },
+    {
+      "id": "api-07",
+      "question": "How many orders can one search page contain?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "100"
+      ]
+    },
+    {
+      "id": "api-08",
+      "question": "Which scope do I need to create orders?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "orders:write"
+      ]
+    },
+    {
+      "id": "onb-01",
+      "question": "How do I request AWS access?",
+      "expectedDocument": "onboarding-handbook",
+      "mustContain": [
+        "access-requests"
+      ]
+    },
+    {
+      "id": "onb-02",
+      "question": "Which VPN client do we use?",
+      "expectedDocument": "onboarding-handbook",
+      "mustContain": [
+        "Tailscale"
+      ]
+    },
+    {
+      "id": "onb-03",
+      "question": "How many reviewers are required for changes to payment code?",
+      "expectedDocument": "onboarding-handbook",
+      "mustContain": [
+        "need two"
+      ]
+    },
+    {
+      "id": "onb-04",
+      "question": "What is the branch naming convention?",
+      "expectedDocument": "onboarding-handbook",
+      "mustContain": [
+        "ticket-id"
+      ]
+    },
+    {
+      "id": "onb-05",
+      "question": "How quickly must the primary on-call respond to a page?",
+      "expectedDocument": "onboarding-handbook",
+      "mustContain": [
+        "fifteen minutes"
+      ]
+    },
+    {
+      "id": "onb-06",
+      "question": "What happens to flaky tests?",
+      "expectedDocument": "onboarding-handbook",
+      "mustContain": [
+        "quarantined"
+      ]
+    },
+    {
+      "id": "onb-07",
+      "question": "How do I install the developer toolchain on a new laptop?",
+      "expectedDocument": "onboarding-handbook",
+      "mustContain": [
+        "bootstrap.sh"
+      ]
+    },
+    {
+      "id": "inc-01",
+      "question": "What counts as a SEV-1 incident?",
+      "expectedDocument": "incident-process",
+      "mustContain": [
+        "cannot buy"
+      ]
+    },
+    {
+      "id": "inc-02",
+      "question": "How do I declare an incident?",
+      "expectedDocument": "incident-process",
+      "mustContain": [
+        "/incident declare"
+      ]
+    },
+    {
+      "id": "inc-03",
+      "question": "How soon must the first public status update be posted?",
+      "expectedDocument": "incident-process",
+      "mustContain": [
+        "fifteen minutes"
+      ]
+    },
+    {
+      "id": "inc-04",
+      "question": "What is the preferred order of mitigations during an incident?",
+      "expectedDocument": "incident-process",
+      "mustContain": [
+        "roll back the latest release"
+      ]
+    },
+    {
+      "id": "inc-05",
+      "question": "When is a postmortem due and what must it contain?",
+      "expectedDocument": "incident-process",
+      "mustContain": [
+        "five working days"
+      ]
+    },
+    {
+      "id": "inc-06",
+      "question": "What are the incident time targets for SEV-1?",
+      "expectedDocument": "incident-process",
+      "mustContain": [
+        "thirty minutes to mitigate"
+      ]
+    },
+    {
+      "id": "inc-07",
+      "question": "Who owns communication during an incident?",
+      "expectedDocument": "incident-process",
+      "mustContain": [
+        "communications lead",
+        "owns communication"
+      ]
+    },
+    {
+      "id": "neg-01",
+      "question": "What is the capital of France?",
+      "expectedDocument": null,
+      "mustContain": []
+    },
+    {
+      "id": "neg-02",
+      "question": "How do I bake sourdough bread at home?",
+      "expectedDocument": null,
+      "mustContain": []
+    },
+    {
+      "id": "neg-03",
+      "question": "Which planets have rings?",
+      "expectedDocument": null,
+      "mustContain": []
+    },
+    {
+      "id": "neg-04",
+      "question": "How do I configure a Cisco router for BGP peering?",
+      "expectedDocument": null,
+      "mustContain": []
+    },
+    {
+      "id": "neg-05",
+      "question": "What is the recommended dosage of ibuprofen for adults?",
+      "expectedDocument": null,
+      "mustContain": []
+    },
+    {
+      "id": "neg-06",
+      "question": "How do I change the oil in a 2015 Toyota Corolla?",
+      "expectedDocument": null,
+      "mustContain": []
+    }
+  ]
+}

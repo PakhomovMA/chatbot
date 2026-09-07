@@ -79,3 +79,21 @@ tasks.named('test') {
 tasks.named('bootRun') {
     jvmArgs nativeAccessJvmArgs
 }
+
+// Retrieval quality gate over the golden set (docs/system-plan.md §11). Needs the local ONNX model files.
+//   ./gradlew ragEval [-Peval.chunkSize=800 -Peval.overlap=100 -Peval.minRecall=0.8 -Peval.sufficientCosine=0.5]
+tasks.register('ragEval', Test) {
+    description = 'Runs the RAG retrieval evaluation against the golden question set'
+    group = 'verification'
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform { includeTags 'eval' }
+    jvmArgs nativeAccessJvmArgs
+    outputs.upToDateWhen { false }
+    ['eval.chunkSize', 'eval.overlap', 'eval.minRecall', 'eval.sufficientCosine'].each { key ->
+        if (project.hasProperty(key)) {
+            systemProperty key, project.property(key)
+        }
+    }
+    testLogging { events 'passed', 'failed'; showStandardStreams = false }
+}

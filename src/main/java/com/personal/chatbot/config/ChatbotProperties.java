@@ -28,7 +28,8 @@ public record ChatbotProperties(
         @Valid @DefaultValue Embedding embedding,
         @Valid @DefaultValue Knowledge knowledge,
         @Valid @DefaultValue Index index,
-        @Valid @DefaultValue Ingestion ingestion
+        @Valid @DefaultValue Ingestion ingestion,
+        @Valid @DefaultValue Retrieval retrieval
 ) {
 
     /**
@@ -86,8 +87,8 @@ public record ChatbotProperties(
     public record Index(
             @Nullable Path dir,
             @DefaultValue("false") boolean inMemory,
-            @Min(100) @DefaultValue("1200") int maxChunkSize,
-            @Min(0) @DefaultValue("150") int overlapSize,
+            @Min(100) @DefaultValue("800") int maxChunkSize,
+            @Min(0) @DefaultValue("100") int overlapSize,
             @Min(1) @DefaultValue("32") int embeddingBatchSize
     ) {
     }
@@ -99,6 +100,28 @@ public record ChatbotProperties(
     public record Ingestion(
             @DefaultValue("true") boolean autoResume,
             @DefaultValue("true") boolean retryInterrupted
+    ) {
+    }
+
+    /**
+     * Retrieval defaults (docs/system-plan.md §6). Cosine values are plain cosine similarity in [-1, 1].
+     *
+     * @param topK                hits returned when the caller does not ask for a number
+     * @param candidateMultiplier candidates requested from each facet per returned hit (before fusion)
+     * @param rrfK                reciprocal-rank-fusion constant
+     * @param minCosine           noise floor for the vector facet
+     * @param minTextScore        noise floor for normalised BM25 (0 = rank only, as recommended by Embabel)
+     * @param sufficientCosine    best-hit cosine at or above which retrieval counts as sufficient evidence
+     * @param traceBufferSize     retrieval traces kept for diagnostics
+     */
+    public record Retrieval(
+            @Min(1) @DefaultValue("8") int topK,
+            @Min(1) @DefaultValue("3") int candidateMultiplier,
+            @Min(0) @DefaultValue("60") int rrfK,
+            @DefaultValue("0.0") double minCosine,
+            @DefaultValue("0.0") double minTextScore,
+            @DefaultValue("0.3") double sufficientCosine,
+            @Min(1) @DefaultValue("200") int traceBufferSize
     ) {
     }
 

@@ -43,8 +43,9 @@ class DocumentServiceTest {
         ChatbotProperties properties = new ChatbotProperties(dir,
                 new ChatbotProperties.Embedding("fake", null, null, 16, 2, true),
                 new ChatbotProperties.Knowledge(DataSize.ofKilobytes(1), Set.of("md", "txt")),
-                new ChatbotProperties.Index(null, true, 1200, 150, 32),
-                new ChatbotProperties.Ingestion(true, true));
+                new ChatbotProperties.Index(null, true, 800, 100, 32),
+                new ChatbotProperties.Ingestion(true, true),
+                new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, 0.5, 200));
         service = new DocumentService(registry, blobStore, properties,
                 Clock.fixed(Instant.parse("2026-09-07T10:00:00Z"), ZoneOffset.UTC), events::add);
     }

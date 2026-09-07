@@ -1,6 +1,7 @@
 package com.personal.chatbot.controller;
 
 import com.personal.chatbot.exceptions.DocumentNotFoundException;
+import com.personal.chatbot.exceptions.IndexUnavailableException;
 import com.personal.chatbot.exceptions.InvalidUploadException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,6 +38,14 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, e.getMessage());
         problem.setTitle("Upload rejected");
         problem.setProperty("reason", e.reason().name());
+        return problem;
+    }
+
+    @ExceptionHandler(IndexUnavailableException.class)
+    ProblemDetail indexUnavailable(IndexUnavailableException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
+        problem.setTitle("Index unavailable");
+        problem.setProperty("indexState", e.state().name());
         return problem;
     }
 

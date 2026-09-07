@@ -48,7 +48,8 @@ class IngestionServiceTest {
                 new ChatbotProperties.Embedding("fake", null, null, 16, 2, true),
                 new ChatbotProperties.Knowledge(DataSize.ofMegabytes(5), Set.of("md", "txt", "pdf", "docx")),
                 new ChatbotProperties.Index(null, true, 400, 50, 8),
-                new ChatbotProperties.Ingestion(true, true));
+                new ChatbotProperties.Ingestion(true, true),
+                new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, 0.5, 200));
     }
 
     /** Wires the same objects the Spring context would; events are dispatched directly to the service. */

@@ -34,12 +34,20 @@ chatbot:
   index:
     dir: ${chatbot.data-dir}/index      # lucene/ + manifest.json
     in-memory: false
-    max-chunk-size: 1200                 # characters (D8); part of the index manifest
-    overlap-size: 150
+    max-chunk-size: 800                  # characters; calibrated on the eval set (docs/eval-log.md); part of the index manifest
+    overlap-size: 100
     embedding-batch-size: 32
   ingestion:
     auto-resume: true                    # queue pending documents at startup
     retry-interrupted: true              # re-queue documents interrupted by a crash
+  retrieval:
+    top-k: 8
+    candidate-multiplier: 3              # candidates per facet = top-k * multiplier
+    rrf-k: 60
+    min-cosine: 0.0                      # vector noise floor (plain cosine)
+    min-text-score: 0.0                  # BM25 is corpus-relative: rank only
+    sufficient-cosine: 0.3               # calibrated on the eval set (docs/eval-log.md): negatives max 0.22, positives min 0.32
+    trace-buffer-size: 200
 
 spring.servlet.multipart:
   max-file-size: 20MB

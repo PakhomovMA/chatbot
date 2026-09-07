@@ -1,0 +1,58 @@
+package com.personal.chatbot.service.retrieval;
+
+import com.personal.chatbot.models.retrieval.RetrievalResult;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Deque;
+import java.util.List;
+import java.util.Optional;
+
+/** Bounded in-memory ring of recent retrieval results for the diagnostics API (docs/system-plan.md D14). */
+public class RetrievalTraceStore {
+
+    private final int capacity;
+    private final Deque<RetrievalResult> traces = new ArrayDeque<>();
+
+    public RetrievalTraceStore(int capacity) {
+        if (capacity < 1) {
+            throw new IllegalArgumentException("capacity must be >= 1");
+        }
+        this.capacity = capacity;
+    }
+
+    public void record(RetrievalResult result) {
+        synchronized (traces) {
+            traces.addFirst(result);
+            while (traces.size() > capacity) {
+                traces.removeLast();
+            }
+        }
+    }
+
+    public Optional<RetrievalResult> find(String traceId) {
+        synchronized (traces) {
+            return traces.stream().filter(t -> t.traceId().equals(traceId)).findFirst();
+        }
+    }
+
+    /** Newest first. */
+    public List<RetrievalResult> recent(int limit) {
+        synchronized (traces) {
+            List<RetrievalResult> out = new ArrayList<>(Math.min(limit, traces.size()));
+            for (RetrievalResult trace : traces) {
+                if (out.size() == limit) {
+                    break;
+                }
+                out.add(trace);
+            }
+            return out;
+        }
+    }
+
+    public int size() {
+        synchronized (traces) {
+            return traces.size();
+        }
+    }
+}
