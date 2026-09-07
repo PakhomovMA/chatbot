@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { api, ApiError } from '@/api/client'
 import { streamChat } from '@/api/stream'
-import type { ChatResponse, Citation, Grounding } from '@/api/types'
+import type { AnswerMode, ChatResponse, Citation, Grounding } from '@/api/types'
 
 export interface ChatMessage {
   id: string
@@ -18,6 +18,7 @@ export interface ChatMessage {
 
 const STAGE_LABELS: Record<string, string> = {
   retrieving: 'Searching the knowledge base…',
+  researching: 'Researching with the search tools…',
   generating: 'Drafting an answer…',
   verifying: 'Verifying citations…',
 }
@@ -29,6 +30,7 @@ export const useChatStore = defineStore('chat', {
     pending: false,
     stage: undefined as string | undefined,
     streamingEnabled: true,
+    mode: 'DETERMINISTIC' as AnswerMode,
     error: undefined as string | undefined,
     selectedMessageId: undefined as string | undefined,
     abort: undefined as AbortController | undefined,
@@ -51,7 +53,7 @@ export const useChatStore = defineStore('chat', {
       this.messages.push({ id: `u-${Date.now()}`, role: 'user', content: message, citations: [] })
       const draftId = `a-${Date.now()}`
       try {
-        const response = this.streamingEnabled ? await this.sendStreaming(message, draftId) : await api.chat({ conversationId: this.conversationId, message })
+        const response = this.streamingEnabled ? await this.sendStreaming(message, draftId) : await api.chat({ conversationId: this.conversationId, message, options: { mode: this.mode } })
         this.conversationId = response.conversationId
         this.replaceOrPush(draftId, {
           id: response.messageId,
@@ -76,7 +78,7 @@ export const useChatStore = defineStore('chat', {
     async sendStreaming(message: string, draftId: string): Promise<ChatResponse> {
       this.abort = new AbortController()
       return streamChat(
-        { conversationId: this.conversationId, message },
+        { conversationId: this.conversationId, message, options: { mode: this.mode } },
         (event) => {
           switch (event.type) {
             case 'status':

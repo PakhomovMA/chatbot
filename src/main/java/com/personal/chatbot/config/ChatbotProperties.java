@@ -9,6 +9,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
+import com.personal.chatbot.models.chat.AnswerMode;
 import org.springframework.util.unit.DataSize;
 
 import java.nio.file.Path;
@@ -130,6 +131,9 @@ public record ChatbotProperties(
     /**
      * Chat defaults (docs/system-plan.md D10, D12).
      *
+     * @param mode               default answer mode: DETERMINISTIC (retrieve-then-generate) or AGENTIC (ToolishRag, Phase 9c)
+     * @param agenticMaxSearches searches the model is told it may issue in agentic mode
+     * @param agenticMinCosine   vector noise floor for the agentic search tools (plain cosine)
      * @param temperature        sampling temperature for the grounded answer
      * @param evidenceCharBudget maximum characters of evidence passages placed in the prompt
      * @param quoteMaxChars      maximum length of a citation quote in the response
@@ -138,6 +142,9 @@ public record ChatbotProperties(
      * @param conversationTtl    idle time after which a conversation is forgotten
      */
     public record Chat(
+            @DefaultValue("DETERMINISTIC") AnswerMode mode,
+            @Min(1) @DefaultValue("4") int agenticMaxSearches,
+            @DefaultValue("0.2") double agenticMinCosine,
             @DefaultValue("0.1") double temperature,
             @Min(500) @DefaultValue("6000") int evidenceCharBudget,
             @Min(50) @DefaultValue("600") int quoteMaxChars,

@@ -1,5 +1,6 @@
 package com.personal.chatbot;
 
+import com.personal.chatbot.models.chat.AnswerMode;
 import com.personal.chatbot.models.chat.ChatRequest;
 import com.personal.chatbot.models.chat.ChatResponse;
 import com.personal.chatbot.models.chat.Grounding;
@@ -96,6 +97,45 @@ class ChatE2eTest {
 
     @Test
     void goldenQuestionsGetGroundedAnswersWithCitations() throws IOException {
+        run(AnswerMode.DETERMINISTIC, GOLDEN.size() - 1);
+    }
+
+    /** Phase 9c: the same questions through ToolishRag-driven research (qwen3 drives the search tools). */
+    @Test
+    void agenticModeAnswersGoldenQuestionsWithCitations() throws IOException {
+        run(AnswerMode.AGENTIC, GOLDEN.size() - 2);
+    }
+
+    private void run(AnswerMode mode, int minGrounded) throws IOException {
+        seedDocuments();
+        int grounded = 0;
+        for (Golden golden : GOLDEN) {
+            long started = System.nanoTime();
+            ChatResponse response = chat.chat(new ChatRequest(null, golden.question(),
+                    new ChatRequest.Options(null, null, true, mode)));
+            long millis = (System.nanoTime() - started) / 1_000_000;
+            String answer = response.answer().toLowerCase(Locale.ROOT);
+            boolean mentions = golden.mustContain().stream().anyMatch(m -> answer.contains(m.toLowerCase(Locale.ROOT)));
+            int searches = response.diagnostics() != null ? response.diagnostics().candidates() : -1;
+            log.info("[{}] Q: {}\n   -> {} in {} ms ({} citations, retrieval {} ms, llm {} ms, searches {}): {}", mode, golden.question(),
+                    response.grounding(), millis, response.citations().size(), response.timings().retrievalMs(),
+                    response.timings().llmMs(), searches, response.answer().replace('\n', ' '));
+            assertThat(response.citations()).as("citations for '%s' in %s mode", golden.question(), mode).isNotEmpty();
+            assertThat(response.citations()).anyMatch(c -> c.documentTitle().equals(golden.expectedDocumentKey()));
+            assertThat(mentions).as("answer to '%s' should mention %s but was: %s", golden.question(), golden.mustContain(), response.answer()).isTrue();
+            if (response.grounding() == Grounding.GROUNDED) {
+                grounded++;
+            }
+        }
+        assertThat(grounded).as("grounded answers out of %d in %s mode", GOLDEN.size(), mode).isGreaterThanOrEqualTo(minGrounded);
+    }
+
+    private static boolean seeded;
+
+    private void seedDocuments() throws IOException {
+        if (seeded) {
+            return;
+        }
         try (Stream<Path> docs = Files.list(Path.of("src/test/resources/eval/docs"))) {
             for (Path file : docs.filter(p -> p.toString().endsWith(".md")).sorted().toList()) {
                 documents.upload(new DocumentService.Upload(file.getFileName().toString(), "text/markdown", Files.size(file),
@@ -104,24 +144,6 @@ class ChatE2eTest {
         }
         await().atMost(Duration.ofMinutes(2)).untilAsserted(() ->
                 assertThat(registry.findAll()).isNotEmpty().allMatch(d -> d.status() == DocumentStatus.READY));
-
-        int grounded = 0;
-        for (Golden golden : GOLDEN) {
-            long started = System.nanoTime();
-            ChatResponse response = chat.chat(new ChatRequest(null, golden.question(), null));
-            long millis = (System.nanoTime() - started) / 1_000_000;
-            String answer = response.answer().toLowerCase(Locale.ROOT);
-            boolean mentions = golden.mustContain().stream().anyMatch(m -> answer.contains(m.toLowerCase(Locale.ROOT)));
-            log.info("Q: {}\n   -> {} in {} ms ({} citations, retrieval {} ms, llm {} ms): {}", golden.question(),
-                    response.grounding(), millis, response.citations().size(), response.timings().retrievalMs(),
-                    response.timings().llmMs(), response.answer().replace('\n', ' '));
-            assertThat(response.citations()).as("citations for '%s'", golden.question()).isNotEmpty();
-            assertThat(response.citations()).anyMatch(c -> c.documentTitle().equals(golden.expectedDocumentKey()));
-            assertThat(mentions).as("answer to '%s' should mention %s but was: %s", golden.question(), golden.mustContain(), response.answer()).isTrue();
-            if (response.grounding() == Grounding.GROUNDED) {
-                grounded++;
-            }
-        }
-        assertThat(grounded).as("grounded answers out of %d", GOLDEN.size()).isGreaterThanOrEqualTo(GOLDEN.size() - 1);
+        seeded = true;
     }
 }

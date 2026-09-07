@@ -19,20 +19,23 @@ public class GroundedAnswerPrompt {
 
     public static final String TEMPLATE_LOCATION = "prompts/grounded-answer.md";
     public static final String STREAM_TEMPLATE_LOCATION = "prompts/grounded-answer-stream.md";
+    public static final String AGENTIC_TEMPLATE_LOCATION = "prompts/agentic-research.md";
     static final String HISTORY_HEADER = "Previous conversation (for context only; the evidence below is authoritative):";
 
     private final String template;
     private final String streamTemplate;
+    private final String agenticTemplate;
     private final int evidenceCharBudget;
     private final int historyTurns;
 
     public GroundedAnswerPrompt(int evidenceCharBudget, int historyTurns) {
-        this(load(TEMPLATE_LOCATION), load(STREAM_TEMPLATE_LOCATION), evidenceCharBudget, historyTurns);
+        this(load(TEMPLATE_LOCATION), load(STREAM_TEMPLATE_LOCATION), load(AGENTIC_TEMPLATE_LOCATION), evidenceCharBudget, historyTurns);
     }
 
-    GroundedAnswerPrompt(String template, String streamTemplate, int evidenceCharBudget, int historyTurns) {
+    GroundedAnswerPrompt(String template, String streamTemplate, String agenticTemplate, int evidenceCharBudget, int historyTurns) {
         this.template = template;
         this.streamTemplate = streamTemplate;
+        this.agenticTemplate = agenticTemplate;
         this.evidenceCharBudget = evidenceCharBudget;
         this.historyTurns = historyTurns;
     }
@@ -45,6 +48,15 @@ public class GroundedAnswerPrompt {
     /** Prompt for the free-text streaming draft. */
     public String buildForStreaming(String question, List<ConversationTurn> history, List<RetrievedChunk> hits) {
         return fill(streamTemplate, question, history, hits);
+    }
+
+    /** Prompt for agentic research: no evidence block, the model searches through tools. */
+    public String buildForAgentic(String question, List<ConversationTurn> history, int maxSearches) {
+        return agenticTemplate
+                .replace("{{maxSearches}}", Integer.toString(maxSearches))
+                .replace("{{history}}", renderHistory(history))
+                .replace("{{question}}", question.strip())
+                .strip();
     }
 
     private String fill(String source, String question, List<ConversationTurn> history, List<RetrievedChunk> hits) {

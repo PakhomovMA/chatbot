@@ -2,6 +2,8 @@ package com.personal.chatbot.service.chat;
 
 import com.embabel.agent.api.invocation.AgentInvocation;
 import com.embabel.agent.core.AgentPlatform;
+import com.personal.chatbot.config.ChatbotProperties;
+import com.personal.chatbot.models.chat.AnswerMode;
 import com.personal.chatbot.exceptions.ConversationNotFoundException;
 import com.personal.chatbot.models.agent.AnswerStreamSink;
 import com.personal.chatbot.models.agent.GroundedAnswer;
@@ -45,14 +47,16 @@ public class ChatService {
     private final RetrievalTraceStore traces;
     private final MeterRegistry meterRegistry;
     private final Clock clock;
+    private final AnswerMode defaultMode;
 
     public ChatService(AgentPlatform agentPlatform, ConversationStore conversations, RetrievalTraceStore traces,
-                       MeterRegistry meterRegistry, Clock clock) {
+                       MeterRegistry meterRegistry, Clock clock, ChatbotProperties properties) {
         this.agentPlatform = agentPlatform;
         this.conversations = conversations;
         this.traces = traces;
         this.meterRegistry = meterRegistry;
         this.clock = clock;
+        this.defaultMode = properties.chat().mode();
     }
 
     public ChatResponse chat(ChatRequest request) {
@@ -94,7 +98,8 @@ public class ChatService {
         ChatRequest.Options options = request.optionsOrDefault();
         List<ConversationTurn> history = conversations.history(conversationId);
 
-        UserQuestion input = new UserQuestion(conversationId, messageId, question, history, options.topK(), options.documentIds(), sink);
+        AnswerMode mode = options.mode() != null ? options.mode() : defaultMode;
+        UserQuestion input = new UserQuestion(conversationId, messageId, question, history, options.topK(), options.documentIds(), mode, sink);
         GroundedAnswer answer;
         try (RequestContext.Scope _ = RequestContext.with(RequestContext.CONVERSATION_ID, conversationId);
              RequestContext.Scope _ = RequestContext.with(RequestContext.MESSAGE_ID, messageId)) {
@@ -109,7 +114,7 @@ public class ChatService {
         conversations.append(conversationId, ConversationTurn.user(question, now));
         conversations.append(conversationId, ConversationTurn.assistant(answer.answer(), answer.citations(), now));
         Timer.builder("chatbot.chat").tag("grounding", answer.grounding().name().toLowerCase())
-                .tag("mode", sink != null ? "stream" : "sync").register(meterRegistry)
+                .tag("mode", sink != null ? "stream" : "sync").tag("answerMode", mode.name().toLowerCase()).register(meterRegistry)
                 .record(totalMs, TimeUnit.MILLISECONDS);
         log.info("Chat [{}] {} in {} ms ({} citations, retrieval {} ms{})", messageId, answer.grounding(), totalMs,
                 answer.citations().size(), answer.retrievalMs(), sink != null ? ", streamed" : "");

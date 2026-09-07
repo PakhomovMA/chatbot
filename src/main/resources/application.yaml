@@ -49,6 +49,9 @@ chatbot:
     sufficient-cosine: 0.3               # calibrated on the eval set (docs/eval-log.md): negatives max 0.22, positives min 0.32
     trace-buffer-size: 200
   chat:
+    mode: DETERMINISTIC                  # or AGENTIC: the model searches via Embabel ToolishRag tools (Phase 9c)
+    agentic-max-searches: 4
+    agentic-min-cosine: 0.2
     temperature: 0.1
     evidence-char-budget: 6000           # evidence passages shown to the model (§6.7)
     quote-max-chars: 600

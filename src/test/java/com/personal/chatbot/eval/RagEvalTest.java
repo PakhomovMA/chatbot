@@ -129,7 +129,7 @@ class RagEvalTest {
                 new ChatbotProperties.Index(dir.resolve("index"), false, chunkSize, overlap, 16),
                 new ChatbotProperties.Ingestion(true, true),
                 new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, 500),
-                new ChatbotProperties.Chat(0.1, 6000, 600, 10, 1000, java.time.Duration.ofHours(24)));
+                new ChatbotProperties.Chat(com.personal.chatbot.models.chat.AnswerMode.DETERMINISTIC, 4, 0.2, 0.1, 6000, 600, 10, 1000, java.time.Duration.ofHours(24)));
         retrieval = new RetrievalService(store, new RetrievalTraceStore(500), properties, new SimpleMeterRegistry());
 
         JsonMapper mapper = JsonMapper.builder().build();

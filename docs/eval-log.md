@@ -93,3 +93,39 @@ Lucene in-memory, Ollama). Все 5 — `GROUNDED`, по одной провер
 Время до первой дельты = prompt processing в Ollama (evidence ≈ 6k символов) плюс прогрев модели после
 простоя; сама генерация идёт ~70–80 мс/токен. Воспринимаемая скорость в UI заметно лучше синхронного режима
 при той же общей латентности.
+
+## 2026-09-07 — Phase 9c, agentic RAG через Embabel `ToolishRag`
+
+Режим `AGENTIC` (`chatbot.chat.mode` или `options.mode` в запросе): действие `researchIteratively` отдаёт
+модели `ToolishRag` поверх того же Lucene-стора (`LockedSearchOperations`: тот же RW-lock, query-префикс
+для embeddings). Инструменты, которые Embabel построил из capabilities стора: `knowledge_base_vectorSearch`,
+`knowledge_base_textSearch`, `knowledge_base_broadenChunk`, `knowledge_base_zoomOut`. Всё, что модель увидела
+через инструменты, собирает `EvidenceCollector` (`ResultsListener`) — это и есть evidence для верификации
+цитат; retrieval-инфраструктура не менялась (INV-06/07), LLM не касается Lucene напрямую (INV-01).
+
+Сравнение на 5 golden-вопросах (`ChatE2eTest`, `qwen3:14b`, thinking off):
+
+| Вопрос | DETERMINISTIC | AGENTIC | Поисков (agentic) |
+|---|---|---|---|
+| How do I restart the payments service? | GROUNDED, 35.5 s | GROUNDED, 36.5 s | 1 |
+| Where are secrets stored and how often are they rotated? | GROUNDED, 17.8 s | GROUNDED, 26.1 s | 1 |
+| Which header prevents duplicate orders? | GROUNDED, 16.6 s | GROUNDED, 25.8 s | 1 |
+| How quickly must the primary on-call respond to a page? | GROUNDED, 14.4 s | GROUNDED, 25.0 s | 1 |
+| How do I declare an incident? | GROUNDED, 18.2 s | GROUNDED, 29.7 s | 1 |
+
+Наблюдения:
+
+- Качество одинаковое (5/5 GROUNDED, те же цитаты), латентность agentic-режима выше на 8–11 с: два вызова
+  модели (решение о поиске + финальный ответ) вместо одного, плюс tool-loop overhead.
+- qwen3:14b всегда делает ровно один `vectorSearch` с исходным вопросом и `topK=5`; `textSearch`,
+  `broadenChunk`, повторные запросы не использовал ни разу — на простом корпусе агентность не даёт выигрыша.
+- Модель надёжно воспроизводит содержание, но неохотно копирует chunk id в `citedChunkIds` (первый прогон:
+  0 цитат при верном ответе). Введён детерминированный fallback `EvidenceAttributor`: чанк засчитывается,
+  только если ответ дословно переиспользует ≥ 3 характерных токена (команды, идентификаторы, числа) из чанка,
+  который модель реально видела. С ним 5/5.
+- Trace agentic-запроса в `/api/diagnostics/retrieval/{id}` содержит все увиденные чанки и список запросов
+  (`candidates` = число поисков).
+
+Вывод: default остаётся `DETERMINISTIC`; `AGENTIC` — feature flag для сложных вопросов (multi-hop,
+сравнение документов), где ожидается несколько поисков. Следующие измерения: вопросы, требующие 2+ поисков;
+`agentic-max-searches`; более сильная модель для tool use.

@@ -16,12 +16,16 @@ public record ChatRequest(
         @Nullable @Valid Options options
 ) {
 
+    /**
+     * @param mode overrides the configured answer mode (Phase 9c); null keeps the server default
+     */
     public record Options(
             @Nullable @Min(1) @Max(20) Integer topK,
             @Nullable Set<String> documentIds,
-            @Nullable Boolean includeDiagnostics
+            @Nullable Boolean includeDiagnostics,
+            @Nullable AnswerMode mode
     ) {
-        public static final Options DEFAULT = new Options(null, null, null);
+        public static final Options DEFAULT = new Options(null, null, null, null);
 
         public boolean diagnostics() {
             return Boolean.TRUE.equals(includeDiagnostics);

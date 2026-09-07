@@ -104,10 +104,12 @@ export interface Citation {
 
 export interface ChatTimings { retrievalMs: number; llmMs: number; totalMs: number }
 
+export type AnswerMode = 'DETERMINISTIC' | 'AGENTIC'
+
 export interface ChatRequest {
   conversationId?: string
   message: string
-  options?: { topK?: number; documentIds?: string[]; includeDiagnostics?: boolean }
+  options?: { topK?: number; documentIds?: string[]; includeDiagnostics?: boolean; mode?: AnswerMode }
 }
 
 export interface ChatResponse {

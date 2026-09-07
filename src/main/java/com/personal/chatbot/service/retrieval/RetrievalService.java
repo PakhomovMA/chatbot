@@ -183,7 +183,7 @@ public class RetrievalService {
     }
 
     /** Lucene reports cosine similarity as {@code (1 + cos) / 2}. */
-    static double toLuceneScore(double cosine) {
+    public static double toLuceneScore(double cosine) {
         return (1 + cosine) / 2;
     }
 

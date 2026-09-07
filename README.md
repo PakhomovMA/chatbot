@@ -3,9 +3,10 @@
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
 Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
 
-Current state: **Phase 8** (observability) — Chat (streamed, cited answers), Knowledge Base (upload, live
-status, re-index, delete) and a Retrieval playground on top of the Embabel agent, hybrid retrieval and the
-Lucene index, with health components, RAG metrics, request correlation and optional tracing.
+Current state: **Phase 9c** (agentic RAG) — Chat (streamed, cited answers; deterministic or ToolishRag-driven
+agentic mode), Knowledge Base (upload, live status, re-index, delete) and a Retrieval playground on top of the
+Embabel agent, hybrid retrieval and the Lucene index, with health components, RAG metrics, request
+correlation and optional tracing.
 
 ## Prerequisites
 
@@ -98,7 +99,7 @@ Errors are RFC 9457 problem details.
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/chat` `{conversationId?, message, options?:{topK?, documentIds?, includeDiagnostics?}}` | Grounded answer: `answer` (Markdown with `[n]` markers), `grounding` (`GROUNDED` / `PARTIAL` / `INSUFFICIENT_EVIDENCE`), `citations[]` with document, section, chunk id and quote, `timings`, `retrievalTraceId` |
+| `POST /api/chat` `{conversationId?, message, options?:{topK?, documentIds?, includeDiagnostics?, mode?}}` | Grounded answer: `answer` (Markdown with `[n]` markers), `grounding` (`GROUNDED` / `PARTIAL` / `INSUFFICIENT_EVIDENCE`), `citations[]` with document, section, chunk id and quote, `timings`, `retrievalTraceId` |
 | `POST /api/chat/stream` (same body) | Server-sent events: `status` (`retrieving` / `generating` / `verifying`), `delta` (`{text}`), `final` (`{response}` with the same shape as `POST /api/chat`), or `error` (`{message}`) |
 | `GET /api/conversations/{id}` / `DELETE` | In-memory conversation history (last 10 turns, 24 h idle TTL) |
 
@@ -109,6 +110,13 @@ without calling the model. Prompts: `src/main/resources/prompts/grounded-answer.
 `grounded-answer-stream.md` (free text for streaming; a trailing `INSUFFICIENT: …` line marks missing evidence);
 tuning: `chatbot.chat.*`. Streaming uses Embabel's streaming prompt runner when the model supports it and
 falls back to the structured path (one `delta` with the whole answer) otherwise; verification is identical.
+
+**Agentic mode** (`options.mode: "AGENTIC"`, or `chatbot.chat.mode`; UI selector "agentic (tools)"): instead of
+one deterministic retrieval, the model researches the question itself through Embabel `ToolishRag` tools built
+from the Lucene store (`knowledge_base_vectorSearch`, `knowledge_base_textSearch`, `knowledge_base_broadenChunk`,
+`knowledge_base_zoomOut`, prompt `prompts/agentic-research.md`). Every passage the tools return is recorded and
+becomes the evidence the citations are verified against, so grounding rules are the same. Comparison and
+caveats: `docs/eval-log.md`.
 
 ## Retrieval and diagnostics
 

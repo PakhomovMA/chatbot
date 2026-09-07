@@ -4,9 +4,11 @@ import com.embabel.agent.rag.ingestion.ChunkTransformer;
 import com.embabel.agent.rag.ingestion.ContentChunker;
 import com.embabel.agent.rag.lucene.LuceneSearchOperations;
 import com.embabel.agent.rag.model.Chunk;
+import com.embabel.agent.rag.model.ContentElement;
 import com.embabel.agent.rag.model.ContentRoot;
 import com.embabel.agent.rag.model.NavigableDocument;
 import com.embabel.agent.rag.service.CoreSearchOperations;
+import com.embabel.agent.rag.service.ResultExpander;
 import com.embabel.common.ai.model.EmbeddingService;
 import com.personal.chatbot.exceptions.IndexUnavailableException;
 import com.personal.chatbot.exceptions.IndexWriteException;
@@ -254,6 +256,27 @@ public class LuceneIndexStore implements AutoCloseable {
         } finally {
             lock.readLock().unlock();
         }
+    }
+
+    /** Expands a chunk to its neighbours or parent section (used by the agentic tools). */
+    public List<ContentElement> expand(String id, ResultExpander.Method method, int elementsToAdd) {
+        lock.readLock().lock();
+        try {
+            LuceneSearchOperations ops = operations;
+            if (ops == null || !state.isWritable()) {
+                throw new IndexUnavailableException(state, "Index is " + state);
+            }
+            synchronized (searchMonitor) {
+                return ops.expandResult(id, method, elementsToAdd);
+            }
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    /** Search capabilities for Embabel tools, guarded by this store's lock and state (Phase 9c). */
+    public LockedSearchOperations searchOperations() {
+        return new LockedSearchOperations(this);
     }
 
     /** Drops all content and starts a fresh index under the current fingerprint. */
