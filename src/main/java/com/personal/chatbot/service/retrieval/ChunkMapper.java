@@ -65,7 +65,16 @@ public final class ChunkMapper {
      */
     public static RetrievedChunk toRetrievedChunk(Chunk chunk, @Nullable Double cosine, @Nullable Double bm25,
                                                   double fusedScore, int rank) {
-        return new RetrievedChunk(chunk.getId(), originalText(chunk), provenanceOf(chunk), cosine, bm25, fusedScore, rank);
+        return new RetrievedChunk(chunk.getId(), originalText(chunk), provenanceOf(chunk), cosine, bm25, fusedScore, rank, null);
+    }
+
+    /**
+     * A chunk shown for context around {@code hit}, not because it matched: it has no facet scores of
+     * its own and inherits the hit's rank and fused score, so ranking metrics stay comparable.
+     */
+    public static RetrievedChunk toNeighbour(Chunk chunk, RetrievedChunk hit) {
+        return new RetrievedChunk(chunk.getId(), originalText(chunk), provenanceOf(chunk), null, null,
+                hit.fusedScore(), hit.rank(), hit.chunkId());
     }
 
     private static String string(@Nullable Object value, String fallback) {

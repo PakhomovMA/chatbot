@@ -47,6 +47,7 @@ chatbot:
     min-cosine: 0.0                      # vector noise floor (plain cosine)
     min-text-score: 0.0                  # BM25 is corpus-relative: rank only
     sufficient-cosine: 0.3               # calibrated on the eval set (docs/eval-log.md): negatives max 0.22, positives min 0.32
+    expand-neighbours: 0                 # section chunks shown on each side of every hit (0 = off); also the agentic search tools
     trace-buffer-size: 200
   chat:
     mode: DETERMINISTIC                  # or AGENTIC: the model searches via Embabel ToolishRag tools (Phase 9c)

@@ -49,7 +49,7 @@ class IngestionServiceTest {
                 new ChatbotProperties.Knowledge(DataSize.ofMegabytes(5), Set.of("md", "txt", "pdf", "docx")),
                 new ChatbotProperties.Index(null, true, 400, 50, 8),
                 new ChatbotProperties.Ingestion(true, true),
-                new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, 0.5, 200),
+                new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, 0.5, 0, 200),
                 new ChatbotProperties.Chat(com.personal.chatbot.models.chat.AnswerMode.DETERMINISTIC,
                         com.personal.chatbot.models.chat.AnswerLanguage.AUTO, 4, 0.2, 0.1, 6000, 600, 10, 1000,
                         java.time.Duration.ofHours(24)));

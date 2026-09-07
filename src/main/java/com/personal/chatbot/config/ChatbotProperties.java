@@ -116,6 +116,7 @@ public record ChatbotProperties(
      * @param minCosine           noise floor for the vector facet
      * @param minTextScore        noise floor for normalised BM25 (0 = rank only, as recommended by Embabel)
      * @param sufficientCosine    best-hit cosine at or above which retrieval counts as sufficient evidence
+     * @param expandNeighbours    chunks fetched on each side of every hit as continuation context (0 = off)
      * @param traceBufferSize     retrieval traces kept for diagnostics
      */
     public record Retrieval(
@@ -125,6 +126,7 @@ public record ChatbotProperties(
             @DefaultValue("0.0") double minCosine,
             @DefaultValue("0.0") double minTextScore,
             @DefaultValue("0.3") double sufficientCosine,
+            @Min(0) @DefaultValue("0") int expandNeighbours,
             @Min(1) @DefaultValue("200") int traceBufferSize
     ) {
     }

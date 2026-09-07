@@ -24,7 +24,7 @@ class GroundingVerifierTest {
 
     static RetrievedChunk hit(int rank, String text) {
         Provenance provenance = new Provenance("doc-1", "Runbook", 1, "Restart", List.of("Restart"), "doc-1:1:" + rank, rank, 0, 1, "text/markdown");
-        return new RetrievedChunk("doc-1:1:" + rank, text, provenance, 0.6, 0.2, 0.03 / rank, rank);
+        return new RetrievedChunk("doc-1:1:" + rank, text, provenance, 0.6, 0.2, 0.03 / rank, rank, null);
     }
 
     static Evidence evidence(boolean sufficientByScore, RetrievedChunk... hits) {

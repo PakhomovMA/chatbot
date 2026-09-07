@@ -46,6 +46,21 @@ class RetrievalServiceTest {
             The rotation job is called vault-rotator and runs on Sundays.
             """;
 
+    /** One section long enough for the 400-character chunker to split it into several chunks. */
+    private static final String HANDBOOK_DOC = """
+            # On-call Handbook
+
+            ## Escalation
+
+            The primary on-call acknowledges a page within five minutes and starts the incident channel.
+            If there is no acknowledgement the pager escalates to the secondary after ten minutes.
+            The secondary on-call has the same responsibilities and the same tooling access as the primary.
+            When both are unavailable the incident commander of the week is paged directly by the duty manager.
+            Escalation to the engineering manager happens only after thirty minutes without an acknowledgement.
+            Every escalation step is recorded in the incident timeline together with the name of the responder.
+            The timeline is exported to the postmortem document once the incident is closed by the commander.
+            """;
+
     @TempDir
     Path dir;
 
@@ -60,6 +75,7 @@ class RetrievalServiceTest {
         service = new RetrievalService(store, traces, properties(0.3), new SimpleMeterRegistry());
         store.writeDocument(parsed("runbook", "Payments Runbook", TestDocuments.MARKDOWN));
         store.writeDocument(parsed("deploy", "Deployment Guide", DEPLOY_DOC));
+        store.writeDocument(parsed("handbook", "On-call Handbook", HANDBOOK_DOC));
     }
 
     @AfterEach
@@ -68,7 +84,11 @@ class RetrievalServiceTest {
     }
 
     private ChatbotProperties.Retrieval properties(double sufficientCosine) {
-        return new ChatbotProperties.Retrieval(5, 3, 60, -1.0, 0.0, sufficientCosine, 50);
+        return properties(sufficientCosine, 0);
+    }
+
+    private ChatbotProperties.Retrieval properties(double sufficientCosine, int expandNeighbours) {
+        return new ChatbotProperties.Retrieval(5, 3, 60, -1.0, 0.0, sufficientCosine, expandNeighbours, 50);
     }
 
     private NavigableDocument parsed(String id, String title, String markdown) throws Exception {
@@ -139,6 +159,28 @@ class RetrievalServiceTest {
         RetrievalService strict = new RetrievalService(store, traces, properties(0.999), new SimpleMeterRegistry());
         assertThat(strict.search(RetrievalQuery.of("systemctl restart payments")).evidenceSufficient()).isFalse();
         assertThat(service.search(new RetrievalQuery("systemctl", null, RetrievalMode.TEXT, null)).evidenceSufficient()).isFalse();
+    }
+
+    @Test
+    void neighbourExpansionAddsSectionContextAroundTheHitsWithoutChangingTheRanking() {
+        RetrievalQuery query = new RetrievalQuery("secondary on-call responsibilities", 2, RetrievalMode.VECTOR, null);
+        List<RetrievedChunk> plain = service.search(query).hits();
+
+        RetrievalService expanding = new RetrievalService(store, traces, properties(0.3, 1), new SimpleMeterRegistry());
+        List<RetrievedChunk> expanded = expanding.search(query).hits();
+
+        assertThat(expanded).filteredOn(RetrievedChunk::isHit).containsExactlyElementsOf(plain);
+        assertThat(expanded).hasSizeGreaterThan(plain.size());
+        assertThat(expanded).filteredOn(chunk -> !chunk.isHit()).isNotEmpty().allSatisfy(neighbour -> {
+            assertThat(neighbour.vectorScore()).isNull();
+            assertThat(neighbour.textScore()).isNull();
+            RetrievedChunk hit = plain.stream().filter(h -> h.chunkId().equals(neighbour.neighbourOf())).findFirst().orElseThrow();
+            // Context is adjacent in the hit's own document (the store widens within the container
+            // section, which can span sub-sections) and carries the hit's rank.
+            assertThat(neighbour.provenance().documentId()).isEqualTo(hit.provenance().documentId());
+            assertThat(neighbour.rank()).isEqualTo(hit.rank());
+        });
+        assertThat(expanded).extracting(RetrievedChunk::chunkId).doesNotHaveDuplicates();
     }
 
     @Test

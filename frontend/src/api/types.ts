@@ -76,6 +76,7 @@ export interface RetrievedChunk {
   textScore?: number | null
   fusedScore: number
   rank: number
+  neighbourOf?: string | null
 }
 
 export interface RetrievalResult {

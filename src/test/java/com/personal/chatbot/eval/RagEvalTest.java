@@ -9,6 +9,8 @@ import com.personal.chatbot.models.retrieval.RetrievalMode;
 import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
+import com.personal.chatbot.models.chat.AnswerLanguage;
+import com.personal.chatbot.service.chat.GroundedAnswerPrompt;
 import com.personal.chatbot.service.embedding.EmbabelEmbeddingServiceAdapter;
 import com.personal.chatbot.service.embedding.PromptedEmbeddingService;
 import com.personal.chatbot.service.embedding.onnx.OnnxModelFiles;
@@ -61,6 +63,8 @@ class RagEvalTest {
 
     private static final Logger log = LoggerFactory.getLogger(RagEvalTest.class);
     private static final int RECALL_K = 5;
+    /** The production evidence budget (chatbot.chat.evidence-char-budget), so "in budget" means what the model sees. */
+    private static final int EVIDENCE_CHAR_BUDGET = 6000;
     private static final int NDCG_K = 10;
 
     /** @param expectedDocument null marks a negative question: nothing in the corpus answers it. */
@@ -89,7 +93,23 @@ class RagEvalTest {
     }
 
     record Report(Instant at, String fingerprint, int chunkSize, int overlap, int chunks, List<ModeSummary> summary,
-                  List<QuestionOutcome> outcomes) {
+                  List<QuestionOutcome> outcomes, List<ExpansionSummary> expansion) {
+    }
+
+    /**
+     * What neighbour expansion buys and costs, measured on HYBRID. Ranking metrics are computed over
+     * matched hits only, so they stay comparable; the rest describes the evidence the model would see.
+     *
+     * @param answerCoverage   share of positive questions whose expected phrase appears in some returned passage
+     * @param answerInBudget   the same, but only counting passages that fit the prompt's evidence budget
+     * @param passages         average passages returned per question (hits plus neighbours)
+     * @param passagesInBudget average passages that fit the evidence budget
+     * @param hitsInBudget     average matched hits that fit it: what expansion displaces
+     * @param evidenceChars    average characters of returned passage text
+     */
+    record ExpansionSummary(int expandNeighbours, double recallAt5, double mrr, double answerCoverage,
+                            double answerInBudget, double passages, double passagesInBudget, double hitsInBudget,
+                            double evidenceChars, double p50Ms) {
     }
 
     @TempDir
@@ -123,7 +143,7 @@ class RagEvalTest {
         store = new LuceneIndexStore(dir.resolve("index"), new EmbabelEmbeddingServiceAdapter(embeddings), fingerprint,
                 new IndexManifest.Chunker(chunkSize, overlap, ProvenanceChunkTransformer.TRANSFORMER_VERSION), 16,
                 new ProvenanceChunkTransformer()).open();
-        var retrievalSettings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, 500);
+        var retrievalSettings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, 0, 500);
         retrieval = new RetrievalService(store, new RetrievalTraceStore(500), retrievalSettings, new SimpleMeterRegistry());
 
         JsonMapper mapper = JsonMapper.builder().build();
@@ -163,7 +183,7 @@ class RagEvalTest {
             summaries.add(evaluate(mode, outcomes));
         }
         Report report = new Report(Instant.now().truncatedTo(ChronoUnit.SECONDS), embeddings.fingerprint().value(),
-                chunkSize, overlap, store.info().chunkCount(), summaries, outcomes);
+                chunkSize, overlap, store.info().chunkCount(), summaries, outcomes, List.of());
         writeReport(report);
         for (ModeSummary summary : summaries) {
             log.info(String.format(Locale.ROOT,
@@ -174,6 +194,80 @@ class RagEvalTest {
         }
         ModeSummary hybrid = summaries.stream().filter(s -> s.mode() == RetrievalMode.HYBRID).findFirst().orElseThrow();
         assertThat(hybrid.recallAt5()).as("HYBRID recall@5").isGreaterThanOrEqualTo(minRecall);
+    }
+
+    /**
+     * Neighbour expansion trade-off (docs/system-plan.md §6, post-filter 5): the knob is a corpus
+     * decision, so it is measured rather than guessed. Reported, not asserted — the default stays 0
+     * until a corpus shows a reason to raise it.
+     */
+    @Test
+    void neighbourExpansionTradeOff() throws IOException {
+        List<ExpansionSummary> summaries = new ArrayList<>();
+        for (int expand : List.of(0, 1, 2)) {
+            summaries.add(measureExpansion(expand));
+        }
+        Path reports = Path.of("build/reports/rag-eval");
+        Files.createDirectories(reports);
+        JsonMapper mapper = JsonMapper.builder().enable(SerializationFeature.INDENT_OUTPUT).build();
+        Files.writeString(reports.resolve("expansion-" + DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")
+                .format(java.time.LocalDateTime.now()) + ".json"), mapper.writeValueAsString(summaries));
+        for (ExpansionSummary summary : summaries) {
+            log.info(String.format(Locale.ROOT,
+                    "expand=%d recall@5=%.3f mrr=%.3f answerCoverage=%.3f inBudget=%.3f passages=%.1f (%.1f in budget, %.1f of them hits) chars=%.0f p50=%.0fms",
+                    summary.expandNeighbours(), summary.recallAt5(), summary.mrr(), summary.answerCoverage(),
+                    summary.answerInBudget(), summary.passages(), summary.passagesInBudget(), summary.hitsInBudget(),
+                    summary.evidenceChars(), summary.p50Ms()));
+        }
+    }
+
+    private ExpansionSummary measureExpansion(int expandNeighbours) {
+        var settings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, expandNeighbours, 500);
+        RetrievalService service = new RetrievalService(store, new RetrievalTraceStore(500), settings, new SimpleMeterRegistry());
+        GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(EVIDENCE_CHAR_BUDGET, 0, AnswerLanguage.EN);
+        int positives = 0;
+        double recallHits = 0;
+        double reciprocalRanks = 0;
+        double covered = 0;
+        double coveredInBudget = 0;
+        double passages = 0;
+        double passagesInBudget = 0;
+        double hitsInBudget = 0;
+        double chars = 0;
+        List<Long> latencies = new ArrayList<>();
+        for (Question question : questionSet.questions()) {
+            RetrievalResult result = service.search(new RetrievalQuery(question.question(), NDCG_K, RetrievalMode.HYBRID, null));
+            latencies.add(result.timings().totalMs());
+            if (question.isNegative()) {
+                continue;
+            }
+            positives++;
+            List<RetrievedChunk> all = result.hits();
+            int inBudget = prompt.includedHits(all);
+            passages += all.size();
+            passagesInBudget += inBudget;
+            hitsInBudget += all.subList(0, inBudget).stream().filter(RetrievedChunk::isHit).count();
+            chars += all.stream().mapToInt(hit -> hit.text().length()).sum();
+            // Ranking metrics see matched chunks only, so expansion cannot flatter them.
+            int firstRelevant = all.stream().filter(RetrievedChunk::isHit).filter(hit -> isRelevant(hit, question))
+                    .mapToInt(RetrievedChunk::rank).min().orElse(-1);
+            if (firstRelevant > 0) {
+                reciprocalRanks += 1.0 / firstRelevant;
+                if (firstRelevant <= RECALL_K) {
+                    recallHits++;
+                }
+            }
+            if (all.stream().anyMatch(hit -> isRelevant(hit, question))) {
+                covered++;
+            }
+            if (all.subList(0, inBudget).stream().anyMatch(hit -> isRelevant(hit, question))) {
+                coveredInBudget++;
+            }
+        }
+        latencies.sort(null);
+        return new ExpansionSummary(expandNeighbours, recallHits / positives, reciprocalRanks / positives,
+                covered / positives, coveredInBudget / positives, passages / positives, passagesInBudget / positives,
+                hitsInBudget / positives, chars / positives, percentile(latencies, 0.5));
     }
 
     private ModeSummary evaluate(RetrievalMode mode, List<QuestionOutcome> outcomes) {

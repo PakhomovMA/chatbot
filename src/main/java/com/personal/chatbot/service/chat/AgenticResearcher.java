@@ -57,16 +57,19 @@ public class AgenticResearcher {
     private final GroundingInstructions instructions;
     private final RetrievalTraceStore traces;
     private final ChatbotProperties.Chat settings;
+    private final ChatbotProperties.Retrieval retrievalSettings;
     private final MeterRegistry meterRegistry;
 
     public AgenticResearcher(LockedSearchOperations searchOperations, GroundedAnswerPrompt prompt,
                              GroundingInstructions instructions, RetrievalTraceStore traces,
-                             ChatbotProperties.Chat settings, MeterRegistry meterRegistry) {
+                             ChatbotProperties.Chat settings, ChatbotProperties.Retrieval retrievalSettings,
+                             MeterRegistry meterRegistry) {
         this.searchOperations = searchOperations;
         this.prompt = prompt;
         this.instructions = instructions;
         this.traces = traces;
         this.settings = settings;
+        this.retrievalSettings = retrievalSettings;
         this.meterRegistry = meterRegistry;
     }
 
@@ -78,7 +81,11 @@ public class AgenticResearcher {
         EvidenceCollector collector = collectorFor(sink);
         ToolishRag rag = new ToolishRag(REFERENCE_NAME, TOOL_DESCRIPTION, searchOperations)
                 .withListener(collector)
-                .withSearchDefaults(new SearchDefaults(CosineScores.toLuceneScore(settings.agenticMinCosine()), 0.0, 0))
+                // Vector floor in Lucene's (1 + cos) / 2 scale; BM25 keeps Embabel's 0.0, where rank is the
+                // only meaningful cutoff. Neighbour expansion is the same corpus decision as in the
+                // deterministic branch, so both read chatbot.retrieval.expand-neighbours.
+                .withSearchDefaults(new SearchDefaults(CosineScores.toLuceneScore(settings.agenticMinCosine()),
+                        SearchDefaults.DEFAULT_TEXT_SIMILARITY_THRESHOLD, retrievalSettings.expandNeighbours()))
                 .withGoal(GOAL);
         AgenticDraft draft;
         try {

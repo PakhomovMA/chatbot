@@ -47,7 +47,8 @@ class ChatConfiguration {
     @Bean
     AgenticResearcher agenticResearcher(LockedSearchOperations searchOperations, GroundedAnswerPrompt prompt,
                                         GroundingInstructions instructions, RetrievalTraceStore traces,
-                                        ChatbotProperties.Chat chat, MeterRegistry meterRegistry) {
-        return new AgenticResearcher(searchOperations, prompt, instructions, traces, chat, meterRegistry);
+                                        ChatbotProperties.Chat chat, ChatbotProperties.Retrieval retrieval,
+                                        MeterRegistry meterRegistry) {
+        return new AgenticResearcher(searchOperations, prompt, instructions, traces, chat, retrieval, meterRegistry);
     }
 }

@@ -1,6 +1,7 @@
 package com.personal.chatbot.service.retrieval;
 
 import com.embabel.agent.rag.model.Chunk;
+import com.embabel.agent.rag.service.ResultExpander;
 import com.embabel.common.core.types.SimilarityResult;
 import com.embabel.common.core.types.TextSimilaritySearchRequest;
 import com.personal.chatbot.config.ChatbotProperties;
@@ -28,8 +29,9 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Deterministic hybrid retrieval (docs/system-plan.md §6, D4, INV-01): runs the vector and BM25
- * facets against the Lucene store, hands them to {@link HitFusion}, decides whether the evidence is
- * good enough and records timings, metrics and a {@link RetrievalTraceStore} entry.
+ * facets against the Lucene store, hands them to {@link HitFusion}, optionally widens each hit with
+ * its section neighbours ({@link NeighbourExpansion}), decides whether the evidence is good enough
+ * and records timings, metrics and a {@link RetrievalTraceStore} entry.
  *
  * <p>Score conventions: Lucene reports cosine as {@code (1 + cos) / 2}; callers and configuration
  * work in plain cosine, converted through {@link CosineScores}. BM25 comes back normalised to
@@ -44,6 +46,7 @@ public class RetrievalService implements Retriever {
     private final RetrievalTraceStore traces;
     private final ChatbotProperties.Retrieval settings;
     private final HitFusion fusion;
+    private final NeighbourExpansion expansion;
     private final MeterRegistry meterRegistry;
 
     public RetrievalService(LuceneIndexStore indexStore, RetrievalTraceStore traces, ChatbotProperties.Retrieval settings,
@@ -52,6 +55,8 @@ public class RetrievalService implements Retriever {
         this.traces = traces;
         this.settings = settings;
         this.fusion = new HitFusion(settings.rrfK());
+        this.expansion = new NeighbourExpansion(
+                (chunkId, each) -> indexStore.expand(chunkId, ResultExpander.Method.SEQUENCE, each), settings.expandNeighbours());
         this.meterRegistry = meterRegistry;
     }
 
@@ -71,8 +76,9 @@ public class RetrievalService implements Retriever {
         List<SimilarityResult<Chunk>> lexical = mode == RetrievalMode.VECTOR ? List.of() : textSearch(text, candidates);
         long textMs = millisSince(textStart);
 
+        // Expansion is timed with fusion: both are post-processing of the two facet queries.
         long fusionStart = System.nanoTime();
-        List<RetrievedChunk> hits = fusion.fuse(mode, vector, lexical, documentFilter, topK);
+        List<RetrievedChunk> hits = expansion.expand(fusion.fuse(mode, vector, lexical, documentFilter, topK));
         long fusionMs = millisSince(fusionStart);
 
         double maxVector = hits.stream().map(RetrievedChunk::vectorScore).filter(Objects::nonNull)
@@ -84,7 +90,7 @@ public class RetrievalService implements Retriever {
         Timer.builder("chatbot.retrieval").tag("mode", mode.name().toLowerCase()).register(meterRegistry)
                 .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
         DistributionSummary.builder("chatbot.retrieval.hits").register(meterRegistry).record(hits.size());
-        log.debug("Retrieval [{}] mode={} '{}' -> {} hits (maxCosine={}, sufficient={}) in {} ms", result.traceId(), mode,
+        log.debug("Retrieval [{}] mode={} '{}' -> {} passages (maxCosine={}, sufficient={}) in {} ms", result.traceId(), mode,
                 text, hits.size(), String.format("%.3f", maxVector), sufficient, result.timings().totalMs());
         return result;
     }
