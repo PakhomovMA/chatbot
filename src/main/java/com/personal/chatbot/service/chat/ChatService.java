@@ -96,10 +96,20 @@ public class ChatService {
         long started = System.nanoTime();
         String conversationId = request.conversationId() != null && !request.conversationId().isBlank()
                 ? request.conversationId() : UUID.randomUUID().toString();
+        // The lease serialises the requests of this conversation: the next one reads a history that
+        // already contains this exchange instead of a half-written one.
+        try (ConversationStore.Lease conversation = conversations.begin(conversationId)) {
+            return answer(request, sink, conversation, started);
+        }
+    }
+
+    private ChatResponse answer(ChatRequest request, @Nullable AnswerStreamSink sink, ConversationStore.Lease conversation,
+                                long started) {
+        String conversationId = conversation.conversationId();
         String messageId = UUID.randomUUID().toString();
         String question = request.message().strip();
         ChatRequest.Options options = request.optionsOrDefault();
-        List<ConversationTurn> history = conversations.history(conversationId);
+        List<ConversationTurn> history = conversation.history();
 
         AnswerMode mode = options.mode() != null ? options.mode() : defaultMode;
         UserQuestion input = new UserQuestion(conversationId, messageId, question, history, options.topK(), options.documentIds(), mode, sink);
@@ -114,8 +124,10 @@ public class ChatService {
         RetrievalResult diagnostics = options.diagnostics() ? traces.find(answer.retrievalTraceId()).orElse(null) : null;
 
         Instant now = clock.instant();
-        conversations.append(conversationId, ConversationTurn.user(question, now));
-        conversations.append(conversationId, ConversationTurn.assistant(answer.answer(), answer.citations(), now));
+        if (!conversation.record(ConversationTurn.user(question, now),
+                ConversationTurn.assistant(answer.answer(), answer.citations(), now))) {
+            log.info("Conversation {} was deleted while [{}] ran; the exchange was not stored", conversationId, messageId);
+        }
         Timer.builder("chatbot.chat").tag("grounding", answer.grounding().name().toLowerCase())
                 .tag("mode", sink != null ? "stream" : "sync").tag("answerMode", mode.name().toLowerCase()).register(meterRegistry)
                 .record(totalMs, TimeUnit.MILLISECONDS);
