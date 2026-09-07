@@ -15,22 +15,67 @@ java {
 }
 
 repositories {
+    mavenLocal()
     mavenCentral()
 }
 
-dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter'
-    compileOnly 'org.projectlombok:lombok'
-    developmentOnly 'org.springframework.boot:spring-boot-devtools'
-    developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
-    annotationProcessor 'org.projectlombok:lombok'
-    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
-    testImplementation 'org.springframework.boot:spring-boot-starter-test'
-    testCompileOnly 'org.projectlombok:lombok'
-    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-    testAnnotationProcessor 'org.projectlombok:lombok'
+ext {
+    // Verified against Maven Central POMs (see docs/system-plan.md §1.2):
+    // Embabel 1.5.1 is built on Spring Boot 4.1.0 / Spring AI 2.0.0 / Lucene 9.11.1.
+    embabelVersion = '1.5.1'
+    // Same versions Embabel's own ONNX module pins; used by the custom EmbeddingService (Phase 1).
+    onnxRuntimeVersion = '1.22.0'
+    djlTokenizersVersion = '0.32.0'
 }
 
+dependencies {
+    implementation platform("com.embabel.agent:embabel-agent-dependencies:${embabelVersion}")
+
+    // Spring
+    implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+
+    // Embabel: platform, Ollama models, Lucene RAG store, Tika parsing.
+    // Deliberately NOT embabel-agent-starter-onnx: it downloads MiniLM and is incompatible with EmbeddingGemma.
+    implementation 'com.embabel.agent:embabel-agent-starter'
+    implementation 'com.embabel.agent:embabel-agent-starter-ollama'
+    implementation 'com.embabel.agent:embabel-agent-rag-lucene'
+    implementation 'com.embabel.agent:embabel-agent-rag-tika'
+
+    // In-process embeddings (EmbeddingGemma ONNX)
+    implementation "com.microsoft.onnxruntime:onnxruntime:${onnxRuntimeVersion}"
+    implementation "ai.djl.huggingface:tokenizers:${djlTokenizersVersion}"
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    annotationProcessor 'org.springframework.boot:spring-boot-configuration-processor'
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'com.embabel.agent:embabel-agent-test'
+    testCompileOnly 'org.projectlombok:lombok'
+    testAnnotationProcessor 'org.projectlombok:lombok'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// JDK 24+ (JEP 472) warns on JNI native access from the unnamed module (ONNX Runtime, DJL tokenizers).
+def nativeAccessJvmArgs = ['--enable-native-access=ALL-UNNAMED']
+
+// Test tiers (docs/system-plan.md §11). Default `test` runs only tests that need neither
+// model files nor a running Ollama. Include a tier with: ./gradlew test -PincludeTags=model,e2e
 tasks.named('test') {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        if (project.hasProperty('includeTags')) {
+            includeTags project.property('includeTags').split(',')
+        } else {
+            excludeTags 'model', 'eval', 'e2e', 'ui'
+        }
+    }
+    jvmArgs nativeAccessJvmArgs
+}
+
+tasks.named('bootRun') {
+    jvmArgs nativeAccessJvmArgs
 }

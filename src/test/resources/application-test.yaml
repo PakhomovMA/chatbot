@@ -1,0 +1,14 @@
+# Test profile: no Ollama, no model files. LLM access is mocked by EmbabelMockitoIntegrationTest.
+chatbot:
+  data-dir: ${java.io.tmpdir}/chatbot-test
+
+embabel:
+  agent:
+    platform:
+      models:
+        ollama:
+          # Empty base-url => Embabel skips Ollama model discovery entirely (OllamaModelsConfig).
+          base-url: ""
+
+server:
+  port: 0

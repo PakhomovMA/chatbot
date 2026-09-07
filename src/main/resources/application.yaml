@@ -1,3 +1,35 @@
 spring:
   application:
     name: chatbot
+
+# Local-first: bind to loopback only (docs/system-plan.md D13).
+server:
+  address: 127.0.0.1
+  port: 8080
+
+chatbot:
+  # Root for Lucene index, document registry, uploaded originals and model files (§9).
+  data-dir: ${user.home}/.chatbot
+
+embabel:
+  models:
+    # Ollama models are registered under their raw Ollama name (§1.3 p.7).
+    default-llm: qwen3:14b
+  agent:
+    platform:
+      models:
+        ollama:
+          base-url: http://localhost:11434
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+logging:
+  level:
+    com.embabel: INFO
