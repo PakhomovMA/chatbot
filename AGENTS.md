@@ -102,4 +102,4 @@ At the end of the phase report, include the resulting commit hash.
 - Runtime prerequisites and commands: `README.md`
 - Reference Embabel project (agents, prompt templates, observability patterns; **Embabel 1.0.0**, API differs):
   `~/IdeaProjects/analyst-agent`
-- When you hit a wrong assumption in this file, propose a CLAUDE.md correction.
+- When you hit a wrong assumption in this file, propose a AGENTS.md correction.
