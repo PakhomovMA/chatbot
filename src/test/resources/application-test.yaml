@@ -4,6 +4,8 @@ chatbot:
   data-dir: ${java.io.tmpdir}/chatbot-test
   embedding:
     provider: fake
+  index:
+    in-memory: true
 
 embabel:
   agent:

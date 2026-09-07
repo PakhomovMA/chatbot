@@ -31,6 +31,15 @@ chatbot:
   knowledge:
     max-upload-size: 20MB
     allowed-extensions: [md, markdown, txt, html, htm, pdf, docx]
+  index:
+    dir: ${chatbot.data-dir}/index      # lucene/ + manifest.json
+    in-memory: false
+    max-chunk-size: 1200                 # characters (D8); part of the index manifest
+    overlap-size: 150
+    embedding-batch-size: 32
+  ingestion:
+    auto-resume: true                    # queue pending documents at startup
+    retry-interrupted: true              # re-queue documents interrupted by a crash
 
 spring.servlet.multipart:
   max-file-size: 20MB

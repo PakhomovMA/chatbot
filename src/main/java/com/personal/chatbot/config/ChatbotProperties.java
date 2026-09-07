@@ -26,7 +26,9 @@ import java.util.Set;
 public record ChatbotProperties(
         @NotNull Path dataDir,
         @Valid @DefaultValue Embedding embedding,
-        @Valid @DefaultValue Knowledge knowledge
+        @Valid @DefaultValue Knowledge knowledge,
+        @Valid @DefaultValue Index index,
+        @Valid @DefaultValue Ingestion ingestion
 ) {
 
     /**
@@ -71,6 +73,32 @@ public record ChatbotProperties(
     public record Knowledge(
             @DefaultValue("20MB") DataSize maxUploadSize,
             @DefaultValue({"md", "markdown", "txt", "html", "htm", "pdf", "docx"}) Set<String> allowedExtensions
+    ) {
+    }
+
+    /**
+     * @param dir                directory holding {@code lucene/} and {@code manifest.json}; defaults to {@code <data-dir>/index}.
+     * @param inMemory           keep the index in memory only (tests, experiments).
+     * @param maxChunkSize       chunk size in characters (docs/system-plan.md D8).
+     * @param overlapSize        overlap between consecutive chunks of one section.
+     * @param embeddingBatchSize chunks per embedding call during ingestion.
+     */
+    public record Index(
+            @Nullable Path dir,
+            @DefaultValue("false") boolean inMemory,
+            @Min(100) @DefaultValue("1200") int maxChunkSize,
+            @Min(0) @DefaultValue("150") int overlapSize,
+            @Min(1) @DefaultValue("32") int embeddingBatchSize
+    ) {
+    }
+
+    /**
+     * @param autoResume        on startup, queue documents that still need indexing (uploaded, pending re-index).
+     * @param retryInterrupted  on startup, also re-queue documents whose ingestion was interrupted by a crash.
+     */
+    public record Ingestion(
+            @DefaultValue("true") boolean autoResume,
+            @DefaultValue("true") boolean retryInterrupted
     ) {
     }
 

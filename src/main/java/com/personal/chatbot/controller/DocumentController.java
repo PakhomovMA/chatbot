@@ -6,6 +6,7 @@ import com.personal.chatbot.models.knowledge.dto.DocumentPage;
 import com.personal.chatbot.models.knowledge.dto.DocumentStatusView;
 import com.personal.chatbot.models.knowledge.dto.UploadResponse;
 import com.personal.chatbot.service.knowledge.DocumentService;
+import com.personal.chatbot.service.knowledge.IngestionService;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -30,9 +31,11 @@ import java.io.UncheckedIOException;
 public class DocumentController {
 
     private final DocumentService documentService;
+    private final IngestionService ingestionService;
 
-    public DocumentController(DocumentService documentService) {
+    public DocumentController(DocumentService documentService, IngestionService ingestionService) {
         this.documentService = documentService;
+        this.ingestionService = ingestionService;
     }
 
     /** 202 for a new document (indexing is asynchronous), 200 when the content was already known. */
@@ -65,6 +68,13 @@ public class DocumentController {
     @GetMapping("/{id}/status")
     public DocumentStatusView status(@PathVariable String id) {
         return DocumentStatusView.of(documentService.get(id));
+    }
+
+    /** Re-parses and re-indexes the current version of one document. */
+    @PostMapping("/{id}/reindex")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    public DocumentStatusView reindex(@PathVariable String id) {
+        return ingestionService.reindex(id);
     }
 
     @DeleteMapping("/{id}")

@@ -8,9 +8,7 @@ import com.personal.chatbot.models.knowledge.Document;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
 import com.personal.chatbot.models.knowledge.dto.DocumentPage;
 import com.personal.chatbot.models.knowledge.dto.UploadResponse;
-import com.personal.chatbot.service.embedding.PromptedEmbeddingService;
-import com.personal.chatbot.support.FakeTextEmbedder;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.personal.chatbot.models.knowledge.DocumentEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -21,6 +19,8 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,6 +31,7 @@ class DocumentServiceTest {
     @TempDir
     Path dir;
 
+    private final List<Object> events = new ArrayList<>();
     private DocumentRegistry registry;
     private BlobStore blobStore;
     private DocumentService service;
@@ -41,10 +42,11 @@ class DocumentServiceTest {
         blobStore = new BlobStore(dir.resolve("blobs"));
         ChatbotProperties properties = new ChatbotProperties(dir,
                 new ChatbotProperties.Embedding("fake", null, null, 16, 2, true),
-                new ChatbotProperties.Knowledge(DataSize.ofKilobytes(1), Set.of("md", "txt")));
-        var embeddings = new PromptedEmbeddingService(new FakeTextEmbedder(8), 4, 1, true, new SimpleMeterRegistry());
-        service = new DocumentService(registry, blobStore, embeddings, properties,
-                Clock.fixed(Instant.parse("2026-09-07T10:00:00Z"), ZoneOffset.UTC));
+                new ChatbotProperties.Knowledge(DataSize.ofKilobytes(1), Set.of("md", "txt")),
+                new ChatbotProperties.Index(null, true, 1200, 150, 32),
+                new ChatbotProperties.Ingestion(true, true));
+        service = new DocumentService(registry, blobStore, properties,
+                Clock.fixed(Instant.parse("2026-09-07T10:00:00Z"), ZoneOffset.UTC), events::add);
     }
 
     private static DocumentService.Upload upload(String name, String content) {
@@ -135,12 +137,13 @@ class DocumentServiceTest {
     }
 
     @Test
-    void knowledgeBaseStatusSummarises() {
-        service.upload(upload("a.md", "bytes"));
-        var status = service.knowledgeBaseStatus();
-        assertThat(status.documentCount()).isEqualTo(1);
-        assertThat(status.documentsByStatus()).containsEntry(DocumentStatus.UPLOADED, 1L);
-        assertThat(status.embedding().provider()).isEqualTo("fake");
-        assertThat(status.embedding().fingerprint()).startsWith("fake/");
+    void publishesLifecycleEvents() {
+        String id = service.upload(upload("a.md", "bytes")).documentId();
+        service.replaceContent(id, upload("a.md", "other bytes"));
+        service.delete(id);
+        assertThat(events).containsExactly(
+                new DocumentEvent.Uploaded(id, 1),
+                new DocumentEvent.ContentReplaced(id, 2),
+                new DocumentEvent.Deleted(id));
     }
 }

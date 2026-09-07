@@ -5,16 +5,16 @@ import com.personal.chatbot.exceptions.DocumentNotFoundException;
 import com.personal.chatbot.exceptions.InvalidUploadException;
 import com.personal.chatbot.exceptions.InvalidUploadException.Reason;
 import com.personal.chatbot.models.knowledge.Document;
+import com.personal.chatbot.models.knowledge.DocumentEvent;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
 import com.personal.chatbot.models.knowledge.StagedBlob;
 import com.personal.chatbot.models.knowledge.dto.DocumentPage;
-import com.personal.chatbot.models.knowledge.dto.KnowledgeBaseStatus;
 import com.personal.chatbot.models.knowledge.dto.UploadResponse;
-import com.personal.chatbot.service.embedding.KnowledgeEmbeddingService;
 import com.personal.chatbot.utils.Filenames;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
@@ -26,8 +26,8 @@ import java.util.Set;
 
 /**
  * Knowledge-base document management (docs/system-plan.md D5): validation, de-duplication by
- * content hash (INV-04), versioned replacement and deletion. Indexing is triggered elsewhere
- * (Phase 3); here a new or replaced document simply lands in {@link DocumentStatus#UPLOADED}.
+ * content hash (INV-04), versioned replacement and deletion. Indexing is driven by
+ * {@link IngestionService}, which reacts to the {@link DocumentEvent}s published here.
  */
 @Service
 public class DocumentService {
@@ -51,17 +51,17 @@ public class DocumentService {
 
     private final DocumentRegistry registry;
     private final BlobStore blobStore;
-    private final KnowledgeEmbeddingService embeddingService;
     private final ChatbotProperties.Knowledge settings;
     private final Clock clock;
+    private final ApplicationEventPublisher events;
 
-    public DocumentService(DocumentRegistry registry, BlobStore blobStore, KnowledgeEmbeddingService embeddingService,
-                           ChatbotProperties properties, Clock clock) {
+    public DocumentService(DocumentRegistry registry, BlobStore blobStore, ChatbotProperties properties, Clock clock,
+                           ApplicationEventPublisher events) {
         this.registry = registry;
         this.blobStore = blobStore;
-        this.embeddingService = embeddingService;
         this.settings = properties.knowledge();
         this.clock = clock;
+        this.events = events;
     }
 
     public UploadResponse upload(Upload upload) {
@@ -80,6 +80,7 @@ public class DocumentService {
             blobStore.commit(staged, document.id(), document.version(), Filenames.extension(filename));
             registry.save(document);
             log.info("Registered document {} '{}' ({} bytes, {})", document.id(), title, staged.sizeBytes(), filename);
+            events.publishEvent(new DocumentEvent.Uploaded(document.id(), document.version()));
             return new UploadResponse(document.id(), document.status(), document.version(), false);
         } catch (RuntimeException e) {
             blobStore.discard(staged);
@@ -99,7 +100,6 @@ public class DocumentService {
             }
             registry.findByContentHash(staged.contentHash()).ifPresent(other -> {
                 if (!other.id().equals(documentId)) {
-                    blobStore.discard(staged);
                     throw new InvalidUploadException(Reason.BAD_FILENAME,
                             "Identical content is already registered as document " + other.id());
                 }
@@ -110,6 +110,7 @@ public class DocumentService {
             registry.save(replaced);
             blobStore.deleteVersion(documentId, current.version());
             log.info("Replaced content of document {}: version {} -> {}", documentId, current.version(), replaced.version());
+            events.publishEvent(new DocumentEvent.ContentReplaced(replaced.id(), replaced.version()));
             return new UploadResponse(replaced.id(), replaced.status(), replaced.version(), false);
         } catch (RuntimeException e) {
             blobStore.discard(staged);
@@ -136,14 +137,9 @@ public class DocumentService {
     public void delete(String documentId) {
         Document document = get(documentId);
         registry.delete(document.id());
+        events.publishEvent(new DocumentEvent.Deleted(document.id()));
         blobStore.delete(document.id());
         log.info("Deleted document {} '{}'", document.id(), document.title());
-    }
-
-    public KnowledgeBaseStatus knowledgeBaseStatus() {
-        return new KnowledgeBaseStatus(registry.count(), registry.countByStatus(),
-                new KnowledgeBaseStatus.EmbeddingInfo(embeddingService.provider(), embeddingService.modelName(),
-                        embeddingService.dimensions(), embeddingService.fingerprint().value()));
     }
 
     private String validateName(Upload upload) {

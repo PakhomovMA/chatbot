@@ -3,6 +3,7 @@ package com.personal.chatbot.service.embedding;
 import com.embabel.common.ai.model.EmbeddingService;
 import com.embabel.common.ai.model.ModelType;
 import com.embabel.common.ai.model.PricingModel;
+import com.personal.chatbot.utils.EmbeddingAudit;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
@@ -27,7 +28,14 @@ public final class EmbabelEmbeddingServiceAdapter implements EmbeddingService {
 
     @Override
     public List<float[]> embed(List<String> texts) {
-        return delegate.embed(texts);
+        try {
+            List<float[]> vectors = delegate.embed(texts);
+            EmbeddingAudit.vectorsProduced(vectors.size());
+            return vectors;
+        } catch (RuntimeException e) {
+            EmbeddingAudit.failed(e);
+            throw e;
+        }
     }
 
     @Override

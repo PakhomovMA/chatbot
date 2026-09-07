@@ -3,10 +3,9 @@
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
 Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
 
-Current state: **Phase 2** (document management) — the application starts, discovers Ollama models,
-loads EmbeddingGemma in-process (ONNX Runtime), exposes Actuator health with the embedding
-fingerprint and manages uploaded documents (registry + stored originals). Indexing and chat are
-not implemented yet.
+Current state: **Phase 3** (ingestion + Lucene index) — uploaded documents are parsed (Tika),
+chunked, embedded with EmbeddingGemma and indexed into an embedded Lucene index that survives
+restarts. Retrieval API and chat are not implemented yet.
 
 ## Prerequisites
 
@@ -62,7 +61,7 @@ Test tiers are JUnit tags: `model`, `eval`, `e2e`, `ui` (excluded by default). T
 profile (`src/test/resources/application-test.yaml`) disables Ollama discovery and mocks LLM calls
 via Embabel's `EmbabelMockitoIntegrationTest`.
 
-## Document API (Phase 2)
+## Document API
 
 | Endpoint | Purpose |
 |---|---|
@@ -73,9 +72,29 @@ via Embabel's `EmbabelMockitoIntegrationTest`.
 | `DELETE /api/documents/{id}` | Remove document and its stored original |
 | `GET /api/knowledge-base/status` | Counts by status and the active embedding fingerprint |
 
+| `POST /api/documents/{id}/reindex` | Re-parse and re-index one document |
+| `POST /api/knowledge-base/reindex` | Drop the index and re-ingest everything (also the fix for an `INCOMPATIBLE` index) |
+| `GET /api/knowledge-base/events` | Server-sent `document-status` events for the admin UI |
+
 Accepted types: md, markdown, txt, html, htm, pdf, docx; max 20 MB (`chatbot.knowledge.*`).
-Errors are RFC 9457 problem details. Data lives under `~/.chatbot/documents/registry.json` and
-`~/.chatbot/blobs/<documentId>/v<n>/`.
+Errors are RFC 9457 problem details.
+
+## Ingestion and index
+
+Upload → `PARSING` → `INDEXING` → `READY` (or `FAILED` with the failing stage) is driven by a single
+background worker; every document is indexed all-or-nothing. Data under `~/.chatbot`:
+
+| Path | Content |
+|---|---|
+| `documents/registry.json` | Document metadata and statuses (atomic writes, `.bak` fallback) |
+| `blobs/<documentId>/v<n>/original.<ext>` | Uploaded originals |
+| `index/lucene/` | Lucene index (BM25 + HNSW vectors) |
+| `index/manifest.json` | Embedding fingerprint and chunker settings the index was built with |
+
+If the embedding model or chunking settings change, the index becomes `INCOMPATIBLE`: nothing is
+searched or ingested until `POST /api/knowledge-base/reindex`. A corrupt index directory is moved
+aside as `lucene.corrupt-<timestamp>` at startup and documents are re-queued automatically.
+Chunk ids are `<documentId>:<version>:<sequence>`; chunk text carries `Document: <title> › <section>`.
 
 ## Key configuration (`src/main/resources/application.yaml`)
 
