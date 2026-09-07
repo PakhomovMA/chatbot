@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Citation } from '@/api/types'
+import { renderQuote } from '@/utils/markdown'
 
 defineProps<{ citations: Citation[]; highlighted?: number }>()
 </script>
@@ -14,7 +15,7 @@ defineProps<{ citations: Citation[]; highlighted?: number }>()
         <strong>[{{ c.marker }}]</strong> {{ c.documentTitle }}<span v-if="c.sectionPath.length"> › {{ c.sectionPath.join(' › ') }}</span>
         <span class="muted"> · score {{ c.score.toFixed(3) }}</span>
       </div>
-      <blockquote>{{ c.quote }}</blockquote>
+      <blockquote v-html="renderQuote(c.quote)"></blockquote>
     </article>
   </section>
 </template>

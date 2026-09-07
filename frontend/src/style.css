@@ -51,14 +51,29 @@ pre code { display: block; padding: 10px; overflow-x: auto; }
 .bubble p { margin: 0 0 8px; }
 .bubble p:last-child { margin-bottom: 0; }
 sup.cite { color: var(--accent); cursor: pointer; font-weight: 600; margin-left: 1px; }
-.composer { display: flex; gap: 10px; margin-top: 12px; }
-.composer textarea { flex: 1; resize: none; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font: inherit; min-height: 48px; }
+.composer { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.composer textarea { width: 100%; resize: vertical; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font: inherit; min-height: 64px; }
+/* Controls sit on their own wrapping row: in one row with the textarea the mode hint squeezed the input to nothing. */
+.composer-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.composer-controls .btn { white-space: nowrap; }
+.composer-controls .check { display: flex; align-items: center; gap: 4px; }
+.composer-controls .hint { flex: 1 1 220px; min-width: 0; }
 .chat-column { display: flex; flex-direction: column; min-height: 0; }
 .citations { overflow-y: auto; }
 .citation { border-top: 1px solid var(--border); padding: 10px 0; }
 .citation:first-of-type { border-top: 0; }
 .citation .where { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.citation blockquote { margin: 4px 0 0; padding-left: 10px; border-left: 3px solid var(--accent-soft); white-space: pre-wrap; font-size: 13px; }
+.citation blockquote { margin: 4px 0 0; padding-left: 10px; border-left: 3px solid var(--accent-soft); font-size: 13px; overflow-wrap: anywhere; }
+/* A quote is a fragment of a document, not a page: its headings stay inline-sized in the panel. */
+.citation blockquote :is(h1, h2, h3, h4, h5, h6) { font-size: 13px; margin: 8px 0 2px; }
+.citation blockquote p { margin: 0 0 6px; }
+.citation blockquote > :last-child { margin-bottom: 0; }
+.citation blockquote :is(ul, ol) { margin: 4px 0; padding-left: 18px; }
+.citation blockquote pre { white-space: pre-wrap; }
+/* A table from a document is wider than the panel: let it scroll instead of crushing its columns. */
+.citation blockquote { overflow-x: auto; }
+.citation blockquote table { border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+.citation blockquote :is(th, td) { border: 1px solid var(--border); padding: 3px 6px; text-align: left; }
 .typing { font-style: italic; color: var(--muted); }
 
 /* knowledge base */

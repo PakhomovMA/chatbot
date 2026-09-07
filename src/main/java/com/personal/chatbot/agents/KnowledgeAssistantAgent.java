@@ -13,6 +13,7 @@ import com.embabel.common.ai.model.LlmOptions;
 import com.personal.chatbot.config.ChatbotProperties;
 import com.personal.chatbot.exceptions.ChatCancelledException;
 import com.personal.chatbot.models.agent.AgenticDraft;
+import com.personal.chatbot.models.agent.AnswerAttempt;
 import com.personal.chatbot.models.agent.AnswerStreamSink;
 import com.personal.chatbot.models.agent.Evidence;
 import com.personal.chatbot.models.agent.GroundedAnswer;
@@ -49,11 +50,13 @@ import java.util.function.BooleanSupplier;
  * chosen by the {@code agenticMode} / {@code deterministicMode} conditions:
  * <ul>
  *   <li><b>deterministic</b>: {@code retrieveEvidence} (one hybrid retrieval, INV-01) → {@code draftAnswer}
- *       (structured or streamed) → {@code verifyGrounding};</li>
+ *       (structured or streamed);</li>
  *   <li><b>agentic</b>: {@code researchIteratively} lets the model search the knowledge base itself through
  *       Embabel {@link ToolishRag} over the same Lucene store; every chunk it sees is captured by an
- *       {@link EvidenceCollector}, so {@code verifyAgenticGrounding} applies the same citation check.</li>
+ *       {@link EvidenceCollector}.</li>
  * </ul>
+ * Both branches end in an {@link AnswerAttempt} and share the single goal {@code verifyGrounding}, which
+ * applies the same citation check either way.
  * Retrieval infrastructure is untouched in both modes (INV-06, INV-07); the model never reaches Lucene
  * except through the store's guarded search operations.
  */
@@ -115,7 +118,11 @@ public class KnowledgeAssistantAgent {
     }
 
     @Action(description = "Draft an answer that uses only the retrieved evidence", pre = DETERMINISTIC_CONDITION)
-    public GroundedAnswerDraft draftAnswer(Evidence evidence, OperationContext context) {
+    public AnswerAttempt draftAnswer(Evidence evidence, OperationContext context) {
+        return new AnswerAttempt(evidence, writeDraft(evidence, context), prompt.includedHits(evidence.hits()));
+    }
+
+    private GroundedAnswerDraft writeDraft(Evidence evidence, OperationContext context) {
         UserQuestion question = evidence.question();
         if (evidence.isEmpty()) {
             GroundedAnswerDraft draft = GroundedAnswerDraft.insufficient(NO_EVIDENCE_ANSWER, "No relevant passages were retrieved.");
@@ -175,7 +182,7 @@ public class KnowledgeAssistantAgent {
      * evidence only exists after the tool loop has finished.
      */
     @Action(description = "Research the question with the knowledge-base search tools and draft an answer", pre = AGENTIC_CONDITION)
-    public AgenticResearch researchIteratively(UserQuestion question, OperationContext context) {
+    public AnswerAttempt researchIteratively(UserQuestion question, OperationContext context) {
         question.notifyStage(STAGE_RESEARCHING);
         long started = System.nanoTime();
         AnswerStreamSink sink = question.stream();
@@ -225,34 +232,22 @@ public class KnowledgeAssistantAgent {
         }
         log.info("Agentic research for [{}]: {} searches, {} distinct chunks, sufficient={}", question.messageId(),
                 collector.steps().size(), seen.size(), draft.evidenceSufficient());
-        return new AgenticResearch(new Evidence(question, trace), numbered);
-    }
-
-    /**
-     * Evidence and draft produced together by the tool loop. A dedicated type (rather than two
-     * blackboard objects) because GOAP plans from declared effects: the planner must see one action
-     * whose output satisfies the goal action's input.
-     */
-    public record AgenticResearch(Evidence evidence, GroundedAnswerDraft draft) {
-    }
-
-    @AchievesGoal(description = "A grounded answer whose citations were verified against the evidence the model retrieved itself")
-    @Action(description = "Verify the researched draft's citations against everything the model saw", readOnly = true, pre = AGENTIC_CONDITION)
-    public GroundedAnswer verifyAgenticGrounding(AgenticResearch research) {
-        Evidence evidence = research.evidence();
-        evidence.question().notifyStage(STAGE_VERIFYING);
-        GroundedAnswer answer = verifier.verify(evidence, research.draft(), evidence.hits().size());
-        log.debug("Agentic answer for [{}]: {} with {} citations", evidence.question().messageId(), answer.grounding(), answer.citations().size());
-        return answer;
+        // Everything the model saw is evidence, so all of it counts as shown passages.
+        return new AnswerAttempt(new Evidence(question, trace), numbered, seen.size());
     }
 
     // ---- shared verification -----------------------------------------------------------------------
 
+    /**
+     * The single goal of the agent: both branches produce an {@link AnswerAttempt}, so the planner
+     * always has a reachable goal and never logs an unreachable one on replan.
+     */
     @AchievesGoal(description = "A grounded answer whose citations were verified against the evidence")
-    @Action(description = "Verify the draft's citations against the evidence and classify grounding", readOnly = true, pre = DETERMINISTIC_CONDITION)
-    public GroundedAnswer verifyGrounding(Evidence evidence, GroundedAnswerDraft draft) {
+    @Action(description = "Verify the draft's citations against the evidence and classify grounding", readOnly = true)
+    public GroundedAnswer verifyGrounding(AnswerAttempt attempt) {
+        Evidence evidence = attempt.evidence();
         evidence.question().notifyStage(STAGE_VERIFYING);
-        GroundedAnswer answer = verifier.verify(evidence, draft, prompt.includedHits(evidence.hits()));
+        GroundedAnswer answer = verifier.verify(evidence, attempt.draft(), attempt.passagesShown());
         log.debug("Answer for [{}]: {} with {} citations", evidence.question().messageId(), answer.grounding(), answer.citations().size());
         return answer;
     }
