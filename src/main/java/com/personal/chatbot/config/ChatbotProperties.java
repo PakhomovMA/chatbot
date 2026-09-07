@@ -1,7 +1,12 @@
 package com.personal.chatbot.config;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
 import java.nio.file.Path;
@@ -9,10 +14,55 @@ import java.nio.file.Path;
 /**
  * Application-level settings under the {@code chatbot.*} prefix.
  *
- * @param dataDir root directory for persistent local state: Lucene index, document registry,
- *                uploaded originals and embedding model files (docs/system-plan.md §9).
+ * @param dataDir   root directory for persistent local state: Lucene index, document registry,
+ *                  uploaded originals and embedding model files (docs/system-plan.md §9).
+ * @param embedding embedding provider settings (docs/system-plan.md D3).
  */
 @Validated
 @ConfigurationProperties(prefix = "chatbot")
-public record ChatbotProperties(@NotNull Path dataDir) {
+public record ChatbotProperties(
+        @NotNull Path dataDir,
+        @Valid @DefaultValue Embedding embedding
+) {
+
+    /**
+     * @param provider             {@code onnx} (in-process EmbeddingGemma) or {@code ollama} (fallback).
+     *                             Any other value creates no embedding bean; tests use {@code fake}.
+     * @param batchSize            texts per backend call.
+     * @param maxConcurrentBatches backend calls allowed to run in parallel (CPU protection).
+     * @param normalize            L2-normalise vectors after the backend (Lucene uses cosine).
+     */
+    public record Embedding(
+            @NotBlank @DefaultValue("onnx") String provider,
+            @Valid @DefaultValue Onnx onnx,
+            @Valid @DefaultValue Ollama ollama,
+            @Min(1) @DefaultValue("16") int batchSize,
+            @Min(1) @DefaultValue("2") int maxConcurrentBatches,
+            @DefaultValue("true") boolean normalize
+    ) {
+    }
+
+    /**
+     * @param modelDir       directory with {@code model.onnx}, {@code model.onnx_data}, {@code tokenizer.json};
+     *                       defaults to {@code <data-dir>/models/embeddinggemma-300m} when null.
+     * @param maxTokens      tokenizer truncation limit (EmbeddingGemma context is 2048).
+     * @param intraOpThreads ONNX Runtime intra-op threads; 0 = min(4, available processors).
+     * @param dimensions     expected output dimensionality; startup fails if the model disagrees.
+     */
+    public record Onnx(
+            @Nullable Path modelDir,
+            @NotBlank @DefaultValue("model.onnx") String modelFile,
+            @NotBlank @DefaultValue("tokenizer.json") String tokenizerFile,
+            @NotBlank @DefaultValue("embeddinggemma-300m") String modelName,
+            @Min(16) @DefaultValue("2048") int maxTokens,
+            @Min(0) @DefaultValue("0") int intraOpThreads,
+            @Min(1) @DefaultValue("768") int dimensions
+    ) {
+    }
+
+    public record Ollama(
+            @NotBlank @DefaultValue("http://localhost:11434") String baseUrl,
+            @NotBlank @DefaultValue("embeddinggemma:300m") String model
+    ) {
+    }
 }

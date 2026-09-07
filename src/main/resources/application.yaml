@@ -10,6 +10,23 @@ server:
 chatbot:
   # Root for Lucene index, document registry, uploaded originals and model files (§9).
   data-dir: ${user.home}/.chatbot
+  embedding:
+    # onnx = in-process EmbeddingGemma (default), ollama = fallback via a running Ollama (D3).
+    provider: onnx
+    batch-size: 16
+    max-concurrent-batches: 2
+    normalize: true
+    onnx:
+      model-dir: ${chatbot.data-dir}/models/embeddinggemma-300m
+      model-file: model.onnx
+      tokenizer-file: tokenizer.json
+      model-name: embeddinggemma-300m
+      max-tokens: 2048
+      intra-op-threads: 0   # 0 = min(4, cores)
+      dimensions: 768
+    ollama:
+      base-url: http://localhost:11434
+      model: embeddinggemma:300m
 
 embabel:
   models:
