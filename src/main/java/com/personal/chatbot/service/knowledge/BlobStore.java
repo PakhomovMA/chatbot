@@ -1,6 +1,7 @@
 package com.personal.chatbot.service.knowledge;
 
 import com.personal.chatbot.models.knowledge.StagedBlob;
+import com.personal.chatbot.utils.Directories;
 import com.personal.chatbot.utils.Hashes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -104,11 +105,11 @@ public class BlobStore {
 
     /** Removes every stored version of a document. */
     public void delete(String documentId) {
-        deleteTree(root.resolve(requireSafe(documentId)));
+        Directories.deleteTreeUnchecked(root.resolve(requireSafe(documentId)));
     }
 
     public void deleteVersion(String documentId, int version) {
-        deleteTree(root.resolve(requireSafe(documentId)).resolve("v" + version));
+        Directories.deleteTreeUnchecked(root.resolve(requireSafe(documentId)).resolve("v" + version));
     }
 
     public Path root() {
@@ -120,22 +121,5 @@ public class BlobStore {
             throw new IllegalArgumentException("Unsafe path segment: " + segment);
         }
         return segment;
-    }
-
-    private static void deleteTree(Path dir) {
-        if (!Files.exists(dir)) {
-            return;
-        }
-        try (Stream<Path> walk = Files.walk(dir)) {
-            walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> {
-                try {
-                    Files.deleteIfExists(path);
-                } catch (IOException e) {
-                    throw new UncheckedIOException("Cannot delete " + path, e);
-                }
-            });
-        } catch (IOException e) {
-            throw new UncheckedIOException("Cannot delete " + dir, e);
-        }
     }
 }

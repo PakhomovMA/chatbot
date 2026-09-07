@@ -2,6 +2,7 @@ package com.personal.chatbot.service.chat;
 
 import com.personal.chatbot.models.chat.ConversationTurn;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
+import com.personal.chatbot.utils.Texts;
 import org.springframework.core.io.ClassPathResource;
 
 import java.io.IOException;
@@ -107,15 +108,11 @@ public class GroundedAnswerPrompt {
         StringBuilder out = new StringBuilder("\n").append(HISTORY_HEADER).append('\n');
         for (ConversationTurn turn : recent) {
             out.append(turn.role() == ConversationTurn.Role.USER ? "User: " : "Assistant: ")
-                    .append(singleLine(turn.content(), 500)).append('\n');
+                    .append(Texts.singleLine(turn.content(), 500)).append('\n');
         }
         return out.toString();
     }
 
-    private static String singleLine(String text, int max) {
-        String flat = text.replaceAll("\\s+", " ").strip();
-        return flat.length() > max ? flat.substring(0, max) + "…" : flat;
-    }
 
     private static String load(String location) {
         try {

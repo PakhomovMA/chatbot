@@ -13,6 +13,7 @@ import com.personal.chatbot.models.retrieval.RetrievalTimings;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.service.index.LuceneIndexStore;
 import com.personal.chatbot.service.parsing.ProvenanceChunkTransformer;
+import com.personal.chatbot.utils.CosineScores;
 import com.personal.chatbot.utils.EmbeddingModeScope;
 import com.personal.chatbot.utils.RankFusion;
 import io.micrometer.core.instrument.DistributionSummary;
@@ -26,6 +27,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -95,7 +97,7 @@ public class RetrievalService {
     }
 
     private List<SimilarityResult<Chunk>> vectorSearch(String text, int candidates) {
-        double luceneFloor = toLuceneScore(settings.minCosine());
+        double luceneFloor = CosineScores.toLuceneScore(settings.minCosine());
         return EmbeddingModeScope.inQueryMode(() -> indexStore.search(ops ->
                 ops.vectorSearch(TextSimilaritySearchRequest.create(text, luceneFloor, candidates), Chunk.class)));
     }
@@ -115,7 +117,7 @@ public class RetrievalService {
         for (SimilarityResult<Chunk> hit : vector) {
             if (accept(hit.getMatch(), documentFilter)) {
                 chunks.putIfAbsent(hit.getMatch().getId(), hit.getMatch());
-                cosines.put(hit.getMatch().getId(), fromLuceneScore(hit.getScore()));
+                cosines.put(hit.getMatch().getId(), CosineScores.fromLuceneScore(hit.getScore()));
                 vectorRanking.add(hit.getMatch().getId());
             }
         }
@@ -128,8 +130,8 @@ public class RetrievalService {
         }
         List<RankFusion.Fused> ranked = switch (mode) {
             case HYBRID -> RankFusion.reciprocalRank(List.of(vectorRanking, textRanking), settings.rrfK());
-            case VECTOR -> vectorRanking.stream().map(id -> new RankFusion.Fused(id, cosines.get(id), vectorRanking.indexOf(id) + 1)).toList();
-            case TEXT -> textRanking.stream().map(id -> new RankFusion.Fused(id, bm25.get(id), textRanking.indexOf(id) + 1)).toList();
+            case VECTOR -> singleFacet(vectorRanking, cosines);
+            case TEXT -> singleFacet(textRanking, bm25);
         };
         List<RetrievedChunk> hits = new ArrayList<>(Math.min(topK, ranked.size()));
         for (RankFusion.Fused fused : ranked) {
@@ -141,6 +143,18 @@ public class RetrievalService {
                     cosines.get(fused.key()), bm25.get(fused.key()), fused.score(), hits.size() + 1));
         }
         return hits;
+    }
+
+    /** One facet keeps its own order and raw score; duplicates are dropped, as {@link RankFusion} does. */
+    private static List<RankFusion.Fused> singleFacet(List<String> ranking, Map<String, Double> scores) {
+        List<RankFusion.Fused> fused = new ArrayList<>(ranking.size());
+        Set<String> seen = new HashSet<>();
+        for (String key : ranking) {
+            if (seen.add(key)) {
+                fused.add(new RankFusion.Fused(key, scores.get(key), fused.size() + 1));
+            }
+        }
+        return fused;
     }
 
     private static boolean accept(Chunk chunk, @Nullable Set<String> documentFilter) {
@@ -180,15 +194,6 @@ public class RetrievalService {
                 structure.getChunkIndex() != null ? structure.getChunkIndex() : parseInteger(metadata.get(ChunkStructure.CHUNK_INDEX)),
                 structure.getTotalChunks() != null ? structure.getTotalChunks() : parseInteger(metadata.get(ChunkStructure.TOTAL_CHUNKS)),
                 metadata.get(ProvenanceChunkTransformer.MEDIA_TYPE) != null ? metadata.get(ProvenanceChunkTransformer.MEDIA_TYPE).toString() : null);
-    }
-
-    /** Lucene reports cosine similarity as {@code (1 + cos) / 2}. */
-    public static double toLuceneScore(double cosine) {
-        return (1 + cosine) / 2;
-    }
-
-    static double fromLuceneScore(double score) {
-        return 2 * score - 1;
     }
 
     private static String string(@Nullable Object value, String fallback) {

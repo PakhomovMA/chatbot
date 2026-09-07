@@ -1,6 +1,7 @@
 package com.personal.chatbot.exceptions;
 
 import com.embabel.agent.api.tool.ToolControlFlowSignal;
+import com.personal.chatbot.utils.Throwables;
 
 /**
  * Raised inside an agent run when the streaming client has gone away. Marked as an Embabel
@@ -15,11 +16,6 @@ public class ChatCancelledException extends RuntimeException implements ToolCont
 
     /** Whether {@code e} or any of its causes is a cancellation. */
     public static boolean isCancellation(Throwable e) {
-        for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
-            if (t instanceof ChatCancelledException) {
-                return true;
-            }
-        }
-        return false;
+        return Throwables.anyCauseIs(e, ChatCancelledException.class);
     }
 }

@@ -13,8 +13,6 @@ import java.util.Map;
  */
 public final class RankFusion {
 
-    public static final int DEFAULT_K = 60;
-
     private RankFusion() {
     }
 

@@ -16,6 +16,7 @@ import com.personal.chatbot.models.embedding.EmbeddingFingerprint;
 import com.personal.chatbot.models.index.IndexInfo;
 import com.personal.chatbot.models.index.IndexManifest;
 import com.personal.chatbot.models.index.IndexState;
+import com.personal.chatbot.utils.Directories;
 import com.personal.chatbot.utils.EmbeddingAudit;
 import org.apache.lucene.util.Version;
 import org.jspecify.annotations.Nullable;
@@ -31,14 +32,12 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 /**
  * Owns the Embabel Lucene store (docs/system-plan.md D4): opens it from {@code <index-dir>/lucene}
@@ -97,7 +96,7 @@ public class LuceneIndexStore implements AutoCloseable {
             Path lucenePath = indexDir.resolve(LUCENE_DIR);
             Files.createDirectories(lucenePath);
             IndexManifest existing = readManifest();
-            boolean hasIndexFiles = hasFiles(lucenePath);
+            boolean hasIndexFiles = Directories.hasFiles(lucenePath);
             if (existing == null && hasIndexFiles) {
                 markIncompatible("index has no manifest; its embedding model is unknown");
                 return this;
@@ -127,7 +126,7 @@ public class LuceneIndexStore implements AutoCloseable {
         try {
             return build(lucenePath);
         } catch (Exception first) { // Lucene surfaces checked IOExceptions through the Kotlin constructor
-            if (!hasFiles(lucenePath)) {
+            if (!Directories.hasFiles(lucenePath)) {
                 throw (RuntimeException) first;
             }
             Path quarantine = lucenePath.resolveSibling(LUCENE_DIR + ".corrupt-"
@@ -153,7 +152,7 @@ public class LuceneIndexStore implements AutoCloseable {
         builder = builder.withIndexPath(lucenePath);
         try {
             // buildAndLoadChunks() logs an error for a directory without segments; only load when there is something to load.
-            return hasFiles(lucenePath) ? builder.buildAndLoadChunks() : builder.build();
+            return Directories.hasFiles(lucenePath) ? builder.buildAndLoadChunks() : builder.build();
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot inspect " + lucenePath, e);
         }
@@ -288,7 +287,7 @@ public class LuceneIndexStore implements AutoCloseable {
             closeOperations();
             if (indexDir != null) {
                 Path lucenePath = indexDir.resolve(LUCENE_DIR);
-                deleteTree(lucenePath);
+                Directories.deleteTree(lucenePath);
                 Files.createDirectories(lucenePath);
                 manifest = newManifest();
                 writeManifest(manifest);
@@ -417,26 +416,6 @@ public class LuceneIndexStore implements AutoCloseable {
             Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot write manifest " + file, e);
-        }
-    }
-
-    private static boolean hasFiles(Path dir) throws IOException {
-        if (!Files.isDirectory(dir)) {
-            return false;
-        }
-        try (Stream<Path> files = Files.list(dir)) {
-            return files.findAny().isPresent();
-        }
-    }
-
-    private static void deleteTree(Path dir) throws IOException {
-        if (!Files.exists(dir)) {
-            return;
-        }
-        try (Stream<Path> walk = Files.walk(dir)) {
-            for (Path path : walk.sorted(Comparator.reverseOrder()).toList()) {
-                Files.deleteIfExists(path);
-            }
         }
     }
 }

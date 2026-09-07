@@ -18,6 +18,7 @@ import com.personal.chatbot.models.chat.ConversationView;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.observability.RequestContext;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
+import com.personal.chatbot.utils.Throwables;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.jspecify.annotations.Nullable;
@@ -100,11 +101,11 @@ public class ChatService {
             listener.accept(new ChatStreamEvent.Final(run(request, sink)));
         } catch (Exception e) { // Embabel (Kotlin) can surface checked exceptions such as ExecutionException
             if (ChatCancelledException.isCancellation(e) || cancelled.getAsBoolean()) {
-                log.info("Streaming chat abandoned: the client went away ({})", rootMessage(e));
+                log.info("Streaming chat abandoned: the client went away ({})", Throwables.rootMessage(e));
                 return;
             }
             log.error("Streaming chat failed", e);
-            listener.accept(new ChatStreamEvent.Error("The assistant could not answer: " + rootMessage(e)));
+            listener.accept(new ChatStreamEvent.Error("The assistant could not answer: " + Throwables.rootMessage(e)));
         }
     }
 
@@ -149,13 +150,5 @@ public class ChatService {
         if (!conversations.delete(conversationId)) {
             throw new ConversationNotFoundException(conversationId);
         }
-    }
-
-    private static String rootMessage(Throwable e) {
-        Throwable cause = e;
-        while (cause.getCause() != null && cause.getCause() != cause) {
-            cause = cause.getCause();
-        }
-        return cause.getMessage() != null ? cause.getMessage() : cause.getClass().getSimpleName();
     }
 }

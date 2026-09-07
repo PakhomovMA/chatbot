@@ -1,9 +1,10 @@
 package com.personal.chatbot.service.chat;
 
 import com.personal.chatbot.models.agent.GroundedAnswerDraft;
+import com.personal.chatbot.utils.CitationMarkers;
 
 import java.util.List;
-import java.util.TreeSet;
+import java.util.SortedSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -15,7 +16,6 @@ import java.util.regex.Pattern;
  */
 public final class StreamedDraftParser {
 
-    private static final Pattern MARKER = Pattern.compile("\\[(\\d{1,3})]");
     private static final Pattern INSUFFICIENT_LINE = Pattern.compile("(?im)^\\s*`?INSUFFICIENT:\\s*(.*?)`?\\s*$");
 
     private StreamedDraftParser() {
@@ -29,11 +29,7 @@ public final class StreamedDraftParser {
             unanswered = insufficient.group(1).strip();
             text = text.substring(0, insufficient.start()).stripTrailing();
         }
-        TreeSet<Integer> cited = new TreeSet<>();
-        Matcher markers = MARKER.matcher(text);
-        while (markers.find()) {
-            cited.add(Integer.parseInt(markers.group(1)));
-        }
+        SortedSet<Integer> cited = CitationMarkers.collect(text);
         boolean sufficient = unanswered == null;
         return new GroundedAnswerDraft(text, List.copyOf(cited), sufficient, sufficient ? null : (unanswered.isEmpty() ? "not covered by the evidence" : unanswered));
     }

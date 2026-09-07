@@ -33,6 +33,7 @@ import com.personal.chatbot.service.index.LuceneIndexStore;
 import com.personal.chatbot.service.retrieval.EvidenceCollector;
 import com.personal.chatbot.service.retrieval.RetrievalService;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
+import com.personal.chatbot.utils.CosineScores;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.jspecify.annotations.NonNull;
@@ -141,7 +142,7 @@ public class KnowledgeAssistantAgent {
                 "Search tools over the team's internal documentation. Use them to find passages before answering.",
                 indexStore.searchOperations())
                 .withListener(collector)
-                .withSearchDefaults(new SearchDefaults(RetrievalService.toLuceneScore(settings.agenticMinCosine()), 0.0, 0))
+                .withSearchDefaults(new SearchDefaults(CosineScores.toLuceneScore(settings.agenticMinCosine()), 0.0, 0))
                 .withGoal("Find passages that answer the question, then stop. Prefer few precise searches over many.");
         AgenticDraft draft;
         try {

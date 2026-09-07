@@ -7,6 +7,7 @@ import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.service.knowledge.DocumentRegistry;
 import com.personal.chatbot.service.retrieval.RetrievalService;
+import com.personal.chatbot.utils.Texts;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
@@ -46,7 +47,7 @@ public class KnowledgeBaseTools {
             if (!hit.provenance().sectionPath().isEmpty()) {
                 out.append(" › ").append(String.join(" › ", hit.provenance().sectionPath()));
             }
-            out.append('\n').append(snippet(hit.text())).append("\n\n");
+            out.append('\n').append(Texts.singleLine(hit.text(), SNIPPET_CHARS)).append("\n\n");
         }
         return out.toString().stripTrailing();
     }
@@ -71,10 +72,5 @@ public class KnowledgeBaseTools {
             out.append(document.id()).append(" — ").append(document.title()).append(" (").append(document.status()).append(")\n");
         }
         return out.toString().stripTrailing();
-    }
-
-    private static String snippet(String text) {
-        String flat = text.replaceAll("\\s+", " ").strip();
-        return flat.length() > SNIPPET_CHARS ? flat.substring(0, SNIPPET_CHARS) + "…" : flat;
     }
 }
