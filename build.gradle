@@ -97,3 +97,39 @@ tasks.register('ragEval', Test) {
     }
     testLogging { events 'passed', 'failed'; showStandardStreams = false }
 }
+
+// ---- Vue frontend (frontend/) -----------------------------------------------------------------
+// Built with the local Node toolchain (Node 20+; the Gradle node plugin predates Gradle 9). The
+// production bundle is copied into the jar under static/. Skip with -PskipFrontend.
+def frontendDir = file('frontend')
+def frontendEnabled = !project.hasProperty('skipFrontend')
+def npmExecutable = System.getProperty('os.name').toLowerCase().contains('windows') ? 'npm.cmd' : 'npm'
+
+tasks.register('frontendInstall', Exec) {
+    description = 'Installs frontend dependencies (npm ci)'
+    group = 'frontend'
+    onlyIf { frontendEnabled }
+    workingDir frontendDir
+    inputs.files('frontend/package.json', 'frontend/package-lock.json')
+    outputs.dir('frontend/node_modules')
+    commandLine npmExecutable, 'ci', '--no-audit', '--no-fund'
+}
+
+tasks.register('frontendBuild', Exec) {
+    description = 'Type-checks and bundles the Vue app into frontend/dist'
+    group = 'frontend'
+    dependsOn 'frontendInstall'
+    onlyIf { frontendEnabled }
+    workingDir frontendDir
+    inputs.dir('frontend/src')
+    inputs.files('frontend/index.html', 'frontend/package.json', 'frontend/package-lock.json', 'frontend/tsconfig.json', 'frontend/vite.config.ts')
+    outputs.dir('frontend/dist')
+    commandLine npmExecutable, 'run', 'build'
+}
+
+tasks.named('processResources') {
+    dependsOn 'frontendBuild'
+    from(frontendDir.toPath().resolve('dist')) {
+        into 'static'
+    }
+}

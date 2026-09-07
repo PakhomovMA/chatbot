@@ -34,8 +34,11 @@ Never:
 
 ## Setup
 
-- Runtime needs Ollama on `localhost:11434` with `qwen3:14b`; from Phase 1 also the EmbeddingGemma ONNX
-  files under `~/.chatbot/models/embeddinggemma-300m/` (see README). Tests need neither.
+- Runtime needs Ollama on `localhost:11434` with `qwen3:14b` and the EmbeddingGemma ONNX files under
+  `~/.chatbot/models/embeddinggemma-300m/` (see README). Tests need neither.
+- `./gradlew build` also builds `frontend/` with the local `npm` (Node 20+); `-PskipFrontend` skips it.
+  Frontend code: Vue 3 SFCs with `<script setup lang="ts">`, Pinia stores, DTO types in `src/api/types.ts`
+  mirroring the backend records; keep `router.ts` and `SpaController` route lists in sync.
 - Always use `./gradlew`. JVM flag `--enable-native-access=ALL-UNNAMED` is already set for `test`/`bootRun`;
   pass it yourself for `java -jar`.
 

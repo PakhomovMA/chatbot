@@ -3,16 +3,16 @@
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
 Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
 
-Current state: **Phase 5** (grounded chat) — uploaded documents are parsed (Tika), chunked, embedded with
-EmbeddingGemma and indexed into an embedded Lucene index; hybrid retrieval feeds an Embabel agent that
-drafts an answer with `qwen3:14b` and verifies every citation against the retrieved evidence. No UI or
-streaming yet.
+Current state: **Phase 6** (web UI) — a Vue app bundled into the jar offers Chat (grounded answers with
+clickable citations and a sources panel) and Knowledge Base (upload, live status, re-index, delete) on top
+of the Embabel agent, hybrid retrieval and the Lucene index. Streaming answers arrive in Phase 7.
 
 ## Prerequisites
 
 | Requirement | Notes |
 |---|---|
 | JDK 25 | e.g. `brew install openjdk@25` (Gradle toolchain resolves it) |
+| Node.js 20+ with npm | builds the Vue frontend during `./gradlew build` (skip with `-PskipFrontend`) |
 | Ollama ≥ 0.11 running on `http://localhost:11434` | `ollama pull qwen3:14b` (LLM). `embeddinggemma:300m` is optional (fallback embedding provider, Phase 1) |
 | EmbeddingGemma ONNX files | Required with the default provider: `model.onnx`, `model.onnx_data` (fp32, 1.2 GB) and `tokenizer.json` from [onnx-community/embeddinggemma-300m-ONNX](https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX) under `~/.chatbot/models/embeddinggemma-300m/` (see below) |
 
@@ -31,6 +31,19 @@ curl -L -o "$D/tokenizer.json"  "$B/tokenizer.json"
 Without these files the app refuses to start and prints the same instructions. Alternative: set
 `chatbot.embedding.provider=ollama` to embed through Ollama (`ollama pull embeddinggemma:300m`);
 note that the two providers produce different index fingerprints.
+
+## Web UI
+
+Open `http://127.0.0.1:8080/` after `./gradlew bootRun`: **Chat** (`/chat`) and **Knowledge Base** (`/knowledge`).
+The UI lives in `frontend/` (Vue 3, Vite, TypeScript, Pinia) and is bundled into the jar under `static/`
+by the `frontendBuild` Gradle task (`npm ci` + `vue-tsc` + `vite build`).
+
+Frontend development with hot reload:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev ./gradlew bootRun   # enables CORS for the Vite dev server
+cd frontend && npm run dev                      # http://localhost:5173, proxies /api to :8080
+```
 
 ## Run
 
