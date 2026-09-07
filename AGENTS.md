@@ -39,6 +39,9 @@ Never:
 - `./gradlew build` also builds `frontend/` with the local `npm` (Node 20+); `-PskipFrontend` skips it.
   Frontend code: Vue 3 SFCs with `<script setup lang="ts">`, Pinia stores, DTO types in `src/api/types.ts`
   mirroring the backend records; keep `router.ts` and `SpaController` route lists in sync.
+- Frontend tests are `frontend/test/*.test.ts` on the built-in Node runner (`npm test`, task `frontendTest`,
+  on the `check` gate; Node 23.6+ for type stripping). They import the sources directly, so keep those
+  strip-only compatible — no constructor parameter properties, `enum` or `namespace`.
 - Always use `./gradlew`. JVM flag `--enable-native-access=ALL-UNNAMED` is already set for `test`/`bootRun`;
   pass it yourself for `java -jar`.
 

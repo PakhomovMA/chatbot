@@ -106,8 +106,9 @@ tasks.register('ragEval', Test) {
 }
 
 // ---- Vue frontend (frontend/) -----------------------------------------------------------------
-// Built with the local Node toolchain (Node 20+; the Gradle node plugin predates Gradle 9). The
-// production bundle is copied into the jar under static/. Skip with -PskipFrontend.
+// Built with the local Node toolchain (Node 20+, and 23.6+ for `frontendTest`, which runs the
+// TypeScript sources through Node's own type stripping; the Gradle node plugin predates Gradle 9).
+// The production bundle is copied into the jar under static/. Skip with -PskipFrontend.
 def frontendDir = file('frontend')
 def frontendEnabled = !project.hasProperty('skipFrontend')
 def npmExecutable = System.getProperty('os.name').toLowerCase().contains('windows') ? 'npm.cmd' : 'npm'
@@ -132,6 +133,22 @@ tasks.register('frontendBuild', Exec) {
     inputs.files('frontend/index.html', 'frontend/package.json', 'frontend/package-lock.json', 'frontend/tsconfig.json', 'frontend/vite.config.ts')
     outputs.dir('frontend/dist')
     commandLine npmExecutable, 'run', 'build'
+}
+
+tasks.register('frontendTest', Exec) {
+    description = 'Runs the frontend store/transport tests on the Node test runner'
+    group = 'frontend'
+    dependsOn 'frontendInstall'
+    onlyIf { frontendEnabled }
+    workingDir frontendDir
+    inputs.dir('frontend/src')
+    inputs.dir('frontend/test')
+    inputs.files('frontend/package.json', 'frontend/package-lock.json')
+    commandLine npmExecutable, 'test', '--silent'
+}
+
+tasks.named('check') {
+    dependsOn 'frontendTest'
 }
 
 tasks.named('processResources') {

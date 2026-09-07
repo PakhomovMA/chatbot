@@ -11,6 +11,11 @@ export type ChatStreamEvent =
  * Streams `POST /api/chat/stream` (server-sent events over fetch, since EventSource cannot POST).
  * Resolves with the final response; rejects on transport errors or an `error` event. Comment blocks
  * (`:keep-alive`, sent by the server through silent phases) carry no data and are skipped.
+ *
+ * Cancellation: aborting `signal` rejects with an `AbortError`, releases the reader and cancels the
+ * response body, so the browser stops waiting and drops the connection. The server treats the lost
+ * connection as a cancellation signal, but a disconnect is not proof that generation stopped — the
+ * model call is only cooperatively cancelled on the server side.
  */
 export async function streamChat(body: ChatRequest, onEvent: (event: ChatStreamEvent) => void, signal?: AbortSignal): Promise<ChatResponse> {
   const response = await fetch('/api/chat/stream', {
@@ -29,7 +34,8 @@ export async function streamChat(body: ChatRequest, onEvent: (event: ChatStreamE
     throw new ApiError(response.status, problem, problem?.detail ?? problem?.title ?? `${response.status} ${response.statusText}`)
   }
 
-  const reader = response.body.getReader()
+  const stream = response.body
+  const reader = stream.getReader()
   const decoder = new TextDecoder()
   let buffer = ''
   let finalResponse: ChatResponse | undefined
@@ -62,18 +68,29 @@ export async function streamChat(body: ChatRequest, onEvent: (event: ChatStreamE
     }
   }
 
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    let separator = buffer.indexOf('\n\n')
-    while (separator >= 0) {
-      dispatch(buffer.slice(0, separator))
-      buffer = buffer.slice(separator + 2)
-      separator = buffer.indexOf('\n\n')
+  try {
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let separator = buffer.indexOf('\n\n')
+      while (separator >= 0) {
+        dispatch(buffer.slice(0, separator))
+        buffer = buffer.slice(separator + 2)
+        separator = buffer.indexOf('\n\n')
+      }
     }
+    if (buffer.trim()) dispatch(buffer)
+  } finally {
+    // Abort, an `error` event and a missing final answer all leave the body unread; release the lock
+    // and drop the connection instead of letting it linger until the response is garbage collected.
+    try {
+      reader.releaseLock()
+    } catch {
+      /* a reader whose stream already errored may refuse to release; the body cancel below suffices */
+    }
+    void stream.cancel().catch(() => undefined)
   }
-  if (buffer.trim()) dispatch(buffer)
   if (failure) throw new Error(failure)
   if (!finalResponse) throw new Error('The stream ended without a final answer.')
   return finalResponse

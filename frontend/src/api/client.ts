@@ -14,8 +14,15 @@ import type {
 
 /** Error carrying the RFC 9457 problem detail returned by the backend. */
 export class ApiError extends Error {
-  constructor(readonly status: number, readonly problem: ProblemDetail | undefined, message: string) {
+  // Plain fields rather than constructor parameter properties: the tests run the sources through
+  // Node's strip-only TypeScript support, which cannot erase parameter properties.
+  readonly status: number
+  readonly problem: ProblemDetail | undefined
+
+  constructor(status: number, problem: ProblemDetail | undefined, message: string) {
     super(message)
+    this.status = status
+    this.problem = problem
   }
 }
 
@@ -43,7 +50,11 @@ const json = (body: unknown, method = 'POST'): RequestInit => ({
 })
 
 export const api = {
-  chat: (body: ChatRequest) => request<ChatResponse>('/api/chat', json(body)),
+  /**
+   * Non-streaming answer. Aborting `signal` stops the browser from waiting for the response; it does
+   * not by itself prove the server stopped the LLM call (see the note in {@link ./stream}).
+   */
+  chat: (body: ChatRequest, signal?: AbortSignal) => request<ChatResponse>('/api/chat', { ...json(body), signal }),
 
   listDocuments: (params: { status?: DocumentStatus; q?: string; page?: number; size?: number } = {}) => {
     const query = new URLSearchParams()
