@@ -62,8 +62,14 @@ class IngestionServiceTest {
                 ingestion.on(documentEvent);
             }
         };
-        ingestion = new IngestionService(registry, blobStore, new DocumentParser(), indexStore, publisher, properties(),
-                Clock.systemUTC(), new SimpleMeterRegistry());
+        DocumentStatusUpdater status = new DocumentStatusUpdater(registry, publisher);
+        IngestionFailureLog failures = new IngestionFailureLog();
+        DocumentIngestionPipeline pipeline = new DocumentIngestionPipeline(registry, blobStore, new DocumentParser(),
+                indexStore, status, failures, Clock.systemUTC(), new SimpleMeterRegistry());
+        IngestionQueue queue = new IngestionQueue(pipeline::process);
+        IndexReconciler reconciler = new IndexReconciler(registry, indexStore, status, queue,
+                properties().ingestion(), Clock.systemUTC());
+        ingestion = new IngestionService(queue, reconciler, status, failures, registry, indexStore, Clock.systemUTC());
         documents = new DocumentService(registry, blobStore, properties(), Clock.systemUTC(), publisher);
     }
 

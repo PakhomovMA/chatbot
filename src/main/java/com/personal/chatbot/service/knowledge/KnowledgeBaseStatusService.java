@@ -25,7 +25,7 @@ public class KnowledgeBaseStatusService {
 
     public KnowledgeBaseStatus status() {
         IndexInfo index = indexStore.info();
-        IngestionService.QueueStatus queue = ingestionService.queueStatus();
+        IngestionQueue.Status queue = ingestionService.queueStatus();
         return new KnowledgeBaseStatus(
                 registry.count(),
                 registry.countByStatus(),
