@@ -3,9 +3,10 @@
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
 Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
 
-Current state: **Phase 1** (embedding service) — the application starts, discovers Ollama models,
-loads EmbeddingGemma in-process (ONNX Runtime) and exposes Actuator health with the embedding
-fingerprint. No chat or ingestion features yet.
+Current state: **Phase 2** (document management) — the application starts, discovers Ollama models,
+loads EmbeddingGemma in-process (ONNX Runtime), exposes Actuator health with the embedding
+fingerprint and manages uploaded documents (registry + stored originals). Indexing and chat are
+not implemented yet.
 
 ## Prerequisites
 
@@ -60,6 +61,21 @@ java --enable-native-access=ALL-UNNAMED -jar build/libs/chatbot-0.0.1-SNAPSHOT.j
 Test tiers are JUnit tags: `model`, `eval`, `e2e`, `ui` (excluded by default). The default `test`
 profile (`src/test/resources/application-test.yaml`) disables Ollama discovery and mocks LLM calls
 via Embabel's `EmbabelMockitoIntegrationTest`.
+
+## Document API (Phase 2)
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/documents` (multipart `file`, optional `title`) | Upload; `202` for a new document, `200` with `duplicate: true` if identical content exists |
+| `GET /api/documents?status=&q=&page=&size=` | List, newest first |
+| `GET /api/documents/{id}` / `GET /api/documents/{id}/status` | Document details / lightweight status |
+| `PUT /api/documents/{id}/content` (multipart `file`) | Replace content as a new version |
+| `DELETE /api/documents/{id}` | Remove document and its stored original |
+| `GET /api/knowledge-base/status` | Counts by status and the active embedding fingerprint |
+
+Accepted types: md, markdown, txt, html, htm, pdf, docx; max 20 MB (`chatbot.knowledge.*`).
+Errors are RFC 9457 problem details. Data lives under `~/.chatbot/documents/registry.json` and
+`~/.chatbot/blobs/<documentId>/v<n>/`.
 
 ## Key configuration (`src/main/resources/application.yaml`)
 

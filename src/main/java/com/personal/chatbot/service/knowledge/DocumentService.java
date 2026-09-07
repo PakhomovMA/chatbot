@@ -1,0 +1,197 @@
+package com.personal.chatbot.service.knowledge;
+
+import com.personal.chatbot.config.ChatbotProperties;
+import com.personal.chatbot.exceptions.DocumentNotFoundException;
+import com.personal.chatbot.exceptions.InvalidUploadException;
+import com.personal.chatbot.exceptions.InvalidUploadException.Reason;
+import com.personal.chatbot.models.knowledge.Document;
+import com.personal.chatbot.models.knowledge.DocumentStatus;
+import com.personal.chatbot.models.knowledge.StagedBlob;
+import com.personal.chatbot.models.knowledge.dto.DocumentPage;
+import com.personal.chatbot.models.knowledge.dto.KnowledgeBaseStatus;
+import com.personal.chatbot.models.knowledge.dto.UploadResponse;
+import com.personal.chatbot.service.embedding.KnowledgeEmbeddingService;
+import com.personal.chatbot.utils.Filenames;
+import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import java.io.InputStream;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+
+/**
+ * Knowledge-base document management (docs/system-plan.md D5): validation, de-duplication by
+ * content hash (INV-04), versioned replacement and deletion. Indexing is triggered elsewhere
+ * (Phase 3); here a new or replaced document simply lands in {@link DocumentStatus#UPLOADED}.
+ */
+@Service
+public class DocumentService {
+
+    private static final Logger log = LoggerFactory.getLogger(DocumentService.class);
+
+    public static final int MAX_PAGE_SIZE = 200;
+    public static final int DEFAULT_PAGE_SIZE = 20;
+
+    /** What the controller hands over; the stream is consumed exactly once. */
+    public record Upload(String filename, @Nullable String declaredMediaType, long declaredSize, InputStream content,
+                         @Nullable String title) {
+    }
+
+    public record Query(@Nullable DocumentStatus status, @Nullable String text, int page, int size) {
+        public Query {
+            page = Math.max(page, 0);
+            size = size <= 0 ? DEFAULT_PAGE_SIZE : Math.min(size, MAX_PAGE_SIZE);
+        }
+    }
+
+    private final DocumentRegistry registry;
+    private final BlobStore blobStore;
+    private final KnowledgeEmbeddingService embeddingService;
+    private final ChatbotProperties.Knowledge settings;
+    private final Clock clock;
+
+    public DocumentService(DocumentRegistry registry, BlobStore blobStore, KnowledgeEmbeddingService embeddingService,
+                           ChatbotProperties properties, Clock clock) {
+        this.registry = registry;
+        this.blobStore = blobStore;
+        this.embeddingService = embeddingService;
+        this.settings = properties.knowledge();
+        this.clock = clock;
+    }
+
+    public UploadResponse upload(Upload upload) {
+        String filename = validateName(upload);
+        StagedBlob staged = stage(upload);
+        try {
+            Document existing = registry.findByContentHash(staged.contentHash()).orElse(null);
+            if (existing != null) {
+                blobStore.discard(staged);
+                log.info("Upload of {} duplicates document {} (hash {})", filename, existing.id(), staged.contentHash());
+                return new UploadResponse(existing.id(), existing.status(), existing.version(), true);
+            }
+            String title = upload.title() != null && !upload.title().isBlank() ? upload.title().strip() : Filenames.baseName(filename);
+            Document document = Document.uploaded(title, filename, mediaTypeOf(upload, filename), staged.sizeBytes(),
+                    staged.contentHash(), now());
+            blobStore.commit(staged, document.id(), document.version(), Filenames.extension(filename));
+            registry.save(document);
+            log.info("Registered document {} '{}' ({} bytes, {})", document.id(), title, staged.sizeBytes(), filename);
+            return new UploadResponse(document.id(), document.status(), document.version(), false);
+        } catch (RuntimeException e) {
+            blobStore.discard(staged);
+            throw e;
+        }
+    }
+
+    /** Replaces the content of an existing document (new version) unless the bytes are unchanged. */
+    public UploadResponse replaceContent(String documentId, Upload upload) {
+        Document current = get(documentId);
+        String filename = validateName(upload);
+        StagedBlob staged = stage(upload);
+        try {
+            if (current.contentHash().equals(staged.contentHash())) {
+                blobStore.discard(staged);
+                return new UploadResponse(current.id(), current.status(), current.version(), true);
+            }
+            registry.findByContentHash(staged.contentHash()).ifPresent(other -> {
+                if (!other.id().equals(documentId)) {
+                    blobStore.discard(staged);
+                    throw new InvalidUploadException(Reason.BAD_FILENAME,
+                            "Identical content is already registered as document " + other.id());
+                }
+            });
+            Document replaced = current.replacedContent(filename, mediaTypeOf(upload, filename), staged.sizeBytes(),
+                    staged.contentHash(), now());
+            blobStore.commit(staged, replaced.id(), replaced.version(), Filenames.extension(filename));
+            registry.save(replaced);
+            blobStore.deleteVersion(documentId, current.version());
+            log.info("Replaced content of document {}: version {} -> {}", documentId, current.version(), replaced.version());
+            return new UploadResponse(replaced.id(), replaced.status(), replaced.version(), false);
+        } catch (RuntimeException e) {
+            blobStore.discard(staged);
+            throw e;
+        }
+    }
+
+    public Document get(String documentId) {
+        return registry.findById(documentId).orElseThrow(() -> new DocumentNotFoundException(documentId));
+    }
+
+    public DocumentPage list(Query query) {
+        String needle = query.text() == null ? null : query.text().strip().toLowerCase(Locale.ROOT);
+        List<Document> matching = registry.findAll().stream()
+                .filter(d -> query.status() == null || d.status() == query.status())
+                .filter(d -> needle == null || needle.isEmpty()
+                        || d.title().toLowerCase(Locale.ROOT).contains(needle)
+                        || d.originalFilename().toLowerCase(Locale.ROOT).contains(needle))
+                .toList();
+        List<Document> items = matching.stream().skip((long) query.page() * query.size()).limit(query.size()).toList();
+        return new DocumentPage(items, matching.size(), query.page(), query.size());
+    }
+
+    public void delete(String documentId) {
+        Document document = get(documentId);
+        registry.delete(document.id());
+        blobStore.delete(document.id());
+        log.info("Deleted document {} '{}'", document.id(), document.title());
+    }
+
+    public KnowledgeBaseStatus knowledgeBaseStatus() {
+        return new KnowledgeBaseStatus(registry.count(), registry.countByStatus(),
+                new KnowledgeBaseStatus.EmbeddingInfo(embeddingService.provider(), embeddingService.modelName(),
+                        embeddingService.dimensions(), embeddingService.fingerprint().value()));
+    }
+
+    private String validateName(Upload upload) {
+        String filename = Filenames.sanitize(upload.filename() == null ? "" : upload.filename());
+        if (filename.isEmpty()) {
+            throw new InvalidUploadException(Reason.BAD_FILENAME, "Upload has no usable file name");
+        }
+        String extension = Filenames.extension(filename);
+        Set<String> allowed = settings.allowedExtensions();
+        if (!allowed.contains(extension)) {
+            throw new InvalidUploadException(Reason.UNSUPPORTED_TYPE,
+                    "Unsupported file type '" + extension + "'; allowed: " + String.join(", ", allowed));
+        }
+        if (upload.declaredSize() > settings.maxUploadSize().toBytes()) {
+            throw new InvalidUploadException(Reason.TOO_LARGE, "File exceeds " + settings.maxUploadSize());
+        }
+        return filename;
+    }
+
+    private StagedBlob stage(Upload upload) {
+        StagedBlob staged = blobStore.stage(upload.content());
+        if (staged.sizeBytes() == 0) {
+            blobStore.discard(staged);
+            throw new InvalidUploadException(Reason.EMPTY, "Uploaded file is empty");
+        }
+        if (staged.sizeBytes() > settings.maxUploadSize().toBytes()) {
+            blobStore.discard(staged);
+            throw new InvalidUploadException(Reason.TOO_LARGE, "File exceeds " + settings.maxUploadSize());
+        }
+        return staged;
+    }
+
+    private static String mediaTypeOf(Upload upload, String filename) {
+        String declared = upload.declaredMediaType();
+        if (declared != null && !declared.isBlank() && !declared.equalsIgnoreCase("application/octet-stream")) {
+            return declared.strip();
+        }
+        return switch (Filenames.extension(filename)) {
+            case "md", "markdown" -> "text/markdown";
+            case "txt" -> "text/plain";
+            case "html", "htm" -> "text/html";
+            case "pdf" -> "application/pdf";
+            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            default -> "application/octet-stream";
+        };
+    }
+
+    private Instant now() {
+        return Instant.now(clock);
+    }
+}

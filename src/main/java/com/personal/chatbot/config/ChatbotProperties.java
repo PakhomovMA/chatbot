@@ -9,7 +9,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
+import org.springframework.util.unit.DataSize;
+
 import java.nio.file.Path;
+import java.util.Set;
 
 /**
  * Application-level settings under the {@code chatbot.*} prefix.
@@ -22,7 +25,8 @@ import java.nio.file.Path;
 @ConfigurationProperties(prefix = "chatbot")
 public record ChatbotProperties(
         @NotNull Path dataDir,
-        @Valid @DefaultValue Embedding embedding
+        @Valid @DefaultValue Embedding embedding,
+        @Valid @DefaultValue Knowledge knowledge
 ) {
 
     /**
@@ -57,6 +61,16 @@ public record ChatbotProperties(
             @Min(16) @DefaultValue("2048") int maxTokens,
             @Min(0) @DefaultValue("0") int intraOpThreads,
             @Min(1) @DefaultValue("768") int dimensions
+    ) {
+    }
+
+    /**
+     * @param maxUploadSize     hard limit for one uploaded file (also mirrored in spring.servlet.multipart).
+     * @param allowedExtensions lower-case extensions accepted for upload (docs/system-plan.md D9).
+     */
+    public record Knowledge(
+            @DefaultValue("20MB") DataSize maxUploadSize,
+            @DefaultValue({"md", "markdown", "txt", "html", "htm", "pdf", "docx"}) Set<String> allowedExtensions
     ) {
     }
 

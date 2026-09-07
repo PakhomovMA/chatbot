@@ -28,6 +28,17 @@ chatbot:
       base-url: http://localhost:11434
       model: embeddinggemma:300m
 
+  knowledge:
+    max-upload-size: 20MB
+    allowed-extensions: [md, markdown, txt, html, htm, pdf, docx]
+
+spring.servlet.multipart:
+  max-file-size: 20MB
+  max-request-size: 25MB
+
+spring.mvc.problemdetails.enabled: true
+spring.jackson.default-property-inclusion: non_null
+
 embabel:
   models:
     # Ollama models are registered under their raw Ollama name (§1.3 p.7).
