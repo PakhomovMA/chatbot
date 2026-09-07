@@ -1,4 +1,6 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.utils;
+
+import com.personal.chatbot.models.embedding.EmbeddingMode;
 
 import java.util.function.Supplier;
 

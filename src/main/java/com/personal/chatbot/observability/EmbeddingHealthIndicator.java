@@ -1,4 +1,6 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.observability;
+
+import com.personal.chatbot.service.embedding.KnowledgeEmbeddingService;
 
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;

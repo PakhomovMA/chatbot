@@ -1,4 +1,10 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.service.embedding;
+
+import com.personal.chatbot.models.embedding.EmbeddingFingerprint;
+import com.personal.chatbot.models.embedding.EmbeddingMode;
+import com.personal.chatbot.utils.EmbeddingModeScope;
+import com.personal.chatbot.utils.EmbeddingPrompts;
+import com.personal.chatbot.utils.VectorMath;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;

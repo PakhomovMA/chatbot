@@ -1,4 +1,8 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.service.embedding;
+
+import com.personal.chatbot.utils.EmbeddingModeScope;
+import com.personal.chatbot.utils.EmbeddingPrompts;
+import com.personal.chatbot.utils.VectorMath;
 
 import com.personal.chatbot.support.FakeTextEmbedder;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;

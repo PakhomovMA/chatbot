@@ -1,6 +1,6 @@
 package com.personal.chatbot.support;
 
-import com.personal.chatbot.embedding.TextEmbedder;
+import com.personal.chatbot.service.embedding.TextEmbedder;
 
 import java.util.ArrayList;
 import java.util.List;

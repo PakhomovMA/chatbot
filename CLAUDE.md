@@ -63,7 +63,8 @@ Never:
 ## Architecture
 
 - Layers: API (DTOs) → application services (chat, knowledge/ingestion, retrieval, index, embedding)
-  → Embabel agent/tool boundary. Package-by-feature; details in plan §2.
+  → Embabel agent/tool boundary. Packages are layered by type, as in the reference project:
+  `config`, `controller`, `service.<area>`, `models.<area>`, `exceptions`, `utils`, `observability`, `agents`.
 - Grounding statuses `GROUNDED | PARTIAL | INSUFFICIENT_EVIDENCE`; citations must be a subset of retrieved evidence.
 - Index is single-writer (one ingestion worker + write lock); per-document ingestion is all-or-nothing.
 - Index manifest stores the embedding fingerprint; mismatch blocks retrieval until rebuild.

@@ -1,7 +1,7 @@
 package com.personal.chatbot.support;
 
-import com.personal.chatbot.embedding.KnowledgeEmbeddingService;
-import com.personal.chatbot.embedding.PromptedEmbeddingService;
+import com.personal.chatbot.service.embedding.KnowledgeEmbeddingService;
+import com.personal.chatbot.service.embedding.PromptedEmbeddingService;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;

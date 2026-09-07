@@ -1,10 +1,15 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.config;
+
+import com.personal.chatbot.service.embedding.EmbabelEmbeddingServiceAdapter;
+import com.personal.chatbot.service.embedding.KnowledgeEmbeddingService;
+import com.personal.chatbot.service.embedding.PromptedEmbeddingService;
+import com.personal.chatbot.service.embedding.TextEmbedder;
 
 import com.embabel.common.ai.model.EmbeddingService;
 import com.personal.chatbot.config.ChatbotProperties;
-import com.personal.chatbot.embedding.ollama.OllamaTextEmbedder;
-import com.personal.chatbot.embedding.onnx.OnnxModelFiles;
-import com.personal.chatbot.embedding.onnx.OnnxTextEmbedder;
+import com.personal.chatbot.service.embedding.ollama.OllamaTextEmbedder;
+import com.personal.chatbot.service.embedding.onnx.OnnxModelFiles;
+import com.personal.chatbot.service.embedding.onnx.OnnxTextEmbedder;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;

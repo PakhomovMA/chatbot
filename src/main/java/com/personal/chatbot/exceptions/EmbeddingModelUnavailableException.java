@@ -1,4 +1,4 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.exceptions;
 
 /** The configured embedding backend cannot be used; the message tells the operator what to do. */
 public class EmbeddingModelUnavailableException extends RuntimeException {

@@ -1,4 +1,8 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.service.embedding;
+
+import com.personal.chatbot.models.embedding.EmbeddingFingerprint;
+import com.personal.chatbot.models.embedding.EmbeddingMode;
+import com.personal.chatbot.utils.EmbeddingModeScope;
 
 import java.time.Duration;
 import java.util.List;

@@ -1,4 +1,4 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.utils;
 
 /** Small float-vector helpers shared by the embedding package and its tests. */
 public final class VectorMath {

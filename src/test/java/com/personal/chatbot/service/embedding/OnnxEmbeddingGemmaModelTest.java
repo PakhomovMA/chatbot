@@ -1,8 +1,15 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.service.embedding;
 
-import com.personal.chatbot.embedding.ollama.OllamaTextEmbedder;
-import com.personal.chatbot.embedding.onnx.OnnxModelFiles;
-import com.personal.chatbot.embedding.onnx.OnnxTextEmbedder;
+import com.personal.chatbot.exceptions.EmbeddingModelUnavailableException;
+import com.personal.chatbot.models.embedding.EmbeddingMode;
+import com.personal.chatbot.utils.EmbeddingModeScope;
+import com.personal.chatbot.utils.EmbeddingPrompts;
+import com.personal.chatbot.utils.Hashes;
+import com.personal.chatbot.utils.VectorMath;
+
+import com.personal.chatbot.service.embedding.ollama.OllamaTextEmbedder;
+import com.personal.chatbot.service.embedding.onnx.OnnxModelFiles;
+import com.personal.chatbot.service.embedding.onnx.OnnxTextEmbedder;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -68,7 +75,7 @@ class OnnxEmbeddingGemmaModelTest {
         assertThat(vector).hasSize(768);
         assertThat(VectorMath.norm(vector)).isCloseTo(1.0, within(1e-3));
         assertThat(service.fingerprint().value()).startsWith("onnx/embeddinggemma-300m/").endsWith("/768/" + EmbeddingPrompts.PREFIX_VERSION + "/l2");
-        assertThat(service.fingerprint().artifactHash()).hasSize(EmbeddingFingerprint.ARTIFACT_HASH_LENGTH);
+        assertThat(service.fingerprint().artifactHash()).hasSize(Hashes.SHORT_DIGEST_LENGTH);
     }
 
     @Test
@@ -120,7 +127,7 @@ class OnnxEmbeddingGemmaModelTest {
     void embedsThirtyTwoChunksWithinBudget() {
         List<String> chunks = new ArrayList<>();
         for (int i = 0; i < 32; i++) {
-            chunks.add(("Chunk " + i + ". ").repeat(1) + "The ingestion pipeline parses documents with Tika, splits them into "
+            chunks.add("Chunk " + i + ". " + "The ingestion pipeline parses documents with Tika, splits them into "
                     + "sections, embeds every chunk with EmbeddingGemma and writes vectors into the Lucene index. ".repeat(4));
         }
         service.embed(chunks); // warm

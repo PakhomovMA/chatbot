@@ -1,4 +1,4 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.service.embedding;
 
 import com.embabel.common.ai.model.EmbeddingService;
 import com.embabel.common.ai.model.ModelType;
@@ -54,9 +54,5 @@ public final class EmbabelEmbeddingServiceAdapter implements EmbeddingService {
     @Override
     public @Nullable PricingModel getPricingModel() {
         return null;
-    }
-
-    public EmbeddingFingerprint fingerprint() {
-        return delegate.fingerprint();
     }
 }

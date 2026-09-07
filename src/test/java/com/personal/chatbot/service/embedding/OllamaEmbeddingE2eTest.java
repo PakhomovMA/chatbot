@@ -1,6 +1,10 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.service.embedding;
 
-import com.personal.chatbot.embedding.ollama.OllamaTextEmbedder;
+import com.personal.chatbot.exceptions.EmbeddingModelUnavailableException;
+import com.personal.chatbot.utils.EmbeddingModeScope;
+import com.personal.chatbot.utils.VectorMath;
+
+import com.personal.chatbot.service.embedding.ollama.OllamaTextEmbedder;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;

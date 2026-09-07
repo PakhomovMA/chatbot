@@ -1,8 +1,8 @@
-package com.personal.chatbot.embedding.ollama;
+package com.personal.chatbot.service.embedding.ollama;
 
-import com.personal.chatbot.embedding.EmbeddingFingerprint;
-import com.personal.chatbot.embedding.EmbeddingModelUnavailableException;
-import com.personal.chatbot.embedding.TextEmbedder;
+import com.personal.chatbot.exceptions.EmbeddingModelUnavailableException;
+import com.personal.chatbot.service.embedding.TextEmbedder;
+import com.personal.chatbot.utils.Hashes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.ollama.OllamaEmbeddingModel;
@@ -45,7 +45,7 @@ public final class OllamaTextEmbedder implements TextEmbedder {
         }
         return models.stream()
                 .filter(m -> modelName.equals(m.name()) || modelName.equals(m.model()))
-                .map(m -> EmbeddingFingerprint.shortHash(m.digest()))
+                .map(m -> Hashes.shortDigest(m.digest()))
                 .findFirst()
                 .orElseThrow(() -> new EmbeddingModelUnavailableException(
                         "Model " + modelName + " is not installed in Ollama at " + baseUrl + "; run: ollama pull " + modelName));

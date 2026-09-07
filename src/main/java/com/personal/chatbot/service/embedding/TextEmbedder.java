@@ -1,4 +1,6 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.service.embedding;
+
+import com.personal.chatbot.models.embedding.EmbeddingFingerprint;
 
 import java.util.List;
 

@@ -1,4 +1,6 @@
-package com.personal.chatbot.embedding;
+package com.personal.chatbot.models.embedding;
+
+import com.personal.chatbot.utils.EmbeddingModeScope;
 
 /**
  * EmbeddingGemma is asymmetric: queries and documents get different instruction prefixes.
