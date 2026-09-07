@@ -47,6 +47,21 @@ class BlobStoreTest {
     }
 
     @Test
+    void keepsTheVersionInUseAndDropsTheOlderOnes(@TempDir Path dir) {
+        BlobStore store = new BlobStore(dir);
+        for (int version = 1; version <= 3; version++) {
+            store.commit(store.stage(new ByteArrayInputStream(("v" + version).getBytes())), "doc-3", version, "txt");
+        }
+
+        store.deleteVersionsBefore("doc-3", 3);
+
+        assertThat(store.find("doc-3", 1)).isEmpty();
+        assertThat(store.find("doc-3", 2)).isEmpty();
+        assertThat(store.find("doc-3", 3)).isPresent();
+        store.deleteVersionsBefore("never-existed", 2);
+    }
+
+    @Test
     void rejectsUnsafePathSegments(@TempDir Path dir) {
         BlobStore store = new BlobStore(dir);
         assertThatThrownBy(() -> store.locate("../x", 1, "md")).isInstanceOf(IllegalArgumentException.class);

@@ -10,6 +10,7 @@ import com.personal.chatbot.service.parsing.DocumentParser;
 import com.personal.chatbot.support.FailingTextEmbedder;
 import com.personal.chatbot.support.FakeTextEmbedder;
 import com.personal.chatbot.support.IndexStores;
+import com.personal.chatbot.support.PausingDocumentParser;
 import com.personal.chatbot.support.TestDocuments;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
@@ -26,6 +27,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -37,6 +39,9 @@ class IngestionServiceTest {
     Path dir;
 
     private final List<Object> published = new CopyOnWriteArrayList<>();
+    private final PausingDocumentParser parser = new PausingDocumentParser();
+    /** Set to make the queued rebuild command fail, as a broken or unreadable index directory would. */
+    private final AtomicBoolean rebuildFails = new AtomicBoolean();
     private DocumentRegistry registry;
     private BlobStore blobStore;
     private LuceneIndexStore indexStore;
@@ -67,9 +72,15 @@ class IngestionServiceTest {
         };
         DocumentStatusUpdater status = new DocumentStatusUpdater(registry, publisher);
         IngestionFailureLog failures = new IngestionFailureLog();
-        DocumentIngestionPipeline pipeline = new DocumentIngestionPipeline(registry, blobStore, new DocumentParser(),
+        DocumentIngestionPipeline pipeline = new DocumentIngestionPipeline(registry, blobStore, parser,
                 indexStore, status, failures, Clock.systemUTC(), new SimpleMeterRegistry());
-        IngestionQueue queue = new IngestionQueue(pipeline::process);
+        IngestionQueue queue = new IngestionQueue(pipeline::process, () -> {
+            if (rebuildFails.get()) {
+                throw new IllegalStateException("simulated rebuild failure");
+            }
+            indexStore.rebuild();
+            return registry.findAll().stream().map(Document::id).toList();
+        });
         IndexReconciler reconciler = new IndexReconciler(registry, indexStore, status, queue,
                 properties().ingestion(), Clock.systemUTC());
         ingestion = new IngestionService(queue, reconciler, status, failures, registry, indexStore, Clock.systemUTC());
@@ -97,6 +108,14 @@ class IngestionServiceTest {
         await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
                 assertThat(registry.findById(id).orElseThrow().status()).isEqualTo(status));
         return registry.findById(id).orElseThrow();
+    }
+
+    /** Waits until nothing is in flight and nothing is waiting; the queue reports both atomically. */
+    private void awaitIdleQueue() {
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
+            assertThat(ingestion.queueStatus().activeDocumentId()).isNull();
+            assertThat(ingestion.queueStatus().pending()).isZero();
+        });
     }
 
     @Test
@@ -227,6 +246,125 @@ class IngestionServiceTest {
 
         ingestion.reindexAll();
         awaitStatus(id, DocumentStatus.READY);
+    }
+
+    @Test
+    void replacementDuringIngestionIsIndexedInsteadOfLost() {
+        parser.pauseNext(1);
+        String id = upload("runbook.md", TestDocuments.markdown()).documentId();
+        parser.awaitParsing();
+
+        documents.replaceContent(id, new DocumentService.Upload("runbook.md", null, 20,
+                new ByteArrayInputStream("# New\n\nCompletely new content here.".getBytes()), null));
+        parser.resume();
+
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> {
+            Document current = registry.findById(id).orElseThrow();
+            assertThat(current.version()).isEqualTo(2);
+            assertThat(current.status()).isEqualTo(DocumentStatus.READY);
+        });
+        awaitIdleQueue();
+        assertThat(indexStore.allChunks()).isNotEmpty().allMatch(c -> c.getId().startsWith(id + ":2:"));
+    }
+
+    @Test
+    void rebuildDuringIngestionKeepsEveryDocument() {
+        String settled = upload("settled.md", "# Settled\n\nAlready indexed text.".getBytes()).documentId();
+        awaitStatus(settled, DocumentStatus.READY);
+        parser.pauseNext(1);
+        String inFlight = upload("in-flight.md", TestDocuments.markdown()).documentId();
+        parser.awaitParsing();
+
+        assertThat(ingestion.reindexAll()).isEqualTo(2);
+        parser.resume();
+
+        awaitStatus(inFlight, DocumentStatus.READY);
+        awaitStatus(settled, DocumentStatus.READY);
+        awaitIdleQueue();
+        assertThat(indexStore.documentUris())
+                .containsExactlyInAnyOrder(DocumentParser.uriOf(settled), DocumentParser.uriOf(inFlight));
+    }
+
+    @Test
+    void uploadDuringAPendingRebuildIsIndexedToo() {
+        parser.pauseNext(1);
+        String inFlight = upload("in-flight.md", TestDocuments.markdown()).documentId();
+        parser.awaitParsing();
+        ingestion.reindexAll();
+
+        String late = upload("late.md", "# Late\n\nUploaded while the rebuild was waiting.".getBytes()).documentId();
+        parser.resume();
+
+        awaitStatus(inFlight, DocumentStatus.READY);
+        awaitStatus(late, DocumentStatus.READY);
+        awaitIdleQueue();
+        assertThat(indexStore.documentUris())
+                .containsExactlyInAnyOrder(DocumentParser.uriOf(inFlight), DocumentParser.uriOf(late));
+    }
+
+    @Test
+    void aFailedRebuildLeavesNoDocumentClaimingToBeIndexed() {
+        rebuildFails.set(true);
+        parser.pauseNext(1);
+        String id = upload("runbook.md", TestDocuments.markdown()).documentId();
+        parser.awaitParsing();
+
+        ingestion.reindexAll();
+        parser.resume();
+
+        awaitIdleQueue();
+        assertThat(registry.findById(id).orElseThrow().status()).isEqualTo(DocumentStatus.PENDING_REINDEX);
+        assertThat(indexStore.containsDocument(DocumentParser.uriOf(id))).isFalse();
+    }
+
+    @Test
+    void deletionDuringIngestionDoesNotBringTheDocumentBack() {
+        parser.pauseNext(1);
+        String id = upload("runbook.md", TestDocuments.markdown()).documentId();
+        parser.awaitParsing();
+
+        documents.delete(id);
+        parser.resume();
+
+        awaitIdleQueue();
+        assertThat(registry.findById(id)).isEmpty();
+        assertThat(registry.count()).isZero();
+        assertThat(indexStore.containsDocument(DocumentParser.uriOf(id))).isFalse();
+        assertThat(indexStore.allChunks()).isEmpty();
+    }
+
+    @Test
+    void repeatedReindexOfAnActiveDocumentRunsExactlyOnceMore() {
+        parser.pauseNext(1);
+        String id = upload("runbook.md", TestDocuments.markdown()).documentId();
+        parser.awaitParsing();
+        assertThat(parser.parses()).isEqualTo(1);
+
+        for (int i = 0; i < 5; i++) {
+            assertThat(ingestion.reindex(id).status()).isEqualTo(DocumentStatus.PENDING_REINDEX);
+        }
+        parser.resume();
+
+        awaitIdleQueue();
+        assertThat(registry.findById(id).orElseThrow().status()).isEqualTo(DocumentStatus.READY);
+        assertThat(parser.parses()).isEqualTo(2);
+    }
+
+    @Test
+    void replacedBlobSurvivesTheRunThatIsReadingItAndIsDroppedAfterwards() {
+        parser.pauseNext(1);
+        String id = upload("runbook.md", TestDocuments.markdown()).documentId();
+        parser.awaitParsing();
+
+        documents.replaceContent(id, new DocumentService.Upload("runbook.md", null, 20,
+                new ByteArrayInputStream("# New\n\nCompletely new content here.".getBytes()), null));
+        assertThat(blobStore.find(id, 1)).isPresent();
+        parser.resume();
+
+        awaitStatus(id, DocumentStatus.READY);
+        awaitIdleQueue();
+        assertThat(blobStore.find(id, 1)).isEmpty();
+        assertThat(blobStore.find(id, 2)).isPresent();
     }
 
     private Path write(String name, byte[] bytes) {

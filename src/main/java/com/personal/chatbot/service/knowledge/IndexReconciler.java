@@ -61,7 +61,7 @@ public class IndexReconciler {
                 case READY -> {
                     if (!indexed.contains(uri)) {
                         log.warn("Document {} is READY but missing from the index; scheduling re-index", document.id());
-                        status.transition(document.id(), d -> d.withStatusAt(DocumentStatus.PENDING_REINDEX, now())
+                        status.transition(document.id(), document.version(), d -> d.withStatusAt(DocumentStatus.PENDING_REINDEX, now())
                                 .withStatusMessage("missing from index after restart"));
                         queuedCount += resume(document.id());
                     }
@@ -69,7 +69,7 @@ public class IndexReconciler {
                 case PARSING, CHUNKING, INDEXING -> {
                     log.warn("Ingestion of {} was interrupted in stage {}", document.id(), document.status());
                     indexStore.deleteDocument(uri);
-                    status.transition(document.id(), d -> d.withStatusAt(DocumentStatus.FAILED, now())
+                    status.transition(document.id(), document.version(), d -> d.withStatusAt(DocumentStatus.FAILED, now())
                             .withError(new DocumentError(d.status().name().toLowerCase(), "interrupted by restart", now())));
                     if (settings.retryInterrupted()) {
                         queuedCount += resume(document.id());

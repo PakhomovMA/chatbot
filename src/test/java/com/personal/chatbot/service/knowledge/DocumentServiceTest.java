@@ -20,8 +20,17 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -31,7 +40,7 @@ class DocumentServiceTest {
     @TempDir
     Path dir;
 
-    private final List<Object> events = new ArrayList<>();
+    private final List<Object> events = Collections.synchronizedList(new ArrayList<>());
     private DocumentRegistry registry;
     private BlobStore blobStore;
     private DocumentService service;
@@ -76,8 +85,9 @@ class DocumentServiceTest {
         assertThat(dir.resolve("blobs/.staging")).isEmptyDirectory();
     }
 
+    /** The previous blob stays until ingestion is done with it; the pipeline prunes it afterwards. */
     @Test
-    void replaceContentBumpsVersionAndDropsOldBlob() {
+    void replaceContentBumpsVersionAndKeepsThePreviousBlob() {
         String id = service.upload(upload("a.md", "v1")).documentId();
         UploadResponse unchanged = service.replaceContent(id, upload("a.md", "v1"));
         assertThat(unchanged.duplicate()).isTrue();
@@ -89,8 +99,54 @@ class DocumentServiceTest {
         Document document = service.get(id);
         assertThat(document.originalFilename()).isEqualTo("a-new.txt");
         assertThat(document.status()).isEqualTo(DocumentStatus.UPLOADED);
+        assertThat(blobStore.find(id, 1)).isPresent();
+        assertThat(blobStore.find(id, 2)).isPresent();
+
+        blobStore.deleteVersionsBefore(id, 2);
         assertThat(blobStore.find(id, 1)).isEmpty();
         assertThat(blobStore.find(id, 2)).isPresent();
+    }
+
+    @Test
+    void concurrentIdenticalUploadsRegisterOneDocument() throws Exception {
+        List<UploadResponse> responses = inParallel(4, () -> service.upload(upload("same.md", "identical bytes")));
+
+        assertThat(registry.count()).isEqualTo(1);
+        assertThat(responses).extracting(UploadResponse::documentId).containsOnly(registry.findAll().getFirst().id());
+        assertThat(responses).filteredOn(r -> !r.duplicate()).hasSize(1);
+        assertThat(dir.resolve("blobs/.staging")).isEmptyDirectory();
+    }
+
+    @Test
+    void concurrentReplacementsAllocateDistinctIncreasingVersions() throws Exception {
+        String id = service.upload(upload("a.md", "v1")).documentId();
+        AtomicInteger content = new AtomicInteger();
+
+        List<UploadResponse> responses = inParallel(4,
+                () -> service.replaceContent(id, upload("a.md", "replacement " + content.incrementAndGet())));
+
+        assertThat(responses).extracting(UploadResponse::version).containsExactlyInAnyOrder(2, 3, 4, 5);
+        assertThat(service.get(id).version()).isEqualTo(5);
+        assertThat(blobStore.find(id, 5)).isPresent();
+        assertThat(dir.resolve("blobs/.staging")).isEmptyDirectory();
+    }
+
+    /** Runs {@code action} on {@code threads} threads that start together, and returns every result. */
+    private <T> List<T> inParallel(int threads, Callable<T> action) throws Exception {
+        CyclicBarrier start = new CyclicBarrier(threads);
+        List<T> results = new ArrayList<>();
+        try (ExecutorService pool = Executors.newFixedThreadPool(threads)) {
+            List<Future<T>> pending = IntStream.range(0, threads)
+                    .mapToObj(_ -> pool.submit(() -> {
+                        start.await(20, TimeUnit.SECONDS);
+                        return action.call();
+                    }))
+                    .toList();
+            for (Future<T> result : pending) {
+                results.add(result.get(30, TimeUnit.SECONDS));
+            }
+        }
+        return results;
     }
 
     @Test

@@ -3,6 +3,7 @@ package com.personal.chatbot.service.knowledge;
 import com.personal.chatbot.exceptions.RegistryCorruptedException;
 import com.personal.chatbot.models.knowledge.Document;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.SerializationFeature;
@@ -21,6 +22,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 /**
@@ -28,6 +31,11 @@ import java.util.stream.Collectors;
  * Every mutation is persisted before it returns, with an atomic replace (write temp file, keep the
  * previous file as {@code .bak}, move temp into place). On load a corrupt main file falls back to
  * the backup; if both are unreadable startup fails rather than silently starting empty.
+ *
+ * <p>All changes go through the write lock, and so do the compound operations built on top of it:
+ * {@link #update} for conditional single-entry changes and {@link #exclusively} for a caller that
+ * has to read, decide and write as one step. Lock order in the ingestion path is <em>queue monitor →
+ * registry lock</em>; nothing may wait for the ingestion worker or the index while holding this lock.
  */
 public class DocumentRegistry {
 
@@ -37,6 +45,33 @@ public class DocumentRegistry {
     static final String FILE_NAME = "registry.json";
     private static final String BACKUP_SUFFIX = ".bak";
     private static final String TEMP_SUFFIX = ".tmp";
+
+    /** Version expectation that matches whatever the registry holds; real versions start at 1. */
+    private static final int ANY_VERSION = 0;
+
+    /**
+     * Outcome of a conditional change. The three cases must be told apart by callers: a job that
+     * lost its document may neither resurrect a deleted entry nor push a newer version back.
+     */
+    public sealed interface Change {
+
+        /** The change was applied and persisted. */
+        record Applied(Document document) implements Change {
+        }
+
+        /** The document no longer exists; nothing was written. */
+        record Missing(String documentId) implements Change {
+        }
+
+        /** Another writer moved the document on; {@code current} is what the registry holds now. */
+        record Stale(Document current) implements Change {
+        }
+
+        /** The stored document if the change went through, {@code null} for {@link Missing} and {@link Stale}. */
+        default @Nullable Document applied() {
+            return this instanceof Applied result ? result.document() : null;
+        }
+    }
 
     /** On-disk envelope; {@code schemaVersion} lets later phases migrate the layout. */
     record RegistryFile(int schemaVersion, List<Document> documents) {
@@ -58,12 +93,57 @@ public class DocumentRegistry {
         load();
     }
 
+    /** Stores {@code document} unconditionally; the in-memory map only changes if the file was written. */
     public Document save(Document document) {
         lock.writeLock().lock();
         try {
-            documents.put(document.id(), document);
-            persist();
+            Document previous = documents.put(document.id(), document);
+            try {
+                persist();
+            } catch (RuntimeException e) {
+                restore(document.id(), previous);
+                throw e;
+            }
             return document;
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    /**
+     * Applies {@code change} to the current entry if the document still exists. Reading the entry,
+     * computing the new one and writing it happen under one lock.
+     */
+    public Change update(String id, UnaryOperator<Document> change) {
+        return update(id, ANY_VERSION, change);
+    }
+
+    /** {@link #update(String, UnaryOperator)}, but only while the document is at {@code expectedVersion}. */
+    public Change update(String id, int expectedVersion, UnaryOperator<Document> change) {
+        lock.writeLock().lock();
+        try {
+            Document current = documents.get(id);
+            if (current == null) {
+                return new Change.Missing(id);
+            }
+            if (expectedVersion != ANY_VERSION && current.version() != expectedVersion) {
+                return new Change.Stale(current);
+            }
+            return new Change.Applied(save(change.apply(current)));
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
+
+    /**
+     * Runs {@code work} with exclusive access to the registry, so a caller can look up a content
+     * hash, allocate a version, place a blob and store the entry without another writer slipping in
+     * between. Keep the callback short and free of index or queue calls (see the class comment).
+     */
+    public <T> T exclusively(Supplier<T> work) {
+        lock.writeLock().lock();
+        try {
+            return work.get();
         } finally {
             lock.writeLock().unlock();
         }
@@ -72,11 +152,17 @@ public class DocumentRegistry {
     public boolean delete(String id) {
         lock.writeLock().lock();
         try {
-            boolean removed = documents.remove(id) != null;
-            if (removed) {
-                persist();
+            Document previous = documents.remove(id);
+            if (previous == null) {
+                return false;
             }
-            return removed;
+            try {
+                persist();
+            } catch (RuntimeException e) {
+                restore(id, previous);
+                throw e;
+            }
+            return true;
         } finally {
             lock.writeLock().unlock();
         }
@@ -148,6 +234,15 @@ public class DocumentRegistry {
             log.info("Loaded {} documents from {}", documents.size(), source);
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot read " + source, e);
+        }
+    }
+
+    /** Must be called under the write lock. */
+    private void restore(String id, @Nullable Document previous) {
+        if (previous == null) {
+            documents.remove(id);
+        } else {
+            documents.put(id, previous);
         }
     }
 

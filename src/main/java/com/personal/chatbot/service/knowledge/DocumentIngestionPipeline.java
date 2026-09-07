@@ -9,6 +9,7 @@ import com.personal.chatbot.models.knowledge.DocumentError;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
 import com.personal.chatbot.observability.RequestContext;
 import com.personal.chatbot.service.index.KnowledgeIndexWriter;
+import com.personal.chatbot.service.knowledge.DocumentRegistry.Change;
 import com.personal.chatbot.service.parsing.DocumentParser;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -27,8 +28,12 @@ import java.util.concurrent.TimeUnit;
 /**
  * Ingestion of one document: {@code PARSING → INDEXING → READY | FAILED} (docs/system-plan.md §5).
  * All-or-nothing — on any failure the document's partial index content is purged and the registry
- * records the failing stage (INV-09). Concurrency is the queue's business; this class assumes it
- * owns the document for the duration of the call.
+ * records the failing stage (INV-09).
+ *
+ * <p>Concurrency is the queue's business, but two things are this class's: every registry change is
+ * conditional on the version this run started from, so a run cannot push an older version back or
+ * resurrect a deleted document; and the final {@code READY} is published through the run's claim, so
+ * a run that a deletion, a replacement or a rebuild has taken over commits nothing.
  */
 public class DocumentIngestionPipeline {
 
@@ -57,7 +62,8 @@ public class DocumentIngestionPipeline {
     }
 
     /** Entry point for the ingestion worker; never throws. */
-    public void process(String documentId) {
+    public void process(IngestionClaim claim) {
+        String documentId = claim.documentId();
         long started = System.nanoTime();
         try (RequestContext.Scope _ = RequestContext.with(RequestContext.DOCUMENT_ID, documentId)) {
             Document document = registry.findById(documentId).orElse(null);
@@ -65,81 +71,114 @@ public class DocumentIngestionPipeline {
                 log.info("Document {} vanished before ingestion", documentId);
                 return;
             }
+            if (superseded(claim, document, "start")) {
+                return;
+            }
             if (!indexStore.state().isWritable()) {
-                status.transition(documentId, d -> d.withStatusMessage("waiting: index is " + indexStore.state()));
+                status.transition(documentId, document.version(), d -> d.withStatusMessage("waiting: index is " + indexStore.state()));
                 log.warn("Skipping {}: index is {}", documentId, indexStore.state());
                 return;
             }
-            ingest(document);
-        } catch (RuntimeException e) {
-            log.error("Unexpected failure while ingesting {}", documentId, e);
-            fail(documentId, "ingestion", e.getMessage());
+            try {
+                ingest(claim, document);
+            } catch (RuntimeException e) {
+                log.error("Unexpected failure while ingesting {}", documentId, e);
+                fail(claim, document, "ingestion", e.getMessage());
+            }
         } finally {
+            pruneSupersededBlobs(documentId);
             timer("total").record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
         }
     }
 
-    private void ingest(Document document) {
+    private void ingest(IngestionClaim claim, Document document) {
         int version = document.version();
         String uri = DocumentParser.uriOf(document.id());
         log.info("Ingesting document {} '{}' v{}", document.id(), document.title(), version);
 
         NavigableDocument parsed;
-        status.transition(document.id(), d -> d.withStatusAt(DocumentStatus.PARSING, now()).withStatusMessage(null).withError(null));
+        status.transition(document.id(), version, d -> d.withStatusAt(DocumentStatus.PARSING, now()).withStatusMessage(null).withError(null));
         long stage = System.nanoTime();
         try {
             Path original = blobStore.find(document.id(), version)
                     .orElseThrow(() -> new DocumentParseException("Stored original for version " + version + " is missing"));
             parsed = parser.parse(document, original);
         } catch (DocumentParseException e) {
-            fail(document.id(), "parse", e.getMessage());
+            fail(claim, document, "parse", e.getMessage());
             return;
         } finally {
             timer("parse").record(System.nanoTime() - stage, TimeUnit.NANOSECONDS);
         }
 
-        status.transition(document.id(), d -> d.withStatusAt(DocumentStatus.INDEXING, now()));
+        if (superseded(claim, document, "indexing")) {
+            return;
+        }
+        status.transition(document.id(), version, d -> d.withStatusAt(DocumentStatus.INDEXING, now()));
         stage = System.nanoTime();
         List<String> chunkIds;
         try {
             chunkIds = indexStore.writeDocument(parsed);
         } catch (IndexWriteException e) {
-            fail(document.id(), e.stage(), e.getMessage());
+            fail(claim, document, e.stage(), e.getMessage());
             return;
         } catch (IndexUnavailableException e) {
-            status.transition(document.id(), d -> d.withStatusAt(DocumentStatus.UPLOADED, now()).withStatusMessage(e.getMessage()));
+            status.transition(document.id(), version, d -> d.withStatusAt(DocumentStatus.UPLOADED, now()).withStatusMessage(e.getMessage()));
             return;
         } finally {
             timer("index").record(System.nanoTime() - stage, TimeUnit.NANOSECONDS);
         }
 
-        Optional<Document> current = registry.findById(document.id());
-        if (current.isEmpty()) {
-            log.info("Document {} was deleted during ingestion; purging its chunks", document.id());
+        // Deciding and writing happen under the claim, announcing after it: an SSE send must never
+        // run while the queue is held.
+        Optional<Change> committed = claim.ifCurrent(() -> status.apply(document.id(), version,
+                d -> d.withStatusAt(DocumentStatus.READY, now())
+                        .withStatusMessage(null).withError(null)
+                        .withChunkCount(chunkIds.size()).withIndexedAt(now())
+                        .withEmbeddingFingerprint(indexStore.fingerprint().value())));
+        if (committed.isEmpty()) {
+            log.info("Document {} v{} was taken over while indexing; dropping what this run wrote", document.id(), version);
             indexStore.deleteDocument(uri);
             return;
         }
-        if (current.get().version() != version) {
-            log.info("Document {} was replaced during ingestion (v{} -> v{}); newer version will be indexed", document.id(),
-                    version, current.get().version());
-            return;
+        status.announce(committed.get());
+        switch (committed.get()) {
+            case Change.Applied _ -> log.info("Document {} indexed: {} chunks", document.id(), chunkIds.size());
+            case Change.Missing _ -> {
+                log.info("Document {} was deleted during ingestion; purging its chunks", document.id());
+                indexStore.deleteDocument(uri);
+            }
+            case Change.Stale stale -> log.info("Document {} was replaced during ingestion (v{} -> v{}); the newer version will be indexed",
+                    document.id(), version, stale.current().version());
         }
-        status.transition(document.id(), d -> d.withStatusAt(DocumentStatus.READY, now())
-                .withStatusMessage(null).withError(null)
-                .withChunkCount(chunkIds.size()).withIndexedAt(now())
-                .withEmbeddingFingerprint(indexStore.fingerprint().value()));
-        log.info("Document {} indexed: {} chunks", document.id(), chunkIds.size());
     }
 
-    private void fail(String documentId, String stage, @Nullable String message) {
-        indexStore.deleteDocument(DocumentParser.uriOf(documentId));
+    private void fail(IngestionClaim claim, Document document, String stage, @Nullable String message) {
+        indexStore.deleteDocument(DocumentParser.uriOf(document.id()));
         Counter.builder("chatbot.ingestion.failures").tag("stage", stage).register(meterRegistry).increment();
         String detail = message != null ? message : "unknown error";
-        failures.record(new IngestionFailureLog.Failure(documentId, stage, detail, now()));
-        log.warn("Ingestion of {} failed at stage {}: {}", documentId, stage, detail);
-        status.transition(documentId, d -> d.withStatusAt(DocumentStatus.FAILED, now())
+        failures.record(new IngestionFailureLog.Failure(document.id(), stage, detail, now()));
+        log.warn("Ingestion of {} failed at stage {}: {}", document.id(), stage, detail);
+        claim.ifCurrent(() -> status.apply(document.id(), document.version(), d -> d.withStatusAt(DocumentStatus.FAILED, now())
                 .withStatusMessage(null).withChunkCount(null).withIndexedAt(null)
-                .withError(new DocumentError(stage, detail, now())));
+                .withError(new DocumentError(stage, detail, now()))))
+                .ifPresent(status::announce);
+    }
+
+    /** True when a deletion, a newer request or a rebuild has taken this document over. */
+    private boolean superseded(IngestionClaim claim, Document document, String before) {
+        if (claim.isCurrent()) {
+            return false;
+        }
+        log.info("Abandoning {} v{} before {}: another request took the document over", document.id(), document.version(), before);
+        return true;
+    }
+
+    /**
+     * A replaced version stays on disk while this run may still be reading it (see
+     * {@link DocumentService#replaceContent}); once the run is over, only the current one is needed.
+     */
+    private void pruneSupersededBlobs(String documentId) {
+        registry.findById(documentId).ifPresent(current -> blobStore.deleteVersionsBefore(documentId, current.version()));
     }
 
     private Timer timer(String stage) {

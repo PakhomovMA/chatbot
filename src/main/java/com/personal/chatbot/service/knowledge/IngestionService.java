@@ -55,7 +55,7 @@ public class IngestionService implements IngestionOperations, AutoCloseable {
             case DocumentEvent.Uploaded uploaded -> enqueue(uploaded.documentId());
             case DocumentEvent.ContentReplaced replaced -> enqueue(replaced.documentId());
             case DocumentEvent.Deleted deleted -> {
-                queue.dequeue(deleted.documentId());
+                queue.invalidate(deleted.documentId());
                 indexStore.deleteDocument(DocumentParser.uriOf(deleted.documentId()));
             }
             case DocumentEvent.StatusChanged _ -> {
@@ -64,7 +64,7 @@ public class IngestionService implements IngestionOperations, AutoCloseable {
         }
     }
 
-    /** Queues a document for (re-)indexing; no-op if it is already queued or being processed. */
+    /** Queues a document for (re-)indexing; a document already in flight is queued again after it. */
     public boolean enqueue(String documentId) {
         return queue.enqueue(documentId);
     }
@@ -73,26 +73,35 @@ public class IngestionService implements IngestionOperations, AutoCloseable {
 
     @Override
     public DocumentStatusView reindex(String documentId) {
-        Document document = registry.findById(documentId).orElseThrow(() -> new DocumentNotFoundException(documentId));
-        Document pending = status.transition(document.id(), d -> d.withStatusAt(DocumentStatus.PENDING_REINDEX, now())
-                .withStatusMessage("re-index requested").withError(null));
+        // No version is expected here, so the only way to miss is a document that is already gone.
+        Document pending = status.transition(documentId, d -> d.withStatusAt(DocumentStatus.PENDING_REINDEX, now())
+                .withStatusMessage("re-index requested").withError(null)).applied();
+        if (pending == null) {
+            throw new DocumentNotFoundException(documentId);
+        }
         enqueue(documentId);
-        return DocumentStatusView.of(pending != null ? pending : document);
+        return DocumentStatusView.of(pending);
     }
 
+    /**
+     * Schedules a full rebuild and marks every known document for re-indexing. The rebuild itself
+     * runs as a command in the ingestion queue, after whatever is in flight; the documents to ingest
+     * are collected then, so uploads and replacements made while it waits are not lost.
+     *
+     * @return how many documents were accepted for re-indexing at the time of the request
+     */
     @Override
     public int reindexAll() {
-        queue.clear();
-        indexStore.rebuild();
-        int count = 0;
-        for (Document document : registry.findAll()) {
+        if (!queue.requestRebuild()) {
+            throw new IllegalStateException("Ingestion is shutting down; index rebuild was not accepted");
+        }
+        List<Document> documents = registry.findAll();
+        for (Document document : documents) {
             status.transition(document.id(), d -> d.withStatusAt(DocumentStatus.PENDING_REINDEX, now())
                     .withStatusMessage("index rebuild").withError(null).withChunkCount(null).withIndexedAt(null));
-            enqueue(document.id());
-            count++;
         }
-        log.info("Index rebuild requested: {} documents queued", count);
-        return count;
+        log.info("Index rebuild requested: {} documents accepted for re-indexing", documents.size());
+        return documents.size();
     }
 
     @Override

@@ -1,5 +1,6 @@
 package com.personal.chatbot.config;
 
+import com.personal.chatbot.models.knowledge.Document;
 import com.personal.chatbot.service.index.LuceneIndexStore;
 import com.personal.chatbot.service.knowledge.DocumentIngestionPipeline;
 import com.personal.chatbot.service.knowledge.DocumentRegistry;
@@ -41,9 +42,16 @@ class IngestionConfiguration {
         return new DocumentIngestionPipeline(registry, blobStore, parser, indexStore, status, failures, clock, meterRegistry);
     }
 
+    /**
+     * The rebuild runs as a command of this queue rather than beside it, so it cannot delete the
+     * result of a document still being ingested (docs/concurrency-plan.md C03).
+     */
     @Bean(destroyMethod = "close")
-    IngestionQueue ingestionQueue(DocumentIngestionPipeline pipeline) {
-        return new IngestionQueue(pipeline::process);
+    IngestionQueue ingestionQueue(DocumentIngestionPipeline pipeline, LuceneIndexStore indexStore, DocumentRegistry registry) {
+        return new IngestionQueue(pipeline::process, () -> {
+            indexStore.rebuild();
+            return registry.findAll().stream().map(Document::id).toList();
+        });
     }
 
     @Bean

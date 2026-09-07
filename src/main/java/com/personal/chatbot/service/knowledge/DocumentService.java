@@ -67,55 +67,66 @@ public class DocumentService {
     public UploadResponse upload(Upload upload) {
         String filename = validator.validateName(upload.filename(), upload.declaredSize());
         StagedBlob staged = stage(upload);
+        Registered registered;
         try {
-            Document existing = registry.findByContentHash(staged.contentHash()).orElse(null);
-            if (existing != null) {
-                blobStore.discard(staged);
-                log.info("Upload of {} duplicates document {} (hash {})", filename, existing.id(), staged.contentHash());
-                return new UploadResponse(existing.id(), existing.status(), existing.version(), true);
-            }
-            String title = upload.title() != null && !upload.title().isBlank() ? upload.title().strip() : Filenames.baseName(filename);
-            Document document = Document.uploaded(title, filename, MediaTypes.resolve(upload.declaredMediaType(), filename), staged.sizeBytes(),
-                    staged.contentHash(), now());
-            blobStore.commit(staged, document.id(), document.version(), Filenames.extension(filename));
-            registry.save(document);
-            log.info("Registered document {} '{}' ({} bytes, {})", document.id(), title, staged.sizeBytes(), filename);
-            events.publishEvent(new DocumentEvent.Uploaded(document.id(), document.version()));
-            return new UploadResponse(document.id(), document.status(), document.version(), false);
-        } catch (RuntimeException e) {
+            registered = registry.exclusively(() -> {
+                Document existing = registry.findByContentHash(staged.contentHash()).orElse(null);
+                if (existing != null) {
+                    log.info("Upload of {} duplicates document {} (hash {})", filename, existing.id(), staged.contentHash());
+                    return new Registered(existing, true);
+                }
+                String title = upload.title() != null && !upload.title().isBlank() ? upload.title().strip() : Filenames.baseName(filename);
+                Document document = Document.uploaded(title, filename, MediaTypes.resolve(upload.declaredMediaType(), filename),
+                        staged.sizeBytes(), staged.contentHash(), now());
+                store(staged, document, filename);
+                return new Registered(document, false);
+            });
+        } finally {
             blobStore.discard(staged);
-            throw e;
         }
+        Document document = registered.document();
+        if (!registered.duplicate()) {
+            log.info("Registered document {} '{}' ({} bytes, {})", document.id(), document.title(), staged.sizeBytes(), filename);
+            events.publishEvent(new DocumentEvent.Uploaded(document.id(), document.version()));
+        }
+        return new UploadResponse(document.id(), document.status(), document.version(), registered.duplicate());
     }
 
-    /** Replaces the content of an existing document (new version) unless the bytes are unchanged. */
+    /**
+     * Replaces the content of an existing document (new version) unless the bytes are unchanged.
+     * The previous version's blob is left on disk: an ingestion run may still be reading it, and the
+     * ingestion pipeline drops superseded versions once it is done with them.
+     */
     public UploadResponse replaceContent(String documentId, Upload upload) {
-        Document current = get(documentId);
         String filename = validator.validateName(upload.filename(), upload.declaredSize());
         StagedBlob staged = stage(upload);
+        Registered registered;
         try {
-            if (current.contentHash().equals(staged.contentHash())) {
-                blobStore.discard(staged);
-                return new UploadResponse(current.id(), current.status(), current.version(), true);
-            }
-            registry.findByContentHash(staged.contentHash()).ifPresent(other -> {
-                if (!other.id().equals(documentId)) {
-                    throw new InvalidUploadException(Reason.BAD_FILENAME,
-                            "Identical content is already registered as document " + other.id());
+            registered = registry.exclusively(() -> {
+                Document current = registry.findById(documentId).orElseThrow(() -> new DocumentNotFoundException(documentId));
+                if (current.contentHash().equals(staged.contentHash())) {
+                    return new Registered(current, true);
                 }
+                registry.findByContentHash(staged.contentHash()).ifPresent(other -> {
+                    if (!other.id().equals(documentId)) {
+                        throw new InvalidUploadException(Reason.BAD_FILENAME,
+                                "Identical content is already registered as document " + other.id());
+                    }
+                });
+                Document replaced = current.replacedContent(filename, MediaTypes.resolve(upload.declaredMediaType(), filename),
+                        staged.sizeBytes(), staged.contentHash(), now());
+                store(staged, replaced, filename);
+                log.info("Replaced content of document {}: version {} -> {}", documentId, current.version(), replaced.version());
+                return new Registered(replaced, false);
             });
-            Document replaced = current.replacedContent(filename, MediaTypes.resolve(upload.declaredMediaType(), filename), staged.sizeBytes(),
-                    staged.contentHash(), now());
-            blobStore.commit(staged, replaced.id(), replaced.version(), Filenames.extension(filename));
-            registry.save(replaced);
-            blobStore.deleteVersion(documentId, current.version());
-            log.info("Replaced content of document {}: version {} -> {}", documentId, current.version(), replaced.version());
-            events.publishEvent(new DocumentEvent.ContentReplaced(replaced.id(), replaced.version()));
-            return new UploadResponse(replaced.id(), replaced.status(), replaced.version(), false);
-        } catch (RuntimeException e) {
+        } finally {
             blobStore.discard(staged);
-            throw e;
         }
+        Document document = registered.document();
+        if (!registered.duplicate()) {
+            events.publishEvent(new DocumentEvent.ContentReplaced(document.id(), document.version()));
+        }
+        return new UploadResponse(document.id(), document.status(), document.version(), registered.duplicate());
     }
 
     public Document get(String documentId) {
@@ -135,13 +146,33 @@ public class DocumentService {
     }
 
     public void delete(String documentId) {
-        Document document = get(documentId);
-        registry.delete(document.id());
+        Document document = registry.exclusively(() -> {
+            Document current = registry.findById(documentId).orElseThrow(() -> new DocumentNotFoundException(documentId));
+            registry.delete(current.id());
+            return current;
+        });
         events.publishEvent(new DocumentEvent.Deleted(document.id()));
         blobStore.delete(document.id());
         log.info("Deleted document {} '{}'", document.id(), document.title());
     }
 
+    /** What {@link #upload} and {@link #replaceContent} agreed on while holding the registry lock. */
+    private record Registered(Document document, boolean duplicate) {
+    }
+
+    /**
+     * Puts the staged bytes in their final place and registers the entry. If the registry cannot be
+     * written the new blob goes away again, so an unregistered version never survives.
+     */
+    private void store(StagedBlob staged, Document document, String filename) {
+        blobStore.commit(staged, document.id(), document.version(), Filenames.extension(filename));
+        try {
+            registry.save(document);
+        } catch (RuntimeException e) {
+            blobStore.deleteVersion(document.id(), document.version());
+            throw e;
+        }
+    }
 
     private StagedBlob stage(Upload upload) {
         StagedBlob staged = blobStore.stage(upload.content());

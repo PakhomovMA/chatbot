@@ -4,6 +4,7 @@ import com.personal.chatbot.exceptions.RegistryCorruptedException;
 import com.personal.chatbot.models.knowledge.Document;
 import com.personal.chatbot.models.knowledge.DocumentError;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
+import com.personal.chatbot.service.knowledge.DocumentRegistry.Change;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -66,6 +67,26 @@ class DocumentRegistryTest {
         assertThat(registry.delete(older.id())).isTrue();
         assertThat(registry.delete(older.id())).isFalse();
         assertThat(new DocumentRegistry(dir).findAll()).containsExactly(newer);
+    }
+
+    @Test
+    void conditionalUpdatesSeparateAppliedMissingAndStale(@TempDir Path dir) {
+        DocumentRegistry registry = new DocumentRegistry(dir);
+        Document stored = registry.save(doc("one", Instant.parse("2026-09-07T10:00:00Z")));
+
+        Change applied = registry.update(stored.id(), stored.version(), d -> d.withStatus(DocumentStatus.READY));
+        assertThat(applied).isInstanceOf(Change.Applied.class);
+        assertThat(applied.applied()).isNotNull().extracting(Document::status).isEqualTo(DocumentStatus.READY);
+
+        Change stale = registry.update(stored.id(), stored.version() + 1, d -> d.withStatus(DocumentStatus.FAILED));
+        assertThat(stale).isInstanceOf(Change.Stale.class);
+        assertThat(((Change.Stale) stale).current().status()).isEqualTo(DocumentStatus.READY);
+
+        registry.delete(stored.id());
+        Change missing = registry.update(stored.id(), d -> d.withStatus(DocumentStatus.READY));
+        assertThat(missing).isEqualTo(new Change.Missing(stored.id()));
+        assertThat(registry.count()).isZero();
+        assertThat(new DocumentRegistry(dir).findAll()).isEmpty();
     }
 
     @Test

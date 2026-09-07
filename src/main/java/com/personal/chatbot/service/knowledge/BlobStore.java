@@ -17,7 +17,9 @@ import java.security.DigestOutputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -112,8 +114,47 @@ public class BlobStore {
         Directories.deleteTreeUnchecked(root.resolve(requireSafe(documentId)).resolve("v" + version));
     }
 
+    /**
+     * Drops every stored version older than {@code keep}. A replaced version stays on disk until the
+     * ingestion run that was reading it is over, so this runs after a run instead of during a replace.
+     * Failures are logged, never propagated: leftover bytes are cheaper than a broken ingestion.
+     */
+    public void deleteVersionsBefore(String documentId, int keep) {
+        Path dir = root.resolve(requireSafe(documentId));
+        if (!Files.isDirectory(dir)) {
+            return;
+        }
+        List<Path> superseded;
+        try (Stream<Path> versions = Files.list(dir)) {
+            superseded = versions.filter(Files::isDirectory)
+                    .filter(p -> versionOf(p.getFileName().toString()).orElse(Integer.MAX_VALUE) < keep)
+                    .toList();
+        } catch (IOException e) {
+            log.warn("Cannot list versions of document {}: {}", documentId, e.toString());
+            return;
+        }
+        for (Path version : superseded) {
+            try {
+                Directories.deleteTree(version);
+            } catch (IOException e) {
+                log.warn("Cannot delete superseded blob {}: {}", version, e.toString());
+            }
+        }
+    }
+
     public Path root() {
         return root;
+    }
+
+    private static OptionalInt versionOf(String directoryName) {
+        if (!directoryName.startsWith("v")) {
+            return OptionalInt.empty();
+        }
+        try {
+            return OptionalInt.of(Integer.parseInt(directoryName.substring(1)));
+        } catch (NumberFormatException e) {
+            return OptionalInt.empty();
+        }
     }
 
     private static String requireSafe(String segment) {
