@@ -33,6 +33,7 @@ import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
@@ -113,7 +114,7 @@ public class LuceneIndexStore implements AutoCloseable {
             }
             refreshState();
             log.info("Lucene index opened at {}: {} chunks, {} documents, state {}", lucenePath,
-                    operations.info().getChunkCount(), operations.info().getDocumentCount(), state);
+                    Objects.requireNonNull(operations).info().getChunkCount(), operations.info().getDocumentCount(), state);
             return this;
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot open index at " + indexDir, e);
@@ -127,12 +128,12 @@ public class LuceneIndexStore implements AutoCloseable {
             return build(lucenePath);
         } catch (Exception first) { // Lucene surfaces checked IOExceptions through the Kotlin constructor
             if (!hasFiles(lucenePath)) {
-                throw first instanceof RuntimeException runtime ? runtime : new IllegalStateException(first);
+                throw (RuntimeException) first;
             }
             Path quarantine = lucenePath.resolveSibling(LUCENE_DIR + ".corrupt-"
                     + DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(java.time.LocalDateTime.now()));
             log.error("Lucene index at {} cannot be opened ({}); moving it to {} and starting empty", lucenePath,
-                    first.toString(), quarantine);
+                    first, quarantine);
             Files.move(lucenePath, quarantine, StandardCopyOption.ATOMIC_MOVE);
             Files.createDirectories(lucenePath);
             recoveredFrom = quarantine.toString();

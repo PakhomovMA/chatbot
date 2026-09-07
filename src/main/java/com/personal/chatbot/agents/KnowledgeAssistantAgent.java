@@ -35,6 +35,7 @@ import com.personal.chatbot.service.retrieval.RetrievalService;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -122,58 +123,6 @@ public class KnowledgeAssistantAgent {
         return new AnswerAttempt(evidence, writeDraft(evidence, context), prompt.includedHits(evidence.hits()));
     }
 
-    private GroundedAnswerDraft writeDraft(Evidence evidence, OperationContext context) {
-        UserQuestion question = evidence.question();
-        if (evidence.isEmpty()) {
-            GroundedAnswerDraft draft = GroundedAnswerDraft.insufficient(NO_EVIDENCE_ANSWER, "No relevant passages were retrieved.");
-            AnswerStreamSink sink = question.stream();
-            if (sink != null) {
-                sink.stage(STAGE_GENERATING);
-                sink.delta(draft.answer());
-            }
-            return draft;
-        }
-        question.notifyStage(STAGE_GENERATING);
-        PromptRunner runner = context.ai().withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()));
-        long started = System.nanoTime();
-        String operation = "draft-answer";
-        try {
-            AnswerStreamSink sink = question.stream();
-            if (sink != null && runner.supportsStreaming()) {
-                operation = "draft-answer-stream";
-                return streamDraft(runner, question, evidence, sink);
-            }
-            GroundedAnswerDraft draft = runner.creating(GroundedAnswerDraft.class)
-                    .fromPrompt(prompt.build(question.question(), question.history(), evidence.hits()));
-            if (sink != null) {
-                sink.delta(draft.answer() != null ? draft.answer() : "");
-            }
-            return draft;
-        } finally {
-            Timer.builder("chatbot.llm").tag("operation", operation).register(meterRegistry)
-                    .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
-        }
-    }
-
-    private GroundedAnswerDraft streamDraft(PromptRunner runner, UserQuestion question, Evidence evidence, AnswerStreamSink sink) {
-        StringBuilder text = new StringBuilder();
-        StreamingPromptRunner.Streaming streaming = (StreamingPromptRunner.Streaming) runner.streaming();
-        streaming.withPrompt(prompt.buildForStreaming(question.question(), question.history(), evidence.hits()))
-                .generateStream()
-                // Cancelling the Flux closes the streaming call to the model, so an abandoned request
-                // stops costing tokens as soon as the client disconnect is noticed.
-                .takeWhile(_ -> !sink.cancelled())
-                .doOnNext(fragment -> {
-                    text.append(fragment);
-                    sink.delta(fragment);
-                })
-                .blockLast();
-        if (sink.cancelled()) {
-            throw new ChatCancelledException(question.messageId());
-        }
-        return StreamedDraftParser.parse(text.toString());
-    }
-
     // ---- agentic path (ToolishRag) -----------------------------------------------------------------
 
     /**
@@ -187,14 +136,7 @@ public class KnowledgeAssistantAgent {
         long started = System.nanoTime();
         AnswerStreamSink sink = question.stream();
         BooleanSupplier cancelled = sink != null ? sink::cancelled : () -> false;
-        AtomicInteger searches = new AtomicInteger();
-        // Narrate every tool call to a streaming client: the tool loop is otherwise silent for as long
-        // as the model takes, and the final answer arrives in one piece (no token streaming here).
-        EvidenceCollector collector = new EvidenceCollector(step -> {
-            if (sink != null) {
-                sink.stage(STAGE_RESEARCHING, "search %d: \"%s\" (%d passages)".formatted(searches.incrementAndGet(), step.query(), step.results()));
-            }
-        });
+        EvidenceCollector collector = buildCollector(sink);
         ToolishRag rag = new ToolishRag(REFERENCE_NAME,
                 "Search tools over the team's internal documentation. Use them to find passages before answering.",
                 indexStore.searchOperations())
@@ -250,5 +192,68 @@ public class KnowledgeAssistantAgent {
         GroundedAnswer answer = verifier.verify(evidence, attempt.draft(), attempt.passagesShown());
         log.debug("Answer for [{}]: {} with {} citations", evidence.question().messageId(), answer.grounding(), answer.citations().size());
         return answer;
+    }
+
+    private GroundedAnswerDraft writeDraft(Evidence evidence, OperationContext context) {
+        UserQuestion question = evidence.question();
+        if (evidence.isEmpty()) {
+            GroundedAnswerDraft draft = GroundedAnswerDraft.insufficient(NO_EVIDENCE_ANSWER, "No relevant passages were retrieved.");
+            AnswerStreamSink sink = question.stream();
+            if (sink != null) {
+                sink.stage(STAGE_GENERATING);
+                sink.delta(draft.answer());
+            }
+            return draft;
+        }
+        question.notifyStage(STAGE_GENERATING);
+        PromptRunner runner = context.ai().withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()));
+        long started = System.nanoTime();
+        String operation = "draft-answer";
+        try {
+            AnswerStreamSink sink = question.stream();
+            if (sink != null && runner.supportsStreaming()) {
+                operation = "draft-answer-stream";
+                return streamDraft(runner, question, evidence, sink);
+            }
+            GroundedAnswerDraft draft = runner.creating(GroundedAnswerDraft.class)
+                    .fromPrompt(prompt.build(question.question(), question.history(), evidence.hits()));
+            if (sink != null) {
+                sink.delta(draft.answer() != null ? draft.answer() : "");
+            }
+            return draft;
+        } finally {
+            Timer.builder("chatbot.llm").tag("operation", operation).register(meterRegistry)
+                    .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
+        }
+    }
+
+    private GroundedAnswerDraft streamDraft(PromptRunner runner, UserQuestion question, Evidence evidence, AnswerStreamSink sink) {
+        StringBuilder text = new StringBuilder();
+        StreamingPromptRunner.Streaming streaming = (StreamingPromptRunner.Streaming) runner.streaming();
+        streaming.withPrompt(prompt.buildForStreaming(question.question(), question.history(), evidence.hits()))
+                .generateStream()
+                // Cancelling the Flux closes the streaming call to the model, so an abandoned request
+                // stops costing tokens as soon as the client disconnect is noticed.
+                .takeWhile(_ -> !sink.cancelled())
+                .doOnNext(fragment -> {
+                    text.append(fragment);
+                    sink.delta(fragment);
+                })
+                .blockLast();
+        if (sink.cancelled()) {
+            throw new ChatCancelledException(question.messageId());
+        }
+        return StreamedDraftParser.parse(text.toString());
+    }
+
+    private static @NonNull EvidenceCollector buildCollector(AnswerStreamSink sink) {
+        AtomicInteger searches = new AtomicInteger();
+        // Narrate every tool call to a streaming client: the tool loop is otherwise silent for as long
+        // as the model takes, and the final answer arrives in one piece (no token streaming here).
+        return new EvidenceCollector(step -> {
+            if (sink != null) {
+                sink.stage(STAGE_RESEARCHING, "search %d: \"%s\" (%d passages)".formatted(searches.incrementAndGet(), step.query(), step.results()));
+            }
+        });
     }
 }

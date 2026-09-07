@@ -9,6 +9,7 @@ import com.embabel.agent.rag.model.HierarchicalContentElement;
 import com.embabel.agent.rag.model.LeafSection;
 import com.embabel.agent.rag.model.NavigableContainerSection;
 import com.embabel.agent.rag.model.NavigableSection;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayDeque;
@@ -53,12 +54,12 @@ public final class ProvenanceChunkTransformer implements ChunkTransformer {
     private static final int PROBE_LENGTH = 80;
 
     @Override
-    public String getName() {
+    public @NonNull String getName() {
         return TRANSFORMER_VERSION;
     }
 
     @Override
-    public Chunk transform(Chunk chunk, ChunkTransformationContext context) {
+    public @NonNull Chunk transform(Chunk chunk, ChunkTransformationContext context) {
         ContentRoot document = context.getDocument();
         Map<String, Object> rootMetadata = document != null ? document.getMetadata() : Map.of();
         String documentId = stringOr(rootMetadata.get(DOCUMENT_ID), document != null ? document.getId() : chunk.getParentId());
@@ -129,10 +130,11 @@ public final class ProvenanceChunkTransformer implements ChunkTransformer {
         NavigableSection current = byId.get(leafId);
         while (current != null) {
             String sectionTitle = current.getTitle();
-            if (sectionTitle != null && !sectionTitle.isBlank() && (titles.isEmpty() || !titles.peekFirst().equals(sectionTitle))) {
+            if (!sectionTitle.isBlank() && (titles.isEmpty() || !titles.peekFirst().equals(sectionTitle))) {
                 titles.addFirst(sectionTitle);
             }
-            String parentId = current instanceof HierarchicalContentElement element ? element.getParentId() : null;
+            HierarchicalContentElement element = current;
+            String parentId = element.getParentId();
             current = parentId != null ? byId.get(parentId) : null;
         }
         return withoutDocumentTitle(String.join(PATH_SEPARATOR, titles), document.getTitle(), PATH_SEPARATOR);
@@ -150,7 +152,7 @@ public final class ProvenanceChunkTransformer implements ChunkTransformer {
         List<String> titles = new ArrayList<>();
         for (LeafSection leaf : root.leaves()) {
             String title = leaf.getTitle();
-            if (title == null || title.isBlank() || titles.contains(title)) {
+            if (title.isBlank() || titles.contains(title)) {
                 continue;
             }
             String body = leaf.getText().strip();

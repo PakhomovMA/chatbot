@@ -5,6 +5,7 @@ import com.embabel.agent.rag.model.Retrievable;
 import com.embabel.agent.rag.service.CoreSearchOperations;
 import com.embabel.agent.rag.service.ResultExpander;
 import com.embabel.agent.rag.service.TextQueryMode;
+import com.embabel.agent.rag.service.TextSearch;
 import com.embabel.common.core.types.SimilarityResult;
 import com.embabel.common.core.types.TextSimilaritySearchRequest;
 import com.personal.chatbot.utils.EmbeddingModeScope;
@@ -45,17 +46,17 @@ public final class LockedSearchOperations implements CoreSearchOperations, Resul
 
     @Override
     public @NotNull Set<TextQueryMode> getSupportedQueryModes() {
-        return store.search(ops -> ops.getSupportedQueryModes());
+        return store.search(TextSearch::getSupportedQueryModes);
     }
 
     @Override
     public @NotNull TextQueryMode getQueryMode() {
-        return store.search(ops -> ops.getQueryMode());
+        return store.search(TextSearch::getQueryMode);
     }
 
     @Override
     public @NotNull String getLuceneSyntaxNotes() {
-        return store.search(ops -> ops.getLuceneSyntaxNotes());
+        return store.search(TextSearch::getLuceneSyntaxNotes);
     }
 
     @Override
