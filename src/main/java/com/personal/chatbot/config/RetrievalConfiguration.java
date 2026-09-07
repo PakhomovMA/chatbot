@@ -8,7 +8,7 @@ import org.springframework.context.annotation.Configuration;
 class RetrievalConfiguration {
 
     @Bean
-    RetrievalTraceStore retrievalTraceStore(ChatbotProperties properties) {
-        return new RetrievalTraceStore(properties.retrieval().traceBufferSize());
+    RetrievalTraceStore retrievalTraceStore(ChatbotProperties.Retrieval settings) {
+        return new RetrievalTraceStore(settings.traceBufferSize());
     }
 }

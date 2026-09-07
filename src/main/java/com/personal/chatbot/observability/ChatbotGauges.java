@@ -2,9 +2,9 @@ package com.personal.chatbot.observability;
 
 import com.personal.chatbot.models.knowledge.DocumentStatus;
 import com.personal.chatbot.service.chat.ConversationStore;
-import com.personal.chatbot.service.index.LuceneIndexStore;
+import com.personal.chatbot.service.index.IndexStatus;
 import com.personal.chatbot.service.knowledge.DocumentRegistry;
-import com.personal.chatbot.service.knowledge.IngestionService;
+import com.personal.chatbot.service.knowledge.IngestionOperations;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -14,8 +14,8 @@ import org.springframework.stereotype.Component;
 @Component
 class ChatbotGauges {
 
-    ChatbotGauges(MeterRegistry registry, LuceneIndexStore indexStore, DocumentRegistry documents,
-                  IngestionService ingestion, ConversationStore conversations, RetrievalTraceStore traces) {
+    ChatbotGauges(MeterRegistry registry, IndexStatus indexStore, DocumentRegistry documents,
+                  IngestionOperations ingestion, ConversationStore conversations, RetrievalTraceStore traces) {
         Gauge.builder("chatbot.index.chunks", indexStore, s -> s.info().chunkCount())
                 .description("Chunks in the Lucene index").register(registry);
         Gauge.builder("chatbot.index.documents", indexStore, s -> s.info().documentCount())

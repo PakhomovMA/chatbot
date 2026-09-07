@@ -5,7 +5,7 @@ import com.personal.chatbot.models.knowledge.Document;
 import com.personal.chatbot.models.knowledge.DocumentEvent;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
 import com.personal.chatbot.models.knowledge.dto.DocumentStatusView;
-import com.personal.chatbot.service.index.LuceneIndexStore;
+import com.personal.chatbot.service.index.KnowledgeIndexWriter;
 import com.personal.chatbot.service.parsing.DocumentParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,7 +23,7 @@ import java.util.List;
  * (one document, all-or-nothing, INV-09) and {@link IndexReconciler} (startup repair).
  */
 @Service
-public class IngestionService implements AutoCloseable {
+public class IngestionService implements IngestionOperations, AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(IngestionService.class);
 
@@ -32,11 +32,11 @@ public class IngestionService implements AutoCloseable {
     private final DocumentStatusUpdater status;
     private final IngestionFailureLog failures;
     private final DocumentRegistry registry;
-    private final LuceneIndexStore indexStore;
+    private final KnowledgeIndexWriter indexStore;
     private final Clock clock;
 
     public IngestionService(IngestionQueue queue, IndexReconciler reconciler, DocumentStatusUpdater status,
-                            IngestionFailureLog failures, DocumentRegistry registry, LuceneIndexStore indexStore,
+                            IngestionFailureLog failures, DocumentRegistry registry, KnowledgeIndexWriter indexStore,
                             Clock clock) {
         this.queue = queue;
         this.reconciler = reconciler;
@@ -71,7 +71,7 @@ public class IngestionService implements AutoCloseable {
 
     // ---- admin operations ---------------------------------------------------------------------
 
-    /** Marks a document for re-indexing and queues it. */
+    @Override
     public DocumentStatusView reindex(String documentId) {
         Document document = registry.findById(documentId).orElseThrow(() -> new DocumentNotFoundException(documentId));
         Document pending = status.transition(document.id(), d -> d.withStatusAt(DocumentStatus.PENDING_REINDEX, now())
@@ -80,7 +80,7 @@ public class IngestionService implements AutoCloseable {
         return DocumentStatusView.of(pending != null ? pending : document);
     }
 
-    /** Rebuilds the index from scratch and re-queues every document. */
+    @Override
     public int reindexAll() {
         queue.clear();
         indexStore.rebuild();
@@ -95,11 +95,12 @@ public class IngestionService implements AutoCloseable {
         return count;
     }
 
+    @Override
     public IngestionQueue.Status queueStatus() {
         return queue.status();
     }
 
-    /** Most recent ingestion failures, newest first, for the knowledge-base status. */
+    @Override
     public List<IngestionFailureLog.Failure> recentFailures() {
         return failures.recent();
     }

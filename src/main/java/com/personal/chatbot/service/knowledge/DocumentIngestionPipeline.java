@@ -8,7 +8,7 @@ import com.personal.chatbot.models.knowledge.Document;
 import com.personal.chatbot.models.knowledge.DocumentError;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
 import com.personal.chatbot.observability.RequestContext;
-import com.personal.chatbot.service.index.LuceneIndexStore;
+import com.personal.chatbot.service.index.KnowledgeIndexWriter;
 import com.personal.chatbot.service.parsing.DocumentParser;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -37,14 +37,14 @@ public class DocumentIngestionPipeline {
     private final DocumentRegistry registry;
     private final BlobStore blobStore;
     private final DocumentParser parser;
-    private final LuceneIndexStore indexStore;
+    private final KnowledgeIndexWriter indexStore;
     private final DocumentStatusUpdater status;
     private final IngestionFailureLog failures;
     private final Clock clock;
     private final MeterRegistry meterRegistry;
 
     public DocumentIngestionPipeline(DocumentRegistry registry, BlobStore blobStore, DocumentParser parser,
-                                     LuceneIndexStore indexStore, DocumentStatusUpdater status,
+                                     KnowledgeIndexWriter indexStore, DocumentStatusUpdater status,
                                      IngestionFailureLog failures, Clock clock, MeterRegistry meterRegistry) {
         this.registry = registry;
         this.blobStore = blobStore;

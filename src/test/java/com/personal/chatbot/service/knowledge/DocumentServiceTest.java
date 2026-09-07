@@ -40,14 +40,8 @@ class DocumentServiceTest {
     void setUp() {
         registry = new DocumentRegistry(dir.resolve("documents"));
         blobStore = new BlobStore(dir.resolve("blobs"));
-        ChatbotProperties properties = new ChatbotProperties(dir,
-                new ChatbotProperties.Embedding("fake", null, null, 16, 2, true),
-                new ChatbotProperties.Knowledge(DataSize.ofKilobytes(1), Set.of("md", "txt")),
-                new ChatbotProperties.Index(null, true, 800, 100, 32),
-                new ChatbotProperties.Ingestion(true, true),
-                new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, 0.5, 200),
-                new ChatbotProperties.Chat(com.personal.chatbot.models.chat.AnswerMode.DETERMINISTIC, 4, 0.2, 0.1, 6000, 600, 10, 1000, java.time.Duration.ofHours(24)));
-        service = new DocumentService(registry, blobStore, properties,
+        var knowledge = new ChatbotProperties.Knowledge(DataSize.ofKilobytes(1), Set.of("md", "txt"));
+        service = new DocumentService(registry, blobStore, knowledge,
                 Clock.fixed(Instant.parse("2026-09-07T10:00:00Z"), ZoneOffset.UTC), events::add);
     }
 

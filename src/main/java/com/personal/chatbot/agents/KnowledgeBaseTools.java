@@ -6,7 +6,7 @@ import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.service.knowledge.DocumentRegistry;
-import com.personal.chatbot.service.retrieval.RetrievalService;
+import com.personal.chatbot.service.retrieval.Retriever;
 import com.personal.chatbot.utils.Texts;
 import org.springframework.stereotype.Component;
 
@@ -14,8 +14,15 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * Tool boundary for future agentic actions (docs/system-plan.md §7, INV-01): the only way a model
- * may reach retrieval. Registered now, wired into prompts in Phase 9; all tools are read-only.
+ * Tool boundary for annotation-driven agentic actions (docs/system-plan.md §7, INV-01): compact,
+ * read-only wrappers over {@link Retriever} and the document registry, never over Lucene.
+ *
+ * <p><b>Not reachable by any model today.</b> Embabel does not scan beans for {@code @LlmTool}
+ * (verified against 1.5.1: tool groups are MCP-only), so these methods run only once something
+ * passes this bean to a prompt runner via {@code withToolObject} / {@code withTools}. The agentic
+ * branch delivered in Phase 9c took the other route — {@code ToolishRag} over the store's guarded
+ * search operations — so this class stands ready for the remaining Phase 9 steps and is otherwise
+ * dead weight. Wire it or drop it; do not assume it is live.
  */
 @Component
 public class KnowledgeBaseTools {
@@ -23,10 +30,10 @@ public class KnowledgeBaseTools {
     static final int MAX_TOOL_HITS = 5;
     static final int SNIPPET_CHARS = 400;
 
-    private final RetrievalService retrievalService;
+    private final Retriever retrievalService;
     private final DocumentRegistry registry;
 
-    public KnowledgeBaseTools(RetrievalService retrievalService, DocumentRegistry registry) {
+    public KnowledgeBaseTools(Retriever retrievalService, DocumentRegistry registry) {
         this.retrievalService = retrievalService;
         this.registry = registry;
     }

@@ -18,31 +18,29 @@ import java.time.Clock;
 class ChatConfiguration {
 
     @Bean
-    ConversationStore conversationStore(ChatbotProperties properties, Clock clock) {
-        ChatbotProperties.Chat chat = properties.chat();
+    ConversationStore conversationStore(ChatbotProperties.Chat chat, Clock clock) {
         return new ConversationStore(chat.historyTurns(), chat.maxConversations(), chat.conversationTtl(), clock);
     }
 
     @Bean
-    GroundedAnswerPrompt groundedAnswerPrompt(ChatbotProperties properties) {
-        ChatbotProperties.Chat chat = properties.chat();
+    GroundedAnswerPrompt groundedAnswerPrompt(ChatbotProperties.Chat chat) {
         return new GroundedAnswerPrompt(chat.evidenceCharBudget(), chat.historyTurns());
     }
 
     @Bean
-    GroundingVerifier groundingVerifier(ChatbotProperties properties) {
-        return new GroundingVerifier(properties.chat().quoteMaxChars());
+    GroundingVerifier groundingVerifier(ChatbotProperties.Chat chat) {
+        return new GroundingVerifier(chat.quoteMaxChars());
     }
 
     @Bean
-    AnswerDrafter answerDrafter(GroundedAnswerPrompt prompt, ChatbotProperties properties, MeterRegistry meterRegistry) {
-        return new AnswerDrafter(prompt, properties.chat(), meterRegistry);
+    AnswerDrafter answerDrafter(GroundedAnswerPrompt prompt, ChatbotProperties.Chat chat, MeterRegistry meterRegistry) {
+        return new AnswerDrafter(prompt, chat, meterRegistry);
     }
 
     @Bean
     AgenticResearcher agenticResearcher(LockedSearchOperations searchOperations, GroundedAnswerPrompt prompt,
-                                        RetrievalTraceStore traces, ChatbotProperties properties,
+                                        RetrievalTraceStore traces, ChatbotProperties.Chat chat,
                                         MeterRegistry meterRegistry) {
-        return new AgenticResearcher(searchOperations, prompt, traces, properties.chat(), meterRegistry);
+        return new AgenticResearcher(searchOperations, prompt, traces, chat, meterRegistry);
     }
 }

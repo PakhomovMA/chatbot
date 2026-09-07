@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
  * (INV-05), serialises writers behind a read/write lock (INV-11), verifies that every chunk got a
  * vector (INV-09), recovers from a corrupt directory and rebuilds on demand.
  */
-public class LuceneIndexStore implements AutoCloseable {
+public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, AutoCloseable {
 
     private static final Logger log = LoggerFactory.getLogger(LuceneIndexStore.class);
 
@@ -120,6 +120,7 @@ public class LuceneIndexStore implements AutoCloseable {
      * Indexes a document, replacing any previous content stored under the same URI. Either every
      * chunk is written with its vector, or nothing of the document remains in the index.
      */
+    @Override
     public List<String> writeDocument(NavigableDocument document) {
         lock.writeLock().lock();
         try {
@@ -149,7 +150,7 @@ public class LuceneIndexStore implements AutoCloseable {
         }
     }
 
-    /** @return true if something was removed. */
+    @Override
     public boolean deleteDocument(String uri) {
         lock.writeLock().lock();
         try {
@@ -173,7 +174,7 @@ public class LuceneIndexStore implements AutoCloseable {
         }
     }
 
-    /** URIs of every document root currently in the index. */
+    @Override
     public Set<String> documentUris() {
         lock.readLock().lock();
         try {
@@ -238,6 +239,7 @@ public class LuceneIndexStore implements AutoCloseable {
     }
 
     /** Drops all content and starts a fresh index under the current fingerprint. */
+    @Override
     public void rebuild() {
         lock.writeLock().lock();
         try {
@@ -264,10 +266,12 @@ public class LuceneIndexStore implements AutoCloseable {
         }
     }
 
+    @Override
     public IndexState state() {
         return state;
     }
 
+    @Override
     public IndexInfo info() {
         lock.readLock().lock();
         try {
@@ -286,6 +290,7 @@ public class LuceneIndexStore implements AutoCloseable {
         }
     }
 
+    @Override
     public EmbeddingFingerprint fingerprint() {
         return fingerprint;
     }

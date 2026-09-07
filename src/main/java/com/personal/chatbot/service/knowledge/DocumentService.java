@@ -55,11 +55,11 @@ public class DocumentService {
     private final Clock clock;
     private final ApplicationEventPublisher events;
 
-    public DocumentService(DocumentRegistry registry, BlobStore blobStore, ChatbotProperties properties, Clock clock,
+    public DocumentService(DocumentRegistry registry, BlobStore blobStore, ChatbotProperties.Knowledge settings, Clock clock,
                            ApplicationEventPublisher events) {
         this.registry = registry;
         this.blobStore = blobStore;
-        this.validator = new UploadValidator(properties.knowledge());
+        this.validator = new UploadValidator(settings);
         this.clock = clock;
         this.events = events;
     }

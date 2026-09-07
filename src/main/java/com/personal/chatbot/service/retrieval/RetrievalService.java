@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit;
  * {@code [0, 1)} by Embabel.
  */
 @Service
-public class RetrievalService {
+public class RetrievalService implements Retriever {
 
     private static final Logger log = LoggerFactory.getLogger(RetrievalService.class);
 
@@ -46,15 +46,16 @@ public class RetrievalService {
     private final HitFusion fusion;
     private final MeterRegistry meterRegistry;
 
-    public RetrievalService(LuceneIndexStore indexStore, RetrievalTraceStore traces, ChatbotProperties properties,
+    public RetrievalService(LuceneIndexStore indexStore, RetrievalTraceStore traces, ChatbotProperties.Retrieval settings,
                             MeterRegistry meterRegistry) {
         this.indexStore = indexStore;
         this.traces = traces;
-        this.settings = properties.retrieval();
+        this.settings = settings;
         this.fusion = new HitFusion(settings.rrfK());
         this.meterRegistry = meterRegistry;
     }
 
+    @Override
     public RetrievalResult search(RetrievalQuery query) {
         long started = System.nanoTime();
         String text = query.query().strip();

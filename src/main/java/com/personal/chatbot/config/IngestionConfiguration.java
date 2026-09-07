@@ -48,7 +48,7 @@ class IngestionConfiguration {
 
     @Bean
     IndexReconciler indexReconciler(DocumentRegistry registry, LuceneIndexStore indexStore, DocumentStatusUpdater status,
-                                    IngestionQueue queue, ChatbotProperties properties, Clock clock) {
-        return new IndexReconciler(registry, indexStore, status, queue, properties.ingestion(), clock);
+                                    IngestionQueue queue, ChatbotProperties.Ingestion settings, Clock clock) {
+        return new IndexReconciler(registry, indexStore, status, queue, settings, clock);
     }
 }

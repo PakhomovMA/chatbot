@@ -53,13 +53,13 @@ public class ChatService {
     private final AnswerMode defaultMode;
 
     public ChatService(AgentPlatform agentPlatform, ConversationStore conversations, RetrievalTraceStore traces,
-                       MeterRegistry meterRegistry, Clock clock, ChatbotProperties properties) {
+                       MeterRegistry meterRegistry, Clock clock, ChatbotProperties.Chat settings) {
         this.agentPlatform = agentPlatform;
         this.conversations = conversations;
         this.traces = traces;
         this.meterRegistry = meterRegistry;
         this.clock = clock;
-        this.defaultMode = properties.chat().mode();
+        this.defaultMode = settings.mode();
     }
 
     public ChatResponse chat(ChatRequest request) {

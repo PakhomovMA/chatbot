@@ -16,7 +16,7 @@ import com.personal.chatbot.service.chat.AgenticResearcher;
 import com.personal.chatbot.service.chat.AnswerDrafter;
 import com.personal.chatbot.service.chat.AnswerStages;
 import com.personal.chatbot.service.chat.GroundingVerifier;
-import com.personal.chatbot.service.retrieval.RetrievalService;
+import com.personal.chatbot.service.retrieval.Retriever;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,12 +39,12 @@ public class KnowledgeAssistantAgent {
     static final String AGENTIC_CONDITION = "agenticMode";
     static final String DETERMINISTIC_CONDITION = "deterministicMode";
 
-    private final RetrievalService retrievalService;
+    private final Retriever retrievalService;
     private final AnswerDrafter drafter;
     private final AgenticResearcher researcher;
     private final GroundingVerifier verifier;
 
-    public KnowledgeAssistantAgent(RetrievalService retrievalService, AnswerDrafter drafter,
+    public KnowledgeAssistantAgent(Retriever retrievalService, AnswerDrafter drafter,
                                    AgenticResearcher researcher, GroundingVerifier verifier) {
         this.retrievalService = retrievalService;
         this.drafter = drafter;

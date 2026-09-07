@@ -1,7 +1,7 @@
 package com.personal.chatbot.observability;
 
 import com.personal.chatbot.models.index.IndexInfo;
-import com.personal.chatbot.service.index.LuceneIndexStore;
+import com.personal.chatbot.service.index.IndexStatus;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.stereotype.Component;
@@ -10,9 +10,9 @@ import org.springframework.stereotype.Component;
 @Component("luceneIndex")
 class IndexHealthIndicator implements HealthIndicator {
 
-    private final LuceneIndexStore indexStore;
+    private final IndexStatus indexStore;
 
-    IndexHealthIndicator(LuceneIndexStore indexStore) {
+    IndexHealthIndicator(IndexStatus indexStore) {
         this.indexStore = indexStore;
     }
 

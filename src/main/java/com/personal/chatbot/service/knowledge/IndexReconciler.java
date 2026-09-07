@@ -4,7 +4,7 @@ import com.personal.chatbot.config.ChatbotProperties;
 import com.personal.chatbot.models.knowledge.Document;
 import com.personal.chatbot.models.knowledge.DocumentError;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
-import com.personal.chatbot.service.index.LuceneIndexStore;
+import com.personal.chatbot.service.index.KnowledgeIndexWriter;
 import com.personal.chatbot.service.parsing.DocumentParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,13 +25,13 @@ public class IndexReconciler {
     private static final Logger log = LoggerFactory.getLogger(IndexReconciler.class);
 
     private final DocumentRegistry registry;
-    private final LuceneIndexStore indexStore;
+    private final KnowledgeIndexWriter indexStore;
     private final DocumentStatusUpdater status;
     private final IngestionQueue queue;
     private final ChatbotProperties.Ingestion settings;
     private final Clock clock;
 
-    public IndexReconciler(DocumentRegistry registry, LuceneIndexStore indexStore, DocumentStatusUpdater status,
+    public IndexReconciler(DocumentRegistry registry, KnowledgeIndexWriter indexStore, DocumentStatusUpdater status,
                            IngestionQueue queue, ChatbotProperties.Ingestion settings, Clock clock) {
         this.registry = registry;
         this.indexStore = indexStore;

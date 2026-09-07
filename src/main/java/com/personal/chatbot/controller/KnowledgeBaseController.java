@@ -1,7 +1,7 @@
 package com.personal.chatbot.controller;
 
 import com.personal.chatbot.models.knowledge.dto.KnowledgeBaseStatus;
-import com.personal.chatbot.service.knowledge.IngestionService;
+import com.personal.chatbot.service.knowledge.IngestionOperations;
 import com.personal.chatbot.service.knowledge.KnowledgeBaseStatusService;
 import com.personal.chatbot.service.knowledge.StatusEventBroadcaster;
 import org.springframework.http.HttpStatus;
@@ -21,10 +21,10 @@ import java.util.Map;
 public class KnowledgeBaseController {
 
     private final KnowledgeBaseStatusService statusService;
-    private final IngestionService ingestionService;
+    private final IngestionOperations ingestionService;
     private final StatusEventBroadcaster broadcaster;
 
-    public KnowledgeBaseController(KnowledgeBaseStatusService statusService, IngestionService ingestionService,
+    public KnowledgeBaseController(KnowledgeBaseStatusService statusService, IngestionOperations ingestionService,
                                    StatusEventBroadcaster broadcaster) {
         this.statusService = statusService;
         this.ingestionService = ingestionService;

@@ -3,7 +3,7 @@ package com.personal.chatbot.service.knowledge;
 import com.personal.chatbot.models.index.IndexInfo;
 import com.personal.chatbot.models.knowledge.dto.KnowledgeBaseStatus;
 import com.personal.chatbot.service.embedding.KnowledgeEmbeddingService;
-import com.personal.chatbot.service.index.LuceneIndexStore;
+import com.personal.chatbot.service.index.IndexStatus;
 import org.springframework.stereotype.Service;
 
 /** Composes registry, index and queue state into the admin-facing {@link KnowledgeBaseStatus}. */
@@ -11,12 +11,12 @@ import org.springframework.stereotype.Service;
 public class KnowledgeBaseStatusService {
 
     private final DocumentRegistry registry;
-    private final LuceneIndexStore indexStore;
-    private final IngestionService ingestionService;
+    private final IndexStatus indexStore;
+    private final IngestionOperations ingestionService;
     private final KnowledgeEmbeddingService embeddingService;
 
-    public KnowledgeBaseStatusService(DocumentRegistry registry, LuceneIndexStore indexStore,
-                                      IngestionService ingestionService, KnowledgeEmbeddingService embeddingService) {
+    public KnowledgeBaseStatusService(DocumentRegistry registry, IndexStatus indexStore,
+                                      IngestionOperations ingestionService, KnowledgeEmbeddingService embeddingService) {
         this.registry = registry;
         this.indexStore = indexStore;
         this.ingestionService = ingestionService;

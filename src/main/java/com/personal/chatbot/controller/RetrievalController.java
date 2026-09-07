@@ -2,7 +2,7 @@ package com.personal.chatbot.controller;
 
 import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
-import com.personal.chatbot.service.retrieval.RetrievalService;
+import com.personal.chatbot.service.retrieval.Retriever;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -14,9 +14,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/retrieval")
 public class RetrievalController {
 
-    private final RetrievalService retrievalService;
+    private final Retriever retrievalService;
 
-    public RetrievalController(RetrievalService retrievalService) {
+    public RetrievalController(Retriever retrievalService) {
         this.retrievalService = retrievalService;
     }
 

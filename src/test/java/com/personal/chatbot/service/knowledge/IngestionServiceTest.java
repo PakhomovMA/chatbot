@@ -70,7 +70,7 @@ class IngestionServiceTest {
         IndexReconciler reconciler = new IndexReconciler(registry, indexStore, status, queue,
                 properties().ingestion(), Clock.systemUTC());
         ingestion = new IngestionService(queue, reconciler, status, failures, registry, indexStore, Clock.systemUTC());
-        documents = new DocumentService(registry, blobStore, properties(), Clock.systemUTC(), publisher);
+        documents = new DocumentService(registry, blobStore, properties().knowledge(), Clock.systemUTC(), publisher);
     }
 
     @BeforeEach

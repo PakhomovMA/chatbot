@@ -6,7 +6,7 @@ import com.personal.chatbot.models.knowledge.dto.DocumentPage;
 import com.personal.chatbot.models.knowledge.dto.DocumentStatusView;
 import com.personal.chatbot.models.knowledge.dto.UploadResponse;
 import com.personal.chatbot.service.knowledge.DocumentService;
-import com.personal.chatbot.service.knowledge.IngestionService;
+import com.personal.chatbot.service.knowledge.IngestionOperations;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -31,9 +31,9 @@ import java.io.UncheckedIOException;
 public class DocumentController {
 
     private final DocumentService documentService;
-    private final IngestionService ingestionService;
+    private final IngestionOperations ingestionService;
 
-    public DocumentController(DocumentService documentService, IngestionService ingestionService) {
+    public DocumentController(DocumentService documentService, IngestionOperations ingestionService) {
         this.documentService = documentService;
         this.ingestionService = ingestionService;
     }
