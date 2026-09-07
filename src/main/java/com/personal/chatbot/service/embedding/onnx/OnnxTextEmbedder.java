@@ -99,8 +99,10 @@ public final class OnnxTextEmbedder implements TextEmbedder {
         if (outputs.contains(SENTENCE_EMBEDDING)) {
             return SENTENCE_EMBEDDING;
         }
-        String last = outputs.stream().reduce((a, b) -> b)
-                .orElseThrow(() -> new EmbeddingModelUnavailableException("ONNX model declares no outputs"));
+        if (outputs.isEmpty()) {
+            throw new EmbeddingModelUnavailableException("ONNX model declares no outputs");
+        }
+        String last = List.copyOf(outputs).getLast();
         log.warn("No '{}' output; using last output '{}' and expecting a [batch, dim] tensor", SENTENCE_EMBEDDING, last);
         return last;
     }
@@ -145,12 +147,12 @@ public final class OnnxTextEmbedder implements TextEmbedder {
                 inputs.put(TOKEN_TYPE_IDS, typeIds);
             }
             try (OrtSession.Result result = session.run(inputs, Set.of(outputName))) {
-                Object raw = result.get(outputName).orElseThrow().getValue();
-                if (!(raw instanceof float[][] matrix)) {
-                    throw new IllegalStateException("Output '" + outputName + "' is not a [batch, dim] float tensor but "
-                            + raw.getClass().getSimpleName() + " (a 3-D output means token embeddings, not sentence embeddings)");
-                }
-                return Arrays.asList(matrix);
+                return switch (result.get(outputName).orElseThrow().getValue()) {
+                    case float[][] matrix -> Arrays.asList(matrix);
+                    case Object other -> throw new IllegalStateException("Output '" + outputName
+                            + "' is not a [batch, dim] float tensor but " + other.getClass().getSimpleName()
+                            + " (a 3-D output means token embeddings, not sentence embeddings)");
+                };
             }
         } catch (OrtException e) {
             throw new IllegalStateException("ONNX inference failed: " + e.getMessage(), e);
@@ -209,10 +211,7 @@ public final class OnnxTextEmbedder implements TextEmbedder {
 
         static PaddedBatch of(Encoding[] encodings) {
             int batch = encodings.length;
-            int maxLen = 0;
-            for (Encoding encoding : encodings) {
-                maxLen = Math.max(maxLen, encoding.getIds().length);
-            }
+            int maxLen = Arrays.stream(encodings).mapToInt(encoding -> encoding.getIds().length).max().orElse(0);
             long[] ids = new long[batch * maxLen];
             long[] mask = new long[batch * maxLen];
             for (int i = 0; i < batch; i++) {

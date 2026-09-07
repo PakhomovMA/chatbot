@@ -22,6 +22,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Gatherers;
+import java.util.stream.IntStream;
 
 /**
  * Backend-agnostic {@link KnowledgeEmbeddingService}: applies EmbeddingGemma prefixes for the ambient
@@ -74,28 +76,20 @@ public final class PromptedEmbeddingService implements KnowledgeEmbeddingService
             return List.of();
         }
         EmbeddingMode mode = EmbeddingModeScope.current();
-        int n = texts.size();
-        String[] prefixed = new String[n];
-        Integer[] order = new Integer[n];
-        for (int i = 0; i < n; i++) {
-            prefixed[i] = EmbeddingPrompts.forMode(mode, texts.get(i));
-            order[i] = i;
-        }
-        Arrays.sort(order, Comparator.comparingInt((Integer i) -> prefixed[i].length()).reversed());
-
-        float[][] result = new float[n][];
-        for (int start = 0; start < n; start += batchSize) {
-            int end = Math.min(n, start + batchSize);
-            List<String> batch = new ArrayList<>(end - start);
-            for (int k = start; k < end; k++) {
-                batch.add(prefixed[order[k]]);
-            }
-            List<float[]> vectors = embedBatch(batch, mode);
-            for (int k = start; k < end; k++) {
-                result[order[k]] = vectors.get(k - start);
+        List<String> prefixed = texts.stream().map(text -> EmbeddingPrompts.forMode(mode, text)).toList();
+        // Longest first so each fixed-size window pads as little as possible; results go back to input order.
+        List<List<Integer>> windows = IntStream.range(0, prefixed.size()).boxed()
+                .sorted(Comparator.comparingInt((Integer i) -> prefixed.get(i).length()).reversed())
+                .gather(Gatherers.windowFixed(batchSize))
+                .toList();
+        float[][] result = new float[prefixed.size()][];
+        for (List<Integer> window : windows) {
+            List<float[]> vectors = embedBatch(window.stream().map(prefixed::get).toList(), mode);
+            for (int k = 0; k < window.size(); k++) {
+                result[window.get(k)] = vectors.get(k);
             }
         }
-        textsCounter.increment(n);
+        textsCounter.increment(prefixed.size());
         return Arrays.asList(result);
     }
 

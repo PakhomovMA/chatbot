@@ -53,8 +53,8 @@ public final class Hashes {
             if (Files.isRegularFile(sidecar)) {
                 List<String> lines = Files.readAllLines(sidecar);
                 if (lines.size() >= 2 && key.equals(lines.get(1).trim())
-                        && lines.get(0).trim().length() == SHORT_DIGEST_LENGTH) {
-                    return lines.get(0).trim();
+                        && lines.getFirst().trim().length() == SHORT_DIGEST_LENGTH) {
+                    return lines.getFirst().trim();
                 }
             }
         } catch (IOException e) {
