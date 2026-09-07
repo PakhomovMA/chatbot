@@ -84,8 +84,8 @@ class AgenticChatControllerTest extends AbstractChatbotIntegrationTest {
     @Test
     void agenticModeSearchesThroughToolishRagAndCitesWhatItSaw() throws Exception {
         AtomicReference<String> toolOutput = new AtomicReference<>();
-        whenCreateObject(p -> p.contains("Question: How do I restart the payment service?")
-                && p.contains("knowledge_base_vectorSearch"), AgenticDraft.class)
+        whenCreateObject(p -> p.contains("Question: How do I restart the payment service?"),
+                AgenticDraft.class, AgenticChatControllerTest::instructsAgenticResearch)
                 .thenAnswer(invocation -> {
                     LlmInteraction interaction = invocation.getArgument(1);
                     // The stubbed model "decides" to search once, exactly like the real tool loop would.
@@ -130,5 +130,15 @@ class AgenticChatControllerTest extends AbstractChatbotIntegrationTest {
                 .andExpect(jsonPath("$.grounding").value("INSUFFICIENT_EVIDENCE"))
                 .andExpect(jsonPath("$.citations", Matchers.empty()))
                 .andExpect(jsonPath("$.notes").value("the listening port"));
+    }
+
+    /**
+     * The agentic branch is now recognised by its prompt contributor rather than by the user prompt:
+     * standing instructions travel in the system message, which the mocked {@code LlmOperations}
+     * never sees in the message list.
+     */
+    private static boolean instructsAgenticResearch(LlmInteraction interaction) {
+        return interaction.getPromptContributors().stream()
+                .anyMatch(c -> c.contribution().contains("knowledge_base_vectorSearch"));
     }
 }

@@ -11,7 +11,7 @@ import java.util.regex.Pattern;
 /**
  * Turns the free text produced by the streaming prompt into a {@link GroundedAnswerDraft}: citation
  * markers are collected from the text, and a trailing {@code INSUFFICIENT: ...} line (see
- * {@code prompts/grounded-answer-stream.md}) marks the evidence as insufficient. Deterministic, so
+ * {@code prompts/grounded-answer-stream.jinja}) marks the evidence as insufficient. Deterministic, so
  * the verifier treats streamed and structured drafts identically.
  */
 public final class StreamedDraftParser {

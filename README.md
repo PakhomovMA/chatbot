@@ -106,15 +106,20 @@ Errors are RFC 9457 problem details.
 The flow is deterministic retrieve → generate → verify (`agents/KnowledgeAssistantAgent`): retrieval never
 involves the model, the model only sees numbered evidence passages, and `[n]` markers that do not point at
 a shown passage are removed before the answer is returned. A question with no retrieved evidence is answered
-without calling the model. Prompts: `src/main/resources/prompts/grounded-answer.md` (structured output) and
-`grounded-answer-stream.md` (free text for streaming; a trailing `INSUFFICIENT: …` line marks missing evidence);
-tuning: `chatbot.chat.*`. Streaming uses Embabel's streaming prompt runner when the model supports it and
-falls back to the structured path (one `delta` with the whole answer) otherwise; verification is identical.
+without calling the model. Prompts: persona and grounding rules are Jinja templates under
+`src/main/resources/prompts/` (`grounded-answer.jinja` for structured output, `grounded-answer-stream.jinja` for
+streaming — a trailing `INSUFFICIENT: …` line marks missing evidence; both `{% include %}` the shared
+`_grounding_rules.jinja`). They are rendered at startup and sent as Embabel prompt contributors, i.e. in the
+system message; history, numbered evidence and the question are assembled in Java as the user message
+(docs/system-plan.md D16). Tuning: `chatbot.chat.*`.
+
+Streaming uses Embabel's streaming prompt runner when the model supports it and falls back to the
+structured path (one `delta` with the whole answer) otherwise; verification is identical.
 
 **Agentic mode** (`options.mode: "AGENTIC"`, or `chatbot.chat.mode`; UI selector "agentic (tools)"): instead of
 one deterministic retrieval, the model researches the question itself through Embabel `ToolishRag` tools built
 from the Lucene store (`knowledge_base_vectorSearch`, `knowledge_base_textSearch`, `knowledge_base_broadenChunk`,
-`knowledge_base_zoomOut`, prompt `prompts/agentic-research.md`). Every passage the tools return is recorded and
+`knowledge_base_zoomOut`, prompt `prompts/agentic-research.jinja`). Every passage the tools return is recorded and
 becomes the evidence the citations are verified against, so grounding rules are the same. Agentic mode does not
 stream tokens: the stream narrates each tool call as a `status` detail and then delivers the answer as one
 `delta`. Budget: the whole tool loop is one Embabel LLM operation, bounded by

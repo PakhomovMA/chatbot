@@ -27,11 +27,14 @@ public class AnswerDrafter {
     static final String NO_EVIDENCE_ANSWER = "I could not find anything about this in the knowledge base.";
 
     private final GroundedAnswerPrompt prompt;
+    private final GroundingInstructions instructions;
     private final ChatbotProperties.Chat settings;
     private final MeterRegistry meterRegistry;
 
-    public AnswerDrafter(GroundedAnswerPrompt prompt, ChatbotProperties.Chat settings, MeterRegistry meterRegistry) {
+    public AnswerDrafter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
+                         ChatbotProperties.Chat settings, MeterRegistry meterRegistry) {
         this.prompt = prompt;
+        this.instructions = instructions;
         this.settings = settings;
         this.meterRegistry = meterRegistry;
     }
@@ -43,16 +46,18 @@ public class AnswerDrafter {
         }
         question.notifyStage(AnswerStages.GENERATING);
         PromptRunner runner = context.ai().withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()));
+        String userPrompt = prompt.build(question.question(), question.history(), evidence.hits());
         long started = System.nanoTime();
         String operation = "draft-answer";
         try {
             AnswerStreamSink sink = question.stream();
             if (sink != null && runner.supportsStreaming()) {
                 operation = "draft-answer-stream";
-                return streamed(runner, question, evidence, sink);
+                return streamed(runner.withPromptContributor(instructions.streamingAnswer()), question, userPrompt, sink);
             }
-            GroundedAnswerDraft draft = runner.creating(GroundedAnswerDraft.class)
-                    .fromPrompt(prompt.build(question.question(), question.history(), evidence.hits()));
+            GroundedAnswerDraft draft = runner.withPromptContributor(instructions.groundedAnswer())
+                    .creating(GroundedAnswerDraft.class)
+                    .fromPrompt(userPrompt);
             if (sink != null) {
                 sink.delta(draft.answer() != null ? draft.answer() : "");
             }
@@ -78,11 +83,11 @@ public class AnswerDrafter {
         return draft;
     }
 
-    private GroundedAnswerDraft streamed(PromptRunner runner, UserQuestion question, Evidence evidence,
+    private GroundedAnswerDraft streamed(PromptRunner runner, UserQuestion question, String userPrompt,
                                          @Nullable AnswerStreamSink sink) {
         StringBuilder text = new StringBuilder();
         StreamingPromptRunner.Streaming streaming = (StreamingPromptRunner.Streaming) runner.streaming();
-        streaming.withPrompt(prompt.buildForStreaming(question.question(), question.history(), evidence.hits()))
+        streaming.withPrompt(userPrompt)
                 .generateStream()
                 // Cancelling the Flux closes the streaming call to the model, so an abandoned request
                 // stops costing tokens as soon as the client disconnect is noticed.

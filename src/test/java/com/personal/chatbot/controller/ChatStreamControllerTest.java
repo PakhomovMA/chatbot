@@ -175,8 +175,8 @@ class ChatStreamControllerTest extends AbstractChatbotIntegrationTest {
     /** Agentic mode (Phase 9c follow-up): every tool call is narrated as a status detail; the answer arrives whole. */
     @Test
     void agenticStreamNarratesEachSearchAndDeliversTheAnswerInOnePiece() throws Exception {
-        whenCreateObject(p -> p.contains("Question: How do I restart payments in agentic mode?")
-                && p.contains("knowledge_base_vectorSearch"), AgenticDraft.class)
+        whenCreateObject(p -> p.contains("Question: How do I restart payments in agentic mode?"),
+                AgenticDraft.class, ChatStreamControllerTest::instructsAgenticResearch)
                 .thenAnswer(invocation -> {
                     LlmInteraction interaction = invocation.getArgument(1);
                     Tool vectorSearch = interaction.getTools().stream()
@@ -215,5 +215,15 @@ class ChatStreamControllerTest extends AbstractChatbotIntegrationTest {
         assertThat(events).noneMatch(e -> e instanceof ChatStreamEvent.Final || e instanceof ChatStreamEvent.Error);
         assertThat(events).filteredOn(ChatStreamEvent.Delta.class::isInstance).isEmpty();
         assertThat(events).filteredOn(ChatStreamEvent.Status.class::isInstance).isNotEmpty();
+    }
+
+    /**
+     * The agentic branch is now recognised by its prompt contributor rather than by the user prompt:
+     * standing instructions travel in the system message, which the mocked {@code LlmOperations}
+     * never sees in the message list.
+     */
+    private static boolean instructsAgenticResearch(LlmInteraction interaction) {
+        return interaction.getPromptContributors().stream()
+                .anyMatch(c -> c.contribution().contains("knowledge_base_vectorSearch"));
     }
 }

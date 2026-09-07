@@ -3,69 +3,37 @@ package com.personal.chatbot.service.chat;
 import com.personal.chatbot.models.chat.ConversationTurn;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.utils.Texts;
-import org.springframework.core.io.ClassPathResource;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * Builds the grounded-answer prompts from {@code prompts/grounded-answer.md} (structured output) and
- * {@code prompts/grounded-answer-stream.md} (free text for streaming): numbered evidence passages with
- * provenance, a compact conversation history and the question. Evidence is cut off at a character budget
- * so a local model never receives more context than it can use (docs/system-plan.md §6.7).
+ * Builds the per-question half of the answer prompts: a compact conversation history, numbered
+ * evidence passages with provenance and the question itself. The standing rules live apart, in
+ * {@link GroundingInstructions}. Evidence is cut off at a character budget so a local model never
+ * receives more context than it can use (docs/system-plan.md §6.7).
  */
 public class GroundedAnswerPrompt {
 
-    public static final String TEMPLATE_LOCATION = "prompts/grounded-answer.md";
-    public static final String STREAM_TEMPLATE_LOCATION = "prompts/grounded-answer-stream.md";
-    public static final String AGENTIC_TEMPLATE_LOCATION = "prompts/agentic-research.md";
     static final String HISTORY_HEADER = "Previous conversation (for context only; the evidence below is authoritative):";
 
-    private final String template;
-    private final String streamTemplate;
-    private final String agenticTemplate;
     private final int evidenceCharBudget;
     private final int historyTurns;
 
     public GroundedAnswerPrompt(int evidenceCharBudget, int historyTurns) {
-        this(load(TEMPLATE_LOCATION), load(STREAM_TEMPLATE_LOCATION), load(AGENTIC_TEMPLATE_LOCATION), evidenceCharBudget, historyTurns);
-    }
-
-    GroundedAnswerPrompt(String template, String streamTemplate, String agenticTemplate, int evidenceCharBudget, int historyTurns) {
-        this.template = template;
-        this.streamTemplate = streamTemplate;
-        this.agenticTemplate = agenticTemplate;
         this.evidenceCharBudget = evidenceCharBudget;
         this.historyTurns = historyTurns;
     }
 
-    /** Prompt for the structured (non-streaming) draft. */
+    /** Prompt for the deterministic branch; the structured and the streaming draft share it. */
     public String build(String question, List<ConversationTurn> history, List<RetrievedChunk> hits) {
-        return fill(template, question, history, hits);
-    }
-
-    /** Prompt for the free-text streaming draft. */
-    public String buildForStreaming(String question, List<ConversationTurn> history, List<RetrievedChunk> hits) {
-        return fill(streamTemplate, question, history, hits);
+        return (renderHistory(history)
+                + "\nEvidence passages:\n" + renderEvidence(hits)
+                + "\n\nQuestion: " + question.strip()).strip();
     }
 
     /** Prompt for agentic research: no evidence block, the model searches through tools. */
-    public String buildForAgentic(String question, List<ConversationTurn> history, int maxSearches) {
-        return agenticTemplate
-                .replace("{{maxSearches}}", Integer.toString(maxSearches))
-                .replace("{{history}}", renderHistory(history))
-                .replace("{{question}}", question.strip())
-                .strip();
-    }
-
-    private String fill(String source, String question, List<ConversationTurn> history, List<RetrievedChunk> hits) {
-        return source
-                .replace("{{history}}", renderHistory(history))
-                .replace("{{evidence}}", renderEvidence(hits))
-                .replace("{{question}}", question.strip())
-                .strip();
+    public String buildForAgentic(String question, List<ConversationTurn> history) {
+        return (renderHistory(history) + "\nQuestion: " + question.strip()).strip();
     }
 
     /** Number of hits that fit into the budget; the prompt and the citations must agree on this. */
@@ -111,14 +79,5 @@ public class GroundedAnswerPrompt {
                     .append(Texts.singleLine(turn.content(), 500)).append('\n');
         }
         return out.toString();
-    }
-
-
-    private static String load(String location) {
-        try {
-            return new ClassPathResource(location).getContentAsString(StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Cannot load prompt template " + location, e);
-        }
     }
 }

@@ -54,14 +54,17 @@ public class AgenticResearcher {
 
     private final LockedSearchOperations searchOperations;
     private final GroundedAnswerPrompt prompt;
+    private final GroundingInstructions instructions;
     private final RetrievalTraceStore traces;
     private final ChatbotProperties.Chat settings;
     private final MeterRegistry meterRegistry;
 
     public AgenticResearcher(LockedSearchOperations searchOperations, GroundedAnswerPrompt prompt,
-                             RetrievalTraceStore traces, ChatbotProperties.Chat settings, MeterRegistry meterRegistry) {
+                             GroundingInstructions instructions, RetrievalTraceStore traces,
+                             ChatbotProperties.Chat settings, MeterRegistry meterRegistry) {
         this.searchOperations = searchOperations;
         this.prompt = prompt;
+        this.instructions = instructions;
         this.traces = traces;
         this.settings = settings;
         this.meterRegistry = meterRegistry;
@@ -84,9 +87,9 @@ public class AgenticResearcher {
             draft = context.ai()
                     .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()))
                     .withTools(CancellableTool.wrapAll(rag.tools(), cancelled, question.messageId()))
-                    .withPromptContributor(rag)
+                    .withPromptContributors(List.of(instructions.agenticResearch(), rag))
                     .creating(AgenticDraft.class)
-                    .fromPrompt(prompt.buildForAgentic(question.question(), question.history(), settings.agenticMaxSearches()));
+                    .fromPrompt(prompt.buildForAgentic(question.question(), question.history()));
         } finally {
             Timer.builder("chatbot.llm").tag("operation", "research-agentic").register(meterRegistry)
                     .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);

@@ -69,6 +69,10 @@ Never:
   → Embabel agent/tool boundary. Packages are layered by type, as in the reference project:
   `config`, `controller`, `service.<area>`, `models.<area>`, `exceptions`, `utils`, `observability`, `agents`.
 - Grounding statuses `GROUNDED | PARTIAL | INSUFFICIENT_EVIDENCE`; citations must be a subset of retrieved evidence.
+- Prompts: standing instructions live in `resources/prompts/*.jinja` and reach the model as Embabel
+  `PromptContributor`s (system message); history, evidence and the question are assembled in Java (user message).
+  Never put untrusted text (document content, user question, history) into a template model — Jinjava
+  re-interprets substituted values (D16).
 - Index is single-writer (one ingestion worker + write lock); per-document ingestion is all-or-nothing.
 - Index manifest stores the embedding fingerprint; mismatch blocks retrieval until rebuild.
 
