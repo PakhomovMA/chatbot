@@ -4,6 +4,7 @@ import com.embabel.agent.api.tool.Tool;
 import com.embabel.agent.core.support.LlmInteraction;
 import com.jayway.jsonpath.JsonPath;
 import com.personal.chatbot.models.agent.AgenticDraft;
+import com.personal.chatbot.models.agent.ChatCancellation;
 import com.personal.chatbot.models.agent.GroundedAnswerDraft;
 import com.personal.chatbot.models.agent.RewrittenQueries;
 import com.personal.chatbot.models.chat.ChatRequest;
@@ -223,12 +224,60 @@ class ChatStreamControllerTest extends AbstractChatbotIntegrationTest {
         whenGenerateStream(p -> p.contains("Question: How do I restart the payment service?"))
                 .thenReturn(Flux.just("Run `systemctl restart payments` ", "on the host [1]."));
         List<ChatStreamEvent> events = new CopyOnWriteArrayList<>();
+        ChatCancellation cancellation = new ChatCancellation();
+        cancellation.cancel("client went away");
 
-        chatService.stream(new ChatRequest(null, "How do I restart the payment service?", null), events::add, () -> true);
+        chatService.stream(new ChatRequest(null, "How do I restart the payment service?", null), events::add, cancellation);
+
+        assertThat(events).as("a request nobody is waiting for does no work at all").isEmpty();
+    }
+
+    /**
+     * The failure this whole task is about: a model that stops sending tokens without ending the
+     * stream. Cancellation used to be a test on the next fragment, so there was no next fragment to
+     * test and the request held its thread until the stream timeout.
+     */
+    @Test
+    void aSilentModelIsDroppedAsSoonAsTheClientLeaves() throws Exception {
+        supportsStreaming(true);
+        whenGenerateStream(p -> p.contains("Question: What happens when the model goes quiet?"))
+                .thenReturn(Flux.never());
+        List<ChatStreamEvent> events = new CopyOnWriteArrayList<>();
+        ChatCancellation cancellation = new ChatCancellation();
+
+        Thread request = Thread.ofPlatform().start(() -> chatService.stream(
+                new ChatRequest(null, "What happens when the model goes quiet?", null), events::add, cancellation));
+        await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> assertThat(events)
+                .anyMatch(e -> e instanceof ChatStreamEvent.Status status && status.stage().equals("generating")));
+
+        cancellation.cancel("client went away");
+
+        request.join(Duration.ofSeconds(10));
+        assertThat(request.isAlive()).as("the request must let go of its thread, not wait for a token").isFalse();
+        assertThat(events).noneMatch(e -> e instanceof ChatStreamEvent.Final || e instanceof ChatStreamEvent.Error);
+    }
+
+    /**
+     * An answer that arrives after the client left is not a result: it is not reported, and above all
+     * it does not enter the history that the next question would be answered from.
+     */
+    @Test
+    void anAnswerThatFinishesAfterTheClientLeftIsNotRecorded() throws Exception {
+        supportsStreaming(false);
+        String conversationId = "abandoned-" + System.nanoTime();
+        ChatCancellation cancellation = new ChatCancellation();
+        whenCreateObject(p -> p.contains("Question: Who reads an answer nobody waited for?"), GroundedAnswerDraft.class)
+                .thenAnswer(_ -> {
+                    cancellation.cancel("client went away"); // the client leaves while the model is answering
+                    return new GroundedAnswerDraft("Nobody [1].", List.of(1), true, null);
+                });
+        List<ChatStreamEvent> events = new CopyOnWriteArrayList<>();
+
+        chatService.stream(new ChatRequest(conversationId, "Who reads an answer nobody waited for?", null),
+                events::add, cancellation);
 
         assertThat(events).noneMatch(e -> e instanceof ChatStreamEvent.Final || e instanceof ChatStreamEvent.Error);
-        assertThat(events).filteredOn(ChatStreamEvent.Delta.class::isInstance).isEmpty();
-        assertThat(events).filteredOn(ChatStreamEvent.Status.class::isInstance).isNotEmpty();
+        mockMvc.perform(get("/api/conversations/{id}", conversationId)).andExpect(status().isNotFound());
     }
 
     /**

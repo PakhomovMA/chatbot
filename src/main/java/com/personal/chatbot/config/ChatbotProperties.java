@@ -34,7 +34,8 @@ public record ChatbotProperties(
         @Valid @DefaultValue Index index,
         @Valid @DefaultValue Ingestion ingestion,
         @Valid @DefaultValue Retrieval retrieval,
-        @Valid @DefaultValue Chat chat
+        @Valid @DefaultValue Chat chat,
+        @Valid @DefaultValue Sse sse
 ) {
 
     /**
@@ -182,6 +183,17 @@ public record ChatbotProperties(
         public boolean enabled() {
             return strategy != ExpansionStrategy.NONE;
         }
+    }
+
+    /**
+     * Server-sent-events delivery (docs/concurrency-plan.md C06). Events are queued per connection and
+     * written by a sender of its own, so a slow reader never holds up ingestion or another client.
+     *
+     * @param bufferSize events a connection may fall behind by before it is dropped and its work cancelled
+     */
+    public record Sse(
+            @Min(1) @DefaultValue("256") int bufferSize
+    ) {
     }
 
     public record Ollama(

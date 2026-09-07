@@ -67,6 +67,11 @@ chatbot:
       # questions the corpus cannot answer (docs/eval-log.md).
       strategy: REWRITE
       queries: 3                         # rewrites asked for (REWRITE only)
+  sse:
+    # Events a server-sent-events connection may fall behind by before it is dropped and the work
+    # behind it cancelled; each connection is written by a sender of its own, so a slow reader
+    # delays nobody else (docs/concurrency-plan.md C06).
+    buffer-size: 256
 
 spring.servlet.multipart:
   max-file-size: 20MB

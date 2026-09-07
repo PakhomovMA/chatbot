@@ -15,8 +15,10 @@ import java.util.Set;
  * @param history     recent turns of the conversation, oldest first
  * @param topK        retrieval override, null for the configured default
  * @param documentIds restrict retrieval to these documents, null for all
- * @param mode        deterministic retrieval or agentic research (Phase 9c)
- * @param stream      progress sink for streaming callers, null otherwise (not part of the data model)
+ * @param mode         deterministic retrieval or agentic research (Phase 9c)
+ * @param stream       progress sink for streaming callers, null otherwise (not part of the data model)
+ * @param cancellation the request's completion signal, polled before every expensive step (not part
+ *                     of the data model)
  */
 public record UserQuestion(
         String conversationId,
@@ -26,12 +28,14 @@ public record UserQuestion(
         @Nullable Integer topK,
         @Nullable Set<String> documentIds,
         AnswerMode mode,
-        @JsonIgnore @Nullable AnswerStreamSink stream
+        @JsonIgnore @Nullable AnswerStreamSink stream,
+        @JsonIgnore ChatCancellation cancellation
 ) {
 
     public UserQuestion(String conversationId, String messageId, String question, List<ConversationTurn> history,
                         @Nullable Integer topK, @Nullable Set<String> documentIds) {
-        this(conversationId, messageId, question, history, topK, documentIds, AnswerMode.DETERMINISTIC, null);
+        this(conversationId, messageId, question, history, topK, documentIds, AnswerMode.DETERMINISTIC, null,
+                ChatCancellation.none());
     }
 
     /** The retrieval this question asks for; the first pass and any widening of it share the options. */
@@ -43,5 +47,10 @@ public record UserQuestion(
         if (stream != null) {
             stream.stage(stage);
         }
+    }
+
+    /** Stops the run when the caller is gone; called before retrieval, model calls and tool calls. */
+    public void abortIfCancelled() {
+        cancellation.abortIfCancelled(messageId);
     }
 }

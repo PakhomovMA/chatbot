@@ -4,10 +4,10 @@ import com.embabel.agent.api.tool.Tool;
 import com.embabel.agent.api.tool.ToolCallContext;
 import com.embabel.agent.api.tool.ToolControlFlowSignal;
 import com.personal.chatbot.exceptions.ChatCancelledException;
+import com.personal.chatbot.models.agent.ChatCancellation;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -21,12 +21,12 @@ import static org.mockito.Mockito.when;
 class CancellableToolTest {
 
     private final Tool delegate = mock(Tool.class);
-    private final AtomicBoolean gone = new AtomicBoolean();
+    private final ChatCancellation cancellation = new ChatCancellation();
 
     @Test
     void delegatesWhileTheClientIsThere() {
         when(delegate.call(eq("{\"query\":\"x\"}"), any())).thenReturn(new Tool.Result.Text("passages"));
-        List<Tool> wrapped = CancellableTool.wrapAll(List.of(delegate), gone::get, "m1");
+        List<Tool> wrapped = CancellableTool.wrapAll(List.of(delegate), cancellation, "m1");
 
         Tool.Result result = wrapped.getFirst().call("{\"query\":\"x\"}");
 
@@ -36,8 +36,8 @@ class CancellableToolTest {
 
     @Test
     void refusesToSearchOnceTheClientIsGoneWithAControlFlowSignal() {
-        Tool wrapped = CancellableTool.wrapAll(List.of(delegate), gone::get, "m1").getFirst();
-        gone.set(true);
+        Tool wrapped = CancellableTool.wrapAll(List.of(delegate), cancellation, "m1").getFirst();
+        cancellation.cancel("client went away");
 
         assertThatThrownBy(() -> wrapped.call("{}"))
                 .isInstanceOf(ChatCancelledException.class)

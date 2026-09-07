@@ -58,7 +58,8 @@ class IngestionServiceTest {
                 new ChatbotProperties.Chat(com.personal.chatbot.models.chat.AnswerMode.DETERMINISTIC,
                         com.personal.chatbot.models.chat.AnswerLanguage.AUTO, 4, 0.2, 0.1, 6000, 600, 10, 1000,
                         java.time.Duration.ofHours(24),
-                        new ChatbotProperties.ExpandSearch(com.personal.chatbot.models.retrieval.ExpansionStrategy.NONE, 3)));
+                        new ChatbotProperties.ExpandSearch(com.personal.chatbot.models.retrieval.ExpansionStrategy.NONE, 3)),
+                new ChatbotProperties.Sse(256));
     }
 
     /** Wires the same objects the Spring context would; events are dispatched directly to the service. */

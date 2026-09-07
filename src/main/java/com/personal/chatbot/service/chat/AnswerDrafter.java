@@ -5,7 +5,6 @@ import com.embabel.agent.api.common.PromptRunner;
 import com.embabel.agent.api.common.streaming.StreamingPromptRunner;
 import com.embabel.common.ai.model.LlmOptions;
 import com.personal.chatbot.config.ChatbotProperties;
-import com.personal.chatbot.exceptions.ChatCancelledException;
 import com.personal.chatbot.models.agent.AnswerStreamSink;
 import com.personal.chatbot.models.agent.Evidence;
 import com.personal.chatbot.models.agent.GroundedAnswerDraft;
@@ -14,7 +13,7 @@ import com.personal.chatbot.models.chat.AnswerLanguage;
 import com.personal.chatbot.utils.AnswerLanguages;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
-import org.jspecify.annotations.Nullable;
+import reactor.core.publisher.Sinks;
 
 import java.util.concurrent.TimeUnit;
 
@@ -25,6 +24,9 @@ import java.util.concurrent.TimeUnit;
  * so the verifier cannot tell them apart.
  */
 public class AnswerDrafter {
+
+    /** The value the stop publisher carries; only its arrival matters. */
+    private static final Object STOP = new Object();
 
     private final GroundedAnswerPrompt prompt;
     private final GroundingInstructions instructions;
@@ -45,6 +47,7 @@ public class AnswerDrafter {
             return noEvidence(question);
         }
         question.notifyStage(AnswerStages.GENERATING);
+        question.abortIfCancelled();
         PromptRunner runner = context.ai().withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()));
         String userPrompt = prompt.build(question.question(), question.history(), evidence.hits());
         long started = System.nanoTime();
@@ -86,25 +89,27 @@ public class AnswerDrafter {
         return draft;
     }
 
+    /**
+     * Cancelling the Flux closes the streaming call to the model, so an abandoned request stops
+     * costing tokens as soon as the disconnect is noticed. The stop arrives as a publisher of its
+     * own rather than as a test on the next fragment: a model that has gone quiet would otherwise
+     * hold the subscription — and this thread — until it decided to speak again.
+     */
     private GroundedAnswerDraft streamed(PromptRunner runner, UserQuestion question, String userPrompt,
-                                         @Nullable AnswerStreamSink sink) {
+                                         AnswerStreamSink sink) {
         StringBuilder text = new StringBuilder();
         StreamingPromptRunner.Streaming streaming = (StreamingPromptRunner.Streaming) runner.streaming();
+        Sinks.One<Object> stop = Sinks.one();
+        question.cancellation().onCancel(() -> stop.tryEmitValue(STOP));
         streaming.withPrompt(userPrompt)
                 .generateStream()
-                // Cancelling the Flux closes the streaming call to the model, so an abandoned request
-                // stops costing tokens as soon as the client disconnect is noticed.
-                .takeWhile(_ -> sink == null || !sink.cancelled())
+                .takeUntilOther(stop.asMono())
                 .doOnNext(fragment -> {
                     text.append(fragment);
-                    if (sink != null) {
-                        sink.delta(fragment);
-                    }
+                    sink.delta(fragment);
                 })
                 .blockLast();
-        if (sink != null && sink.cancelled()) {
-            throw new ChatCancelledException(question.messageId());
-        }
+        question.abortIfCancelled();
         return StreamedDraftParser.parse(text.toString());
     }
 }

@@ -82,6 +82,7 @@ public class KnowledgeAssistantAgent {
 
     @Action(description = "Retrieve evidence for the question from the knowledge base", readOnly = true, pre = DETERMINISTIC_CONDITION)
     public Evidence retrieveEvidence(UserQuestion question) {
+        question.abortIfCancelled();
         question.notifyStage(AnswerStages.RETRIEVING);
         RetrievalResult result = retrievalService.search(question.retrievalQuery());
         log.debug("Retrieved {} hits for [{}] (sufficient={})", result.hits().size(), question.messageId(), result.evidenceSufficient());

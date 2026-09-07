@@ -7,6 +7,7 @@ import com.personal.chatbot.models.chat.AnswerMode;
 import com.personal.chatbot.exceptions.ChatCancelledException;
 import com.personal.chatbot.exceptions.ConversationNotFoundException;
 import com.personal.chatbot.models.agent.AnswerStreamSink;
+import com.personal.chatbot.models.agent.ChatCancellation;
 import com.personal.chatbot.models.agent.GroundedAnswer;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.models.chat.ChatRequest;
@@ -31,7 +32,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
-import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -63,7 +63,11 @@ public class ChatService {
     }
 
     public ChatResponse chat(ChatRequest request) {
-        return run(request, null);
+        return chat(request, ChatCancellation.none());
+    }
+
+    public ChatResponse chat(ChatRequest request, ChatCancellation cancellation) {
+        return run(request, null, cancellation);
     }
 
     /**
@@ -71,20 +75,21 @@ public class ChatService {
      * {@code final} event carrying the verified response (or {@code error}). Blocks until finished.
      */
     public void stream(ChatRequest request, Consumer<ChatStreamEvent> listener) {
-        stream(request, listener, () -> false);
+        stream(request, listener, ChatCancellation.none());
     }
 
     /**
-     * @param cancelled reports that the listener is gone; the agent then abandons the run at the next
-     *                  model or tool boundary and no terminal event is emitted
+     * @param cancellation the request's completion signal; once it fires, the run is abandoned at the
+     *                     next retrieval, model or tool boundary, no terminal event is emitted and no
+     *                     partial answer reaches the conversation history
      */
-    public void stream(ChatRequest request, Consumer<ChatStreamEvent> listener, BooleanSupplier cancelled) {
-        AnswerStreamSink sink = new ListenerAnswerStreamSink(listener, cancelled);
+    public void stream(ChatRequest request, Consumer<ChatStreamEvent> listener, ChatCancellation cancellation) {
+        AnswerStreamSink sink = new ListenerAnswerStreamSink(listener, cancellation);
         try {
-            listener.accept(new ChatStreamEvent.Final(run(request, sink)));
+            listener.accept(new ChatStreamEvent.Final(run(request, sink, cancellation)));
         } catch (Exception e) { // Embabel (Kotlin) can surface checked exceptions such as ExecutionException
-            if (ChatCancelledException.isCancellation(e) || cancelled.getAsBoolean()) {
-                log.info("Streaming chat abandoned: the client went away ({})", Throwables.rootMessage(e));
+            if (ChatCancelledException.isCancellation(e) || cancellation.isCancelled()) {
+                log.info("Streaming chat abandoned ({}): {}", cancellation.reason(), Throwables.rootMessage(e));
                 return;
             }
             log.error("Streaming chat failed", e);
@@ -92,27 +97,30 @@ public class ChatService {
         }
     }
 
-    private ChatResponse run(ChatRequest request, @Nullable AnswerStreamSink sink) {
+    private ChatResponse run(ChatRequest request, @Nullable AnswerStreamSink sink, ChatCancellation cancellation) {
         long started = System.nanoTime();
         String conversationId = request.conversationId() != null && !request.conversationId().isBlank()
                 ? request.conversationId() : UUID.randomUUID().toString();
+        String messageId = UUID.randomUUID().toString();
+        // Nobody is waiting: stop before queueing behind whatever else this conversation is doing.
+        cancellation.abortIfCancelled(messageId);
         // The lease serialises the requests of this conversation: the next one reads a history that
         // already contains this exchange instead of a half-written one.
         try (ConversationStore.Lease conversation = conversations.begin(conversationId)) {
-            return answer(request, sink, conversation, started);
+            return answer(request, sink, cancellation, conversation, messageId, started);
         }
     }
 
-    private ChatResponse answer(ChatRequest request, @Nullable AnswerStreamSink sink, ConversationStore.Lease conversation,
-                                long started) {
+    private ChatResponse answer(ChatRequest request, @Nullable AnswerStreamSink sink, ChatCancellation cancellation,
+                                ConversationStore.Lease conversation, String messageId, long started) {
         String conversationId = conversation.conversationId();
-        String messageId = UUID.randomUUID().toString();
         String question = request.message().strip();
         ChatRequest.Options options = request.optionsOrDefault();
         List<ConversationTurn> history = conversation.history();
 
         AnswerMode mode = options.mode() != null ? options.mode() : defaultMode;
-        UserQuestion input = new UserQuestion(conversationId, messageId, question, history, options.topK(), options.documentIds(), mode, sink);
+        UserQuestion input = new UserQuestion(conversationId, messageId, question, history, options.topK(),
+                options.documentIds(), mode, sink, cancellation);
         GroundedAnswer answer;
         try (RequestContext.Scope _ = RequestContext.with(RequestContext.CONVERSATION_ID, conversationId);
              RequestContext.Scope _ = RequestContext.with(RequestContext.MESSAGE_ID, messageId)) {
@@ -123,6 +131,9 @@ public class ChatService {
         ChatTimings timings = new ChatTimings(answer.retrievalMs(), Math.max(0, totalMs - answer.retrievalMs()), totalMs);
         RetrievalResult diagnostics = options.diagnostics() ? traces.find(answer.retrievalTraceId()).orElse(null) : null;
 
+        // An abandoned run has no result to report: a half-written answer is not an answer, and it
+        // must not enter the history the next question will be answered from.
+        cancellation.abortIfCancelled(messageId);
         Instant now = clock.instant();
         if (!conversation.record(ConversationTurn.user(question, now),
                 ConversationTurn.assistant(answer.answer(), answer.citations(), now))) {

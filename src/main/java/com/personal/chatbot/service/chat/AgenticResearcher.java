@@ -6,7 +6,6 @@ import com.embabel.agent.rag.tools.ToolishRag;
 import com.embabel.common.ai.model.LlmOptions;
 import com.personal.chatbot.agents.CancellableTool;
 import com.personal.chatbot.config.ChatbotProperties;
-import com.personal.chatbot.exceptions.ChatCancelledException;
 import com.personal.chatbot.models.agent.AgenticDraft;
 import com.personal.chatbot.models.agent.AnswerAttempt;
 import com.personal.chatbot.models.agent.AnswerStreamSink;
@@ -32,7 +31,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BooleanSupplier;
 
 /**
  * Agentic research (docs/system-plan.md Phase 9c): the model drives retrieval itself through Embabel
@@ -77,7 +75,6 @@ public class AgenticResearcher {
         question.notifyStage(AnswerStages.RESEARCHING);
         long started = System.nanoTime();
         AnswerStreamSink sink = question.stream();
-        BooleanSupplier cancelled = sink != null ? sink::cancelled : () -> false;
         EvidenceCollector collector = collectorFor(sink);
         ToolishRag rag = new ToolishRag(REFERENCE_NAME, TOOL_DESCRIPTION, searchOperations)
                 .withListener(collector)
@@ -88,12 +85,13 @@ public class AgenticResearcher {
                         SearchDefaults.DEFAULT_TEXT_SIMILARITY_THRESHOLD, retrievalSettings.expandNeighbours()))
                 .withGoal(GOAL);
         AgenticDraft draft;
+        question.abortIfCancelled();
         try {
             // withReference(rag) would register the tools twice (deprecated toolObject() plus tools()) under
             // two different prefixes; register the flat tool list and the prompt contribution explicitly.
             draft = context.ai()
                     .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()))
-                    .withTools(CancellableTool.wrapAll(rag.tools(), cancelled, question.messageId()))
+                    .withTools(CancellableTool.wrapAll(rag.tools(), question.cancellation(), question.messageId()))
                     .withPromptContributors(List.of(instructions.agenticResearch(), rag))
                     .creating(AgenticDraft.class)
                     .fromPrompt(prompt.buildForAgentic(question.question(), question.history()));
@@ -101,9 +99,7 @@ public class AgenticResearcher {
             Timer.builder("chatbot.llm").tag("operation", "research-agentic").register(meterRegistry)
                     .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
         }
-        if (cancelled.getAsBoolean()) {
-            throw new ChatCancelledException(question.messageId());
-        }
+        question.abortIfCancelled();
 
         List<RetrievedChunk> seen = collector.chunks();
         RetrievalResult trace = traceOf(question, collector, seen, (System.nanoTime() - started) / 1_000_000);

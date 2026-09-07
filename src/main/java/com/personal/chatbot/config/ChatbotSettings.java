@@ -29,4 +29,9 @@ class ChatbotSettings {
     ChatbotProperties.Chat chatSettings(ChatbotProperties properties) {
         return properties.chat();
     }
+
+    @Bean
+    ChatbotProperties.Sse sseSettings(ChatbotProperties properties) {
+        return properties.sse();
+    }
 }

@@ -68,6 +68,7 @@ public class EvidenceExpander {
     public Evidence expand(Evidence evidence, OperationContext context) {
         UserQuestion question = evidence.question();
         ExpansionStrategy strategy = settings.expandSearch().strategy();
+        question.abortIfCancelled();
         question.notifyStage(AnswerStages.EXPANDING);
         long started = System.nanoTime();
         List<String> queries = queriesFor(strategy, question, context);

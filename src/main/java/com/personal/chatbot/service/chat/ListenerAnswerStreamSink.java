@@ -1,10 +1,10 @@
 package com.personal.chatbot.service.chat;
 
 import com.personal.chatbot.models.agent.AnswerStreamSink;
+import com.personal.chatbot.models.agent.ChatCancellation;
 import com.personal.chatbot.models.chat.ChatStreamEvent;
 import org.jspecify.annotations.Nullable;
 
-import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -15,11 +15,11 @@ import java.util.function.Consumer;
 final class ListenerAnswerStreamSink implements AnswerStreamSink {
 
     private final Consumer<ChatStreamEvent> listener;
-    private final BooleanSupplier cancelled;
+    private final ChatCancellation cancellation;
 
-    ListenerAnswerStreamSink(Consumer<ChatStreamEvent> listener, BooleanSupplier cancelled) {
+    ListenerAnswerStreamSink(Consumer<ChatStreamEvent> listener, ChatCancellation cancellation) {
         this.listener = listener;
-        this.cancelled = cancelled;
+        this.cancellation = cancellation;
     }
 
     @Override
@@ -36,6 +36,6 @@ final class ListenerAnswerStreamSink implements AnswerStreamSink {
 
     @Override
     public boolean cancelled() {
-        return cancelled.getAsBoolean();
+        return cancellation.isCancelled();
     }
 }
