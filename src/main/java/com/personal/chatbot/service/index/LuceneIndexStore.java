@@ -1,7 +1,6 @@
 package com.personal.chatbot.service.index;
 
 import com.embabel.agent.rag.ingestion.ChunkTransformer;
-import com.embabel.agent.rag.ingestion.ContentChunker;
 import com.embabel.agent.rag.lucene.LuceneSearchOperations;
 import com.embabel.agent.rag.model.Chunk;
 import com.embabel.agent.rag.model.ContentElement;
@@ -22,16 +21,12 @@ import org.apache.lucene.util.Version;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import tools.jackson.databind.SerializationFeature;
-import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.time.Instant;
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -50,16 +45,13 @@ public class LuceneIndexStore implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(LuceneIndexStore.class);
 
     static final String LUCENE_DIR = "lucene";
-    static final String MANIFEST_FILE = "manifest.json";
     static final String STORE_NAME = "knowledge";
 
     private final @Nullable Path indexDir;
-    private final EmbeddingService embeddingService;
     private final EmbeddingFingerprint fingerprint;
     private final IndexManifest.Chunker chunkerSpec;
-    private final int embeddingBatchSize;
-    private final ChunkTransformer chunkTransformer;
-    private final JsonMapper mapper = JsonMapper.builder().enable(SerializationFeature.INDENT_OUTPUT).build();
+    private final LuceneStoreFactory stores;
+    private final IndexManifestFile manifestFile;
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private final Object searchMonitor = new Object();
 
@@ -75,11 +67,10 @@ public class LuceneIndexStore implements AutoCloseable {
     public LuceneIndexStore(@Nullable Path indexDir, EmbeddingService embeddingService, EmbeddingFingerprint fingerprint,
                             IndexManifest.Chunker chunkerSpec, int embeddingBatchSize, ChunkTransformer chunkTransformer) {
         this.indexDir = indexDir;
-        this.embeddingService = embeddingService;
         this.fingerprint = fingerprint;
         this.chunkerSpec = chunkerSpec;
-        this.embeddingBatchSize = embeddingBatchSize;
-        this.chunkTransformer = chunkTransformer;
+        this.stores = new LuceneStoreFactory(embeddingService, chunkerSpec, embeddingBatchSize, chunkTransformer);
+        this.manifestFile = new IndexManifestFile(indexDir);
     }
 
     /** Opens (or creates) the index and loads existing content. Must be called exactly once before use. */
@@ -88,14 +79,14 @@ public class LuceneIndexStore implements AutoCloseable {
         try {
             if (indexDir == null) {
                 manifest = newManifest();
-                operations = build(null);
+                operations = stores.inMemory();
                 refreshState();
                 log.info("In-memory Lucene index opened ({})", fingerprint.value());
                 return this;
             }
             Path lucenePath = indexDir.resolve(LUCENE_DIR);
             Files.createDirectories(lucenePath);
-            IndexManifest existing = readManifest();
+            IndexManifest existing = manifestFile.read();
             boolean hasIndexFiles = Directories.hasFiles(lucenePath);
             if (existing == null && hasIndexFiles) {
                 markIncompatible("index has no manifest; its embedding model is unknown");
@@ -107,9 +98,11 @@ public class LuceneIndexStore implements AutoCloseable {
                 return this;
             }
             manifest = existing != null ? existing : newManifest();
-            operations = openOrRecover(lucenePath);
+            LuceneStoreFactory.Opened opened = stores.openOrRecover(lucenePath);
+            operations = opened.operations();
+            recoveredFrom = opened.recoveredFrom();
             if (existing == null) {
-                writeManifest(manifest);
+                manifestFile.write(manifest);
             }
             refreshState();
             log.info("Lucene index opened at {}: {} chunks, {} documents, state {}", lucenePath,
@@ -122,41 +115,6 @@ public class LuceneIndexStore implements AutoCloseable {
         }
     }
 
-    private LuceneSearchOperations openOrRecover(Path lucenePath) throws IOException {
-        try {
-            return build(lucenePath);
-        } catch (Exception first) { // Lucene surfaces checked IOExceptions through the Kotlin constructor
-            if (!Directories.hasFiles(lucenePath)) {
-                throw (RuntimeException) first;
-            }
-            Path quarantine = lucenePath.resolveSibling(LUCENE_DIR + ".corrupt-"
-                    + DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").format(java.time.LocalDateTime.now()));
-            log.error("Lucene index at {} cannot be opened ({}); moving it to {} and starting empty", lucenePath,
-                    first, quarantine);
-            Files.move(lucenePath, quarantine, StandardCopyOption.ATOMIC_MOVE);
-            Files.createDirectories(lucenePath);
-            recoveredFrom = quarantine.toString();
-            return build(lucenePath);
-        }
-    }
-
-    private LuceneSearchOperations build(@Nullable Path lucenePath) {
-        var builder = LuceneSearchOperations.builder()
-                .withName(STORE_NAME)
-                .withEmbeddingService(embeddingService)
-                .withChunkerConfig(new ContentChunker.Config(chunkerSpec.maxChunkSize(), chunkerSpec.overlapSize(), embeddingBatchSize))
-                .withChunkTransformer(chunkTransformer);
-        if (lucenePath == null) {
-            return builder.build();
-        }
-        builder = builder.withIndexPath(lucenePath);
-        try {
-            // buildAndLoadChunks() logs an error for a directory without segments; only load when there is something to load.
-            return Directories.hasFiles(lucenePath) ? builder.buildAndLoadChunks() : builder.build();
-        } catch (IOException e) {
-            throw new UncheckedIOException("Cannot inspect " + lucenePath, e);
-        }
-    }
 
     /**
      * Indexes a document, replacing any previous content stored under the same URI. Either every
@@ -290,11 +248,11 @@ public class LuceneIndexStore implements AutoCloseable {
                 Directories.deleteTree(lucenePath);
                 Files.createDirectories(lucenePath);
                 manifest = newManifest();
-                writeManifest(manifest);
-                operations = build(lucenePath);
+                manifestFile.write(manifest);
+                operations = stores.open(lucenePath);
             } else {
                 manifest = newManifest();
-                operations = build(null);
+                operations = stores.inMemory();
             }
             incompatibilityReason = null;
             refreshState();
@@ -362,7 +320,7 @@ public class LuceneIndexStore implements AutoCloseable {
     private void markIncompatible(String reason) {
         incompatibilityReason = reason;
         state = IndexState.INCOMPATIBLE;
-        manifest = readManifest();
+        manifest = manifestFile.read();
         log.error("Lucene index at {} is INCOMPATIBLE: {}. Rebuild it via POST /api/knowledge-base/reindex", indexDir, reason);
     }
 
@@ -388,34 +346,4 @@ public class LuceneIndexStore implements AutoCloseable {
         return IndexManifest.create(fingerprint, chunkerSpec, Version.LATEST.toString(), Instant.now());
     }
 
-    private @Nullable IndexManifest readManifest() {
-        if (indexDir == null) {
-            return null;
-        }
-        Path file = indexDir.resolve(MANIFEST_FILE);
-        if (!Files.isRegularFile(file)) {
-            return null;
-        }
-        try {
-            return mapper.readValue(Files.readString(file), IndexManifest.class);
-        } catch (IOException | RuntimeException e) {
-            log.error("Manifest {} is unreadable: {}", file, e.toString());
-            return null;
-        }
-    }
-
-    private void writeManifest(IndexManifest content) {
-        if (indexDir == null) {
-            return;
-        }
-        Path file = indexDir.resolve(MANIFEST_FILE);
-        Path temp = file.resolveSibling(MANIFEST_FILE + ".tmp");
-        try {
-            Files.createDirectories(indexDir);
-            Files.writeString(temp, mapper.writeValueAsString(content));
-            Files.move(temp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException e) {
-            throw new UncheckedIOException("Cannot write manifest " + file, e);
-        }
-    }
 }

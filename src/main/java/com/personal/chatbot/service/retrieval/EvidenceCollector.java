@@ -49,8 +49,7 @@ public final class EvidenceCollector implements ResultsListener {
             steps.add(step);
             for (SimilarityResult<?> result : event.getResults()) {
                 if (result.getMatch() instanceof Chunk chunk && !chunks.containsKey(chunk.getId())) {
-                    chunks.put(chunk.getId(), new RetrievedChunk(chunk.getId(), RetrievalService.originalText(chunk),
-                            RetrievalService.provenanceOf(chunk), null, null, result.getScore(), chunks.size() + 1));
+                    chunks.put(chunk.getId(), ChunkMapper.toRetrievedChunk(chunk, null, null, result.getScore(), chunks.size() + 1));
                 }
             }
             log.debug("Agentic search '{}' returned {} results ({} distinct chunks so far)", event.getQuery(),
