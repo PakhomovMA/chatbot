@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { api, ApiError } from '@/api/client'
+import { streamChat } from '@/api/stream'
 import type { ChatResponse, Citation, Grounding } from '@/api/types'
 
 export interface ChatMessage {
@@ -11,6 +12,14 @@ export interface ChatMessage {
   notes?: string
   timings?: { retrievalMs: number; llmMs: number; totalMs: number }
   error?: boolean
+  /** True while the answer text is still arriving. */
+  streaming?: boolean
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  retrieving: 'Searching the knowledge base…',
+  generating: 'Drafting an answer…',
+  verifying: 'Verifying citations…',
 }
 
 export const useChatStore = defineStore('chat', {
@@ -18,12 +27,18 @@ export const useChatStore = defineStore('chat', {
     conversationId: undefined as string | undefined,
     messages: [] as ChatMessage[],
     pending: false,
+    stage: undefined as string | undefined,
+    streamingEnabled: true,
     error: undefined as string | undefined,
     selectedMessageId: undefined as string | undefined,
+    abort: undefined as AbortController | undefined,
   }),
   getters: {
     selectedMessage(state): ChatMessage | undefined {
       return state.messages.find((m) => m.id === state.selectedMessageId)
+    },
+    stageLabel(state): string | undefined {
+      return state.stage ? (STAGE_LABELS[state.stage] ?? state.stage) : undefined
     },
   },
   actions: {
@@ -32,12 +47,13 @@ export const useChatStore = defineStore('chat', {
       if (!message || this.pending) return
       this.error = undefined
       this.pending = true
-      const userId = `u-${Date.now()}`
-      this.messages.push({ id: userId, role: 'user', content: message, citations: [] })
+      this.stage = 'retrieving'
+      this.messages.push({ id: `u-${Date.now()}`, role: 'user', content: message, citations: [] })
+      const draftId = `a-${Date.now()}`
       try {
-        const response: ChatResponse = await api.chat({ conversationId: this.conversationId, message })
+        const response = this.streamingEnabled ? await this.sendStreaming(message, draftId) : await api.chat({ conversationId: this.conversationId, message })
         this.conversationId = response.conversationId
-        this.messages.push({
+        this.replaceOrPush(draftId, {
           id: response.messageId,
           role: 'assistant',
           content: response.answer,
@@ -48,17 +64,50 @@ export const useChatStore = defineStore('chat', {
         })
         this.selectedMessageId = response.messageId
       } catch (e) {
-        const detail = e instanceof ApiError ? e.message : 'The assistant is unavailable.'
+        const detail = e instanceof ApiError || e instanceof Error ? e.message : 'The assistant is unavailable.'
         this.error = detail
-        this.messages.push({ id: `err-${Date.now()}`, role: 'assistant', content: detail, citations: [], error: true })
+        this.replaceOrPush(draftId, { id: `err-${Date.now()}`, role: 'assistant', content: detail, citations: [], error: true })
       } finally {
         this.pending = false
+        this.stage = undefined
+        this.abort = undefined
       }
+    },
+    async sendStreaming(message: string, draftId: string): Promise<ChatResponse> {
+      this.abort = new AbortController()
+      return streamChat(
+        { conversationId: this.conversationId, message },
+        (event) => {
+          switch (event.type) {
+            case 'status':
+              this.stage = event.stage
+              break
+            case 'delta': {
+              const draft = this.messages.find((m) => m.id === draftId)
+              if (draft) draft.content += event.text
+              else this.messages.push({ id: draftId, role: 'assistant', content: event.text, citations: [], streaming: true })
+              break
+            }
+            default:
+              break
+          }
+        },
+        this.abort.signal,
+      )
+    },
+    replaceOrPush(draftId: string, message: ChatMessage) {
+      const index = this.messages.findIndex((m) => m.id === draftId)
+      if (index >= 0) this.messages[index] = message
+      else this.messages.push(message)
+    },
+    cancel() {
+      this.abort?.abort()
     },
     select(messageId: string) {
       this.selectedMessageId = messageId
     },
     reset() {
+      this.cancel()
       this.conversationId = undefined
       this.messages = []
       this.error = undefined

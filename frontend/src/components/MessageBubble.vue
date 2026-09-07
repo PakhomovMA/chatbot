@@ -23,11 +23,11 @@ function onClick(event: MouseEvent) {
 </script>
 
 <template>
-  <div class="bubble" :class="[message.role, { selected, error: message.error }]" @click="onClick">
+  <div class="bubble" :class="[message.role, { selected, error: message.error, streaming: message.streaming }]" @click="onClick">
     <div v-if="message.role === 'user'">{{ message.content }}</div>
     <div v-else-if="message.error" class="error">{{ message.content }}</div>
     <div v-else v-html="html"></div>
-    <div v-if="message.role === 'assistant' && !message.error" class="meta">
+    <div v-if="message.role === 'assistant' && !message.error && !message.streaming" class="meta">
       <StatusBadge v-if="message.grounding" :value="message.grounding" />
       <span v-if="message.citations.length">{{ message.citations.length }} citation{{ message.citations.length === 1 ? '' : 's' }}</span>
       <span v-if="message.timings">{{ formatSeconds(message.timings.totalMs) }} (retrieval {{ message.timings.retrievalMs }} ms)</span>

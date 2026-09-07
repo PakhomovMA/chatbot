@@ -2,10 +2,14 @@ package com.personal.chatbot.controller;
 
 import com.personal.chatbot.models.chat.ChatRequest;
 import com.personal.chatbot.models.chat.ChatResponse;
+import com.personal.chatbot.models.chat.ChatStreamEvent;
 import com.personal.chatbot.models.chat.ConversationView;
 import com.personal.chatbot.service.chat.ChatService;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -14,13 +18,25 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-/** Chat API (docs/system-plan.md §8). Streaming arrives in Phase 7. */
+import java.io.IOException;
+import java.time.Duration;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/** Chat API (docs/system-plan.md §8, D11): synchronous answers and a server-sent-events variant. */
 @RestController
 @RequestMapping("/api")
-public class ChatController {
+public class ChatController implements AutoCloseable {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatController.class);
+    static final Duration STREAM_TIMEOUT = Duration.ofMinutes(10);
 
     private final ChatService chatService;
+    private final ExecutorService streamExecutor = Executors.newThreadPerTaskExecutor(
+            Thread.ofVirtual().name("chat-stream-", 0).factory());
 
     public ChatController(ChatService chatService) {
         this.chatService = chatService;
@@ -29,6 +45,40 @@ public class ChatController {
     @PostMapping("/chat")
     public ChatResponse chat(@Valid @RequestBody ChatRequest request) {
         return chatService.chat(request);
+    }
+
+    /**
+     * Same contract as {@link #chat}, delivered as SSE events {@code status}, {@code delta}, {@code final}
+     * and {@code error}. The agent runs on a virtual thread; a client that disconnects simply stops
+     * receiving events.
+     */
+    @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter chatStream(@Valid @RequestBody ChatRequest request) {
+        SseEmitter emitter = new SseEmitter(STREAM_TIMEOUT.toMillis());
+        AtomicBoolean open = new AtomicBoolean(true);
+        Runnable closed = () -> open.set(false);
+        emitter.onCompletion(closed);
+        emitter.onTimeout(closed);
+        emitter.onError(_ -> closed.run());
+        streamExecutor.execute(() -> {
+            chatService.stream(request, event -> send(emitter, open, event));
+            if (open.get()) {
+                emitter.complete();
+            }
+        });
+        return emitter;
+    }
+
+    private static void send(SseEmitter emitter, AtomicBoolean open, ChatStreamEvent event) {
+        if (!open.get()) {
+            return;
+        }
+        try {
+            emitter.send(SseEmitter.event().name(event.type()).data(event, MediaType.APPLICATION_JSON));
+        } catch (IOException | IllegalStateException e) {
+            log.debug("Client went away during streaming: {}", e.toString());
+            open.set(false);
+        }
     }
 
     @GetMapping("/conversations/{id}")
@@ -40,5 +90,10 @@ public class ChatController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteConversation(@PathVariable String id) {
         chatService.deleteConversation(id);
+    }
+
+    @Override
+    public void close() {
+        streamExecutor.shutdownNow();
     }
 }

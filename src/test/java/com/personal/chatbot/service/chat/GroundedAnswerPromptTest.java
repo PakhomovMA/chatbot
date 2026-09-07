@@ -14,6 +14,14 @@ class GroundedAnswerPromptTest {
     private final GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(155, 2);
 
     @Test
+    void streamingTemplateSharesEvidenceAndHistoryRendering() {
+        var hits = List.of(GroundingVerifierTest.hit(1, "Run systemctl restart payments."));
+        String rendered = prompt.buildForStreaming("How?", List.of(ConversationTurn.user("earlier", Instant.EPOCH)), hits);
+        assertThat(rendered).contains("INSUFFICIENT:").contains("[1] Document \"Runbook\"").contains("User: earlier").endsWith("Question: How?")
+                .doesNotContain("evidenceSufficient");
+    }
+
+    @Test
     void rendersNumberedEvidenceHistoryAndQuestionFromTheTemplate() {
         List<RetrievedChunk> hits = List.of(
                 GroundingVerifierTest.hit(1, "Run systemctl restart payments."),

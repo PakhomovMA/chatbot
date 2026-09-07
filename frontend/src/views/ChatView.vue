@@ -39,13 +39,15 @@ watch(() => chat.selectedMessageId, () => (highlighted.value = undefined))
         <p v-if="!chat.messages.length" class="muted">Ask a question about the documents in the knowledge base. Answers cite the passages they rely on.</p>
         <MessageBubble v-for="m in chat.messages" :key="m.id" :message="m" :selected="m.id === chat.selectedMessageId"
                        @select="chat.select" @citation="onCitation" />
-        <div v-if="chat.pending" class="bubble assistant typing">Retrieving evidence and drafting an answer…</div>
+        <div v-if="chat.pending" class="bubble assistant typing">{{ chat.stageLabel ?? 'Working…' }}</div>
       </div>
       <form class="composer" @submit.prevent="send">
         <textarea v-model="draft" placeholder="Ask about the knowledge base… (Enter to send, Shift+Enter for a new line)" rows="2"
                   :disabled="chat.pending" @keydown="onKeydown"></textarea>
         <button class="btn primary" type="submit" :disabled="chat.pending || !draft.trim()">Send</button>
-        <button class="btn" type="button" :disabled="chat.pending || !chat.messages.length" @click="chat.reset()">New chat</button>
+        <button v-if="chat.pending" class="btn" type="button" @click="chat.cancel()">Stop</button>
+        <button v-else class="btn" type="button" :disabled="!chat.messages.length" @click="chat.reset()">New chat</button>
+        <label class="small muted" style="display: flex; align-items: center; gap: 4px"><input type="checkbox" v-model="chat.streamingEnabled" :disabled="chat.pending" /> stream</label>
       </form>
     </div>
     <CitationPanel :citations="chat.selectedMessage?.citations ?? []" :highlighted="highlighted" />

@@ -10,31 +10,45 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * Builds the grounded-answer prompt from {@code prompts/grounded-answer.md}: numbered evidence
- * passages with provenance, a compact conversation history and the question. Evidence is cut off at
- * a character budget so a local model never receives more context than it can use (docs/system-plan.md §6.7).
+ * Builds the grounded-answer prompts from {@code prompts/grounded-answer.md} (structured output) and
+ * {@code prompts/grounded-answer-stream.md} (free text for streaming): numbered evidence passages with
+ * provenance, a compact conversation history and the question. Evidence is cut off at a character budget
+ * so a local model never receives more context than it can use (docs/system-plan.md §6.7).
  */
 public class GroundedAnswerPrompt {
 
     public static final String TEMPLATE_LOCATION = "prompts/grounded-answer.md";
+    public static final String STREAM_TEMPLATE_LOCATION = "prompts/grounded-answer-stream.md";
     static final String HISTORY_HEADER = "Previous conversation (for context only; the evidence below is authoritative):";
 
     private final String template;
+    private final String streamTemplate;
     private final int evidenceCharBudget;
     private final int historyTurns;
 
     public GroundedAnswerPrompt(int evidenceCharBudget, int historyTurns) {
-        this(loadTemplate(), evidenceCharBudget, historyTurns);
+        this(load(TEMPLATE_LOCATION), load(STREAM_TEMPLATE_LOCATION), evidenceCharBudget, historyTurns);
     }
 
-    GroundedAnswerPrompt(String template, int evidenceCharBudget, int historyTurns) {
+    GroundedAnswerPrompt(String template, String streamTemplate, int evidenceCharBudget, int historyTurns) {
         this.template = template;
+        this.streamTemplate = streamTemplate;
         this.evidenceCharBudget = evidenceCharBudget;
         this.historyTurns = historyTurns;
     }
 
+    /** Prompt for the structured (non-streaming) draft. */
     public String build(String question, List<ConversationTurn> history, List<RetrievedChunk> hits) {
-        return template
+        return fill(template, question, history, hits);
+    }
+
+    /** Prompt for the free-text streaming draft. */
+    public String buildForStreaming(String question, List<ConversationTurn> history, List<RetrievedChunk> hits) {
+        return fill(streamTemplate, question, history, hits);
+    }
+
+    private String fill(String source, String question, List<ConversationTurn> history, List<RetrievedChunk> hits) {
+        return source
                 .replace("{{history}}", renderHistory(history))
                 .replace("{{evidence}}", renderEvidence(hits))
                 .replace("{{question}}", question.strip())
@@ -91,11 +105,11 @@ public class GroundedAnswerPrompt {
         return flat.length() > max ? flat.substring(0, max) + "…" : flat;
     }
 
-    private static String loadTemplate() {
+    private static String load(String location) {
         try {
-            return new ClassPathResource(TEMPLATE_LOCATION).getContentAsString(StandardCharsets.UTF_8);
+            return new ClassPathResource(location).getContentAsString(StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new UncheckedIOException("Cannot load prompt template " + TEMPLATE_LOCATION, e);
+            throw new UncheckedIOException("Cannot load prompt template " + location, e);
         }
     }
 }

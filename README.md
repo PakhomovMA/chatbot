@@ -3,9 +3,9 @@
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
 Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
 
-Current state: **Phase 6** (web UI) — a Vue app bundled into the jar offers Chat (grounded answers with
-clickable citations and a sources panel) and Knowledge Base (upload, live status, re-index, delete) on top
-of the Embabel agent, hybrid retrieval and the Lucene index. Streaming answers arrive in Phase 7.
+Current state: **Phase 7** (streaming) — a Vue app bundled into the jar offers Chat (answers streamed token
+by token, then verified citations and a sources panel) and Knowledge Base (upload, live status, re-index,
+delete) on top of the Embabel agent, hybrid retrieval and the Lucene index.
 
 ## Prerequisites
 
@@ -99,12 +99,16 @@ Errors are RFC 9457 problem details.
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/chat` `{conversationId?, message, options?:{topK?, documentIds?, includeDiagnostics?}}` | Grounded answer: `answer` (Markdown with `[n]` markers), `grounding` (`GROUNDED` / `PARTIAL` / `INSUFFICIENT_EVIDENCE`), `citations[]` with document, section, chunk id and quote, `timings`, `retrievalTraceId` |
+| `POST /api/chat/stream` (same body) | Server-sent events: `status` (`retrieving` / `generating` / `verifying`), `delta` (`{text}`), `final` (`{response}` with the same shape as `POST /api/chat`), or `error` (`{message}`) |
 | `GET /api/conversations/{id}` / `DELETE` | In-memory conversation history (last 10 turns, 24 h idle TTL) |
 
 The flow is deterministic retrieve → generate → verify (`agents/KnowledgeAssistantAgent`): retrieval never
 involves the model, the model only sees numbered evidence passages, and `[n]` markers that do not point at
 a shown passage are removed before the answer is returned. A question with no retrieved evidence is answered
-without calling the model. Prompt: `src/main/resources/prompts/grounded-answer.md`; tuning: `chatbot.chat.*`.
+without calling the model. Prompts: `src/main/resources/prompts/grounded-answer.md` (structured output) and
+`grounded-answer-stream.md` (free text for streaming; a trailing `INSUFFICIENT: …` line marks missing evidence);
+tuning: `chatbot.chat.*`. Streaming uses Embabel's streaming prompt runner when the model supports it and
+falls back to the structured path (one `delta` with the whole answer) otherwise; verification is identical.
 
 ## Retrieval and diagnostics
 

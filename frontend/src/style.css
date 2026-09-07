@@ -76,3 +76,5 @@ table.docs tr:last-child td { border-bottom: 0; }
 .banner { border-radius: var(--radius); padding: 10px 14px; margin-bottom: 16px; border: 1px solid var(--border); background: var(--panel); }
 .banner.warn { background: #fffbeb; border-color: #fde68a; }
 .banner.bad { background: #fef2f2; border-color: #fecaca; }
+.bubble.streaming::after { content: "▍"; color: var(--accent); animation: blink 1s steps(2) infinite; }
+@keyframes blink { to { opacity: 0; } }
