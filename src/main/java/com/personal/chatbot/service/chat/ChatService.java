@@ -79,24 +79,7 @@ public class ChatService {
      *                  model or tool boundary and no terminal event is emitted
      */
     public void stream(ChatRequest request, Consumer<ChatStreamEvent> listener, BooleanSupplier cancelled) {
-        AnswerStreamSink sink = new AnswerStreamSink() {
-            @Override
-            public void stage(String stage, @Nullable String detail) {
-                listener.accept(new ChatStreamEvent.Status(stage, detail));
-            }
-
-            @Override
-            public void delta(String text) {
-                if (!text.isEmpty()) {
-                    listener.accept(new ChatStreamEvent.Delta(text));
-                }
-            }
-
-            @Override
-            public boolean cancelled() {
-                return cancelled.getAsBoolean();
-            }
-        };
+        AnswerStreamSink sink = new ListenerAnswerStreamSink(listener, cancelled);
         try {
             listener.accept(new ChatStreamEvent.Final(run(request, sink)));
         } catch (Exception e) { // Embabel (Kotlin) can surface checked exceptions such as ExecutionException

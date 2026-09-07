@@ -3,6 +3,7 @@ package com.personal.chatbot.config;
 import com.embabel.common.ai.model.EmbeddingService;
 import com.personal.chatbot.models.index.IndexManifest;
 import com.personal.chatbot.service.embedding.KnowledgeEmbeddingService;
+import com.personal.chatbot.service.index.LockedSearchOperations;
 import com.personal.chatbot.service.index.LuceneIndexStore;
 import com.personal.chatbot.service.parsing.DocumentParser;
 import com.personal.chatbot.service.parsing.ProvenanceChunkTransformer;
@@ -39,5 +40,14 @@ class IndexConfiguration {
         var chunker = new IndexManifest.Chunker(index.maxChunkSize(), index.overlapSize(), ProvenanceChunkTransformer.TRANSFORMER_VERSION);
         return new LuceneIndexStore(indexDir, embabelEmbeddingService, knowledgeEmbeddingService.fingerprint(),
                 chunker, index.embeddingBatchSize(), transformer).open();
+    }
+
+    /**
+     * The store's search capabilities as the agent sees them: guarded by the store's read lock and
+     * index state, so an LLM tool call can never reach Lucene directly (INV-01).
+     */
+    @Bean
+    LockedSearchOperations knowledgeSearchOperations(LuceneIndexStore indexStore) {
+        return indexStore.searchOperations();
     }
 }

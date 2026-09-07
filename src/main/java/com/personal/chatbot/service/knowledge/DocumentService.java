@@ -11,6 +11,7 @@ import com.personal.chatbot.models.knowledge.StagedBlob;
 import com.personal.chatbot.models.knowledge.dto.DocumentPage;
 import com.personal.chatbot.models.knowledge.dto.UploadResponse;
 import com.personal.chatbot.utils.Filenames;
+import com.personal.chatbot.utils.MediaTypes;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,7 +23,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 
 /**
  * Knowledge-base document management (docs/system-plan.md D5): validation, de-duplication by
@@ -51,7 +51,7 @@ public class DocumentService {
 
     private final DocumentRegistry registry;
     private final BlobStore blobStore;
-    private final ChatbotProperties.Knowledge settings;
+    private final UploadValidator validator;
     private final Clock clock;
     private final ApplicationEventPublisher events;
 
@@ -59,13 +59,13 @@ public class DocumentService {
                            ApplicationEventPublisher events) {
         this.registry = registry;
         this.blobStore = blobStore;
-        this.settings = properties.knowledge();
+        this.validator = new UploadValidator(properties.knowledge());
         this.clock = clock;
         this.events = events;
     }
 
     public UploadResponse upload(Upload upload) {
-        String filename = validateName(upload);
+        String filename = validator.validateName(upload.filename(), upload.declaredSize());
         StagedBlob staged = stage(upload);
         try {
             Document existing = registry.findByContentHash(staged.contentHash()).orElse(null);
@@ -75,7 +75,7 @@ public class DocumentService {
                 return new UploadResponse(existing.id(), existing.status(), existing.version(), true);
             }
             String title = upload.title() != null && !upload.title().isBlank() ? upload.title().strip() : Filenames.baseName(filename);
-            Document document = Document.uploaded(title, filename, mediaTypeOf(upload, filename), staged.sizeBytes(),
+            Document document = Document.uploaded(title, filename, MediaTypes.resolve(upload.declaredMediaType(), filename), staged.sizeBytes(),
                     staged.contentHash(), now());
             blobStore.commit(staged, document.id(), document.version(), Filenames.extension(filename));
             registry.save(document);
@@ -91,7 +91,7 @@ public class DocumentService {
     /** Replaces the content of an existing document (new version) unless the bytes are unchanged. */
     public UploadResponse replaceContent(String documentId, Upload upload) {
         Document current = get(documentId);
-        String filename = validateName(upload);
+        String filename = validator.validateName(upload.filename(), upload.declaredSize());
         StagedBlob staged = stage(upload);
         try {
             if (current.contentHash().equals(staged.contentHash())) {
@@ -104,7 +104,7 @@ public class DocumentService {
                             "Identical content is already registered as document " + other.id());
                 }
             });
-            Document replaced = current.replacedContent(filename, mediaTypeOf(upload, filename), staged.sizeBytes(),
+            Document replaced = current.replacedContent(filename, MediaTypes.resolve(upload.declaredMediaType(), filename), staged.sizeBytes(),
                     staged.contentHash(), now());
             blobStore.commit(staged, replaced.id(), replaced.version(), Filenames.extension(filename));
             registry.save(replaced);
@@ -142,50 +142,18 @@ public class DocumentService {
         log.info("Deleted document {} '{}'", document.id(), document.title());
     }
 
-    private String validateName(Upload upload) {
-        String filename = Filenames.sanitize(upload.filename() == null ? "" : upload.filename());
-        if (filename.isEmpty()) {
-            throw new InvalidUploadException(Reason.BAD_FILENAME, "Upload has no usable file name");
-        }
-        String extension = Filenames.extension(filename);
-        Set<String> allowed = settings.allowedExtensions();
-        if (!allowed.contains(extension)) {
-            throw new InvalidUploadException(Reason.UNSUPPORTED_TYPE,
-                    "Unsupported file type '" + extension + "'; allowed: " + String.join(", ", allowed));
-        }
-        if (upload.declaredSize() > settings.maxUploadSize().toBytes()) {
-            throw new InvalidUploadException(Reason.TOO_LARGE, "File exceeds " + settings.maxUploadSize());
-        }
-        return filename;
-    }
 
     private StagedBlob stage(Upload upload) {
         StagedBlob staged = blobStore.stage(upload.content());
-        if (staged.sizeBytes() == 0) {
+        try {
+            validator.validateStaged(staged);
+        } catch (RuntimeException e) {
             blobStore.discard(staged);
-            throw new InvalidUploadException(Reason.EMPTY, "Uploaded file is empty");
-        }
-        if (staged.sizeBytes() > settings.maxUploadSize().toBytes()) {
-            blobStore.discard(staged);
-            throw new InvalidUploadException(Reason.TOO_LARGE, "File exceeds " + settings.maxUploadSize());
+            throw e;
         }
         return staged;
     }
 
-    private static String mediaTypeOf(Upload upload, String filename) {
-        String declared = upload.declaredMediaType();
-        if (declared != null && !declared.isBlank() && !declared.equalsIgnoreCase("application/octet-stream")) {
-            return declared.strip();
-        }
-        return switch (Filenames.extension(filename)) {
-            case "md", "markdown" -> "text/markdown";
-            case "txt" -> "text/plain";
-            case "html", "htm" -> "text/html";
-            case "pdf" -> "application/pdf";
-            case "docx" -> "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-            default -> "application/octet-stream";
-        };
-    }
 
     private Instant now() {
         return Instant.now(clock);
