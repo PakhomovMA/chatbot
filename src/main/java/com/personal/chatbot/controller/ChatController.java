@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -54,9 +55,9 @@ public class ChatController implements ActiveWork {
             Thread.ofVirtual().name("chat-stream-", 0).factory());
     private final ScheduledExecutorService heartbeats = Executors.newSingleThreadScheduledExecutor(
             Thread.ofVirtual().name("chat-heartbeat", 0).factory());
-    /** Requests still running, so shutdown ends them instead of waiting for them. */
+    /** Requests still running. Its monitor makes admission atomic with the shutdown snapshot. */
     private final Set<ChatCancellation> running = ConcurrentHashMap.newKeySet();
-    private volatile boolean stopping;
+    private boolean stopping;
 
     public ChatController(ChatService chatService, SseConnections connections) {
         this.chatService = chatService;
@@ -88,27 +89,29 @@ public class ChatController implements ActiveWork {
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chatStream(@Valid @RequestBody ChatRequest request) {
         ChatCancellation cancellation = start();
-        SseConnection connection = connections.open("chat", STREAM_TIMEOUT, cancellation::cancel);
+        SseConnection connection = null;
         ScheduledFuture<?> heartbeat = null;
         try {
+            SseConnection opened = connections.open("chat", STREAM_TIMEOUT, cancellation::cancel);
+            connection = opened;
             long interval = HEARTBEAT_INTERVAL.toMillis();
-            ScheduledFuture<?> scheduled = heartbeats.scheduleAtFixedRate(connection::heartbeat, interval, interval,
+            ScheduledFuture<?> scheduled = heartbeats.scheduleAtFixedRate(opened::heartbeat, interval, interval,
                     TimeUnit.MILLISECONDS);
             heartbeat = scheduled;
             Future<?> work = streamExecutor.submit(() -> {
                 try {
-                    chatService.stream(request, event -> connection.send(event.type(), null, event), cancellation);
+                    chatService.stream(request, event -> opened.send(event.type(), null, event), cancellation);
                 } finally {
-                    release(cancellation, scheduled, connection);
+                    release(cancellation, scheduled, opened);
                 }
             });
             // A request cancelled before its turn on the executor never runs, so nothing else would clean up.
             cancellation.onCancel(() -> {
                 if (work.cancel(false)) {
-                    release(cancellation, scheduled, connection);
+                    release(cancellation, scheduled, opened);
                 }
             });
-            return connection.emitter();
+            return opened.emitter();
         } catch (RuntimeException e) {
             // Shutdown between the check above and here: whatever was created is given back, so the
             // request is not left counted as running (docs/concurrency-plan.md C10).
@@ -136,8 +139,13 @@ public class ChatController implements ActiveWork {
     /** Refuses new questions and cancels the ones being answered; both are idempotent. */
     @Override
     public void stopAccepting() {
-        stopping = true;
-        running.forEach(cancellation -> cancellation.cancel("application shutdown"));
+        List<ChatCancellation> accepted;
+        synchronized (running) {
+            stopping = true;
+            accepted = List.copyOf(running);
+        }
+        // Cancellation invokes callbacks; never run them under the admission monitor.
+        accepted.forEach(cancellation -> cancellation.cancel("application shutdown"));
         heartbeats.shutdown();
         streamExecutor.shutdown();
     }
@@ -166,23 +174,28 @@ public class ChatController implements ActiveWork {
     }
 
     private ChatCancellation start() {
-        if (stopping) {
-            throw new ServiceStoppingException("chat");
+        synchronized (running) {
+            if (stopping) {
+                throw new ServiceStoppingException("chat");
+            }
+            ChatCancellation cancellation = new ChatCancellation();
+            running.add(cancellation);
+            return cancellation;
         }
-        ChatCancellation cancellation = new ChatCancellation();
-        running.add(cancellation);
-        return cancellation;
     }
 
     /**
      * Idempotent: whichever path gets here first releases everything the request held. The heartbeat
      * is null when the request failed before one was scheduled.
      */
-    private void release(ChatCancellation cancellation, @Nullable ScheduledFuture<?> heartbeat, SseConnection connection) {
+    private void release(ChatCancellation cancellation, @Nullable ScheduledFuture<?> heartbeat,
+                         @Nullable SseConnection connection) {
         if (heartbeat != null) {
             heartbeat.cancel(false);
         }
         running.remove(cancellation);
-        connection.complete();
+        if (connection != null) {
+            connection.complete();
+        }
     }
 }

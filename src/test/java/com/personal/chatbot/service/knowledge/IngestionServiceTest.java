@@ -47,6 +47,7 @@ class IngestionServiceTest {
     private final AtomicBoolean rebuildFails = new AtomicBoolean();
     /** Set to let the worker run the whole rebuild while the request that asked for it marks documents. */
     private final AtomicBoolean settleWhileMarkingRebuild = new AtomicBoolean();
+    private final AtomicBoolean finishActiveWhileMarkingRebuild = new AtomicBoolean();
     /** What a rebuild did, in the order it happened: one entry per marked document, one per rebuild. */
     private final List<String> rebuildSteps = new CopyOnWriteArrayList<>();
     private DocumentRegistry registry;
@@ -128,6 +129,10 @@ class IngestionServiceTest {
             return;
         }
         rebuildSteps.add("mark");
+        if (finishActiveWhileMarkingRebuild.compareAndSet(true, false)) {
+            parser.resume();
+            awaitIdleQueue();
+        }
         if (settleWhileMarkingRebuild.compareAndSet(true, false)) {
             awaitIdleQueue();
         }
@@ -243,9 +248,8 @@ class IngestionServiceTest {
 
         assertThat(ingestion.reindexAll()).isEqualTo(2);
 
-        assertThat(rebuildSteps).as("every document is marked before the rebuild is requested")
-                .containsExactly("mark", "mark", "rebuild");
         awaitIdleQueue();
+        assertThat(rebuildSteps).containsExactlyInAnyOrder("mark", "mark", "rebuild");
         assertThat(registry.findById(a).orElseThrow().status()).isEqualTo(DocumentStatus.READY);
         assertThat(registry.findById(b).orElseThrow().status()).isEqualTo(DocumentStatus.READY);
         assertThat(indexStore.documentUris()).containsExactlyInAnyOrder(DocumentParser.uriOf(a), DocumentParser.uriOf(b));
@@ -257,10 +261,25 @@ class IngestionServiceTest {
         String id = upload("a.md", TestDocuments.markdown()).documentId();
         awaitStatus(id, DocumentStatus.READY);
         stopIngestion();
+        Document before = registry.findById(id).orElseThrow();
 
         assertThatThrownBy(() -> ingestion.reindex(id)).isInstanceOf(ServiceStoppingException.class);
+        assertThat(registry.findById(id)).contains(before);
         assertThatThrownBy(() -> ingestion.reindexAll()).isInstanceOf(ServiceStoppingException.class);
-        // Marked, not indexed: exactly what startup reconciliation queues again.
+        assertThat(registry.findById(id)).contains(before);
+    }
+
+    @Test
+    void anOldRunCannotPublishReadyBetweenRebuildMarkingAndAdmission() {
+        parser.pauseNext(1);
+        String id = upload("runbook.md", TestDocuments.markdown()).documentId();
+        parser.awaitParsing();
+        rebuildFails.set(true);
+        finishActiveWhileMarkingRebuild.set(true);
+
+        ingestion.reindexAll();
+
+        awaitIdleQueue();
         assertThat(registry.findById(id).orElseThrow().status()).isEqualTo(DocumentStatus.PENDING_REINDEX);
     }
 

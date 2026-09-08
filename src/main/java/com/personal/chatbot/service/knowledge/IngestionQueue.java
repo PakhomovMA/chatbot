@@ -115,11 +115,20 @@ public class IngestionQueue implements ActiveWork {
      * @return false if the queue is shutting down and the request was not accepted
      */
     public boolean enqueue(String documentId) {
+        return enqueue(documentId, () -> Boolean.TRUE).isPresent();
+    }
+
+    /**
+     * Prepares metadata and accepts work under the same monitor as shutdown and result publication.
+     * The callback must not publish events or wait for the worker; announce its result afterwards.
+     */
+    public <T> Optional<T> enqueue(String documentId, Supplier<T> prepare) {
         synchronized (monitor) {
             if (stopping) {
                 log.warn("Ingestion queue is stopping; request for {} rejected", documentId);
-                return false;
+                return Optional.empty();
             }
+            T prepared = Objects.requireNonNull(prepare.get());
             Job job = new Job(documentId, ++requests, generation);
             if (active != null && active.documentId().equals(documentId)) {
                 rerun = job;
@@ -127,7 +136,7 @@ public class IngestionQueue implements ActiveWork {
                 pending.put(documentId, job);
             }
             monitor.notifyAll();
-            return true;
+            return Optional.of(prepared);
         }
     }
 
@@ -155,18 +164,24 @@ public class IngestionQueue implements ActiveWork {
      * @return false if the queue is shutting down and the rebuild was not accepted
      */
     public boolean requestRebuild() {
+        return requestRebuild(() -> Boolean.TRUE).isPresent();
+    }
+
+    /** Like {@link #enqueue(String, Supplier)}, but invalidates the old generation before releasing the monitor. */
+    public <T> Optional<T> requestRebuild(Supplier<T> prepare) {
         synchronized (monitor) {
             if (stopping) {
                 log.warn("Ingestion queue is stopping; index rebuild rejected");
-                return false;
+                return Optional.empty();
             }
+            T prepared = Objects.requireNonNull(prepare.get());
             generation++;
             pending.clear();
             rerun = null;
             activeIsCurrent = false;
             rebuildRequested = true;
             monitor.notifyAll();
-            return true;
+            return Optional.of(prepared);
         }
     }
 

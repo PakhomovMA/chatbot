@@ -2,11 +2,11 @@ package com.personal.chatbot.service.knowledge;
 
 import com.personal.chatbot.exceptions.DocumentNotFoundException;
 import com.personal.chatbot.exceptions.ServiceStoppingException;
-import com.personal.chatbot.models.knowledge.Document;
 import com.personal.chatbot.models.knowledge.DocumentEvent;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
 import com.personal.chatbot.models.knowledge.dto.DocumentStatusView;
 import com.personal.chatbot.service.index.KnowledgeIndexWriter;
+import com.personal.chatbot.service.knowledge.DocumentRegistry.Change;
 import com.personal.chatbot.service.parsing.DocumentParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Entry point to ingestion (docs/system-plan.md §5, D7): reacts to document lifecycle events and
@@ -76,23 +77,21 @@ public class IngestionService implements IngestionOperations {
     // ---- admin operations ---------------------------------------------------------------------
 
     /**
-     * Marks a document for re-indexing and queues it. The status is written before the request is
-     * accepted, so the run it starts cannot be overwritten by this thread; if the queue refuses the
-     * request the caller is told, and the document stays {@code PENDING_REINDEX} for the startup
-     * reconciliation of the next run rather than being reported as queued (docs/concurrency-plan.md C10).
+     * Marks a document and queues it as one operation with respect to shutdown and the worker.
+     * A refused request changes no metadata; events are announced after the queue lock is released.
      */
     @Override
     public DocumentStatusView reindex(String documentId) {
-        // No version is expected here, so the only way to miss is a document that is already gone.
-        Document pending = status.transition(documentId, d -> d.withStatusAt(DocumentStatus.PENDING_REINDEX, now())
-                .withStatusMessage("re-index requested").withError(null)).applied();
-        if (pending == null) {
-            throw new DocumentNotFoundException(documentId);
-        }
-        if (!enqueue(documentId)) {
-            throw new ServiceStoppingException("re-index");
-        }
-        return DocumentStatusView.of(pending);
+        Change pending = queue.enqueue(documentId, () -> {
+            Change change = registry.update(documentId, d -> d.withStatusAt(DocumentStatus.PENDING_REINDEX, now())
+                    .withStatusMessage("re-index requested").withError(null));
+            if (change.applied() == null) {
+                throw new DocumentNotFoundException(documentId);
+            }
+            return change;
+        }).orElseThrow(() -> new ServiceStoppingException("re-index"));
+        status.announce(pending);
+        return DocumentStatusView.of(Objects.requireNonNull(pending.applied()));
     }
 
     /**
@@ -100,26 +99,20 @@ public class IngestionService implements IngestionOperations {
      * runs as a command in the ingestion queue, after whatever is in flight; the documents to ingest
      * are collected then, so uploads and replacements made while it waits are not lost.
      *
-     * <p>The statuses are written before the rebuild is requested, never after: from the request on,
-     * every document in the registry has a run coming, and a run that finishes quickly would
-     * otherwise have its {@code READY} overwritten here by a {@code PENDING_REINDEX} nothing takes
-     * back (docs/concurrency-plan.md C10). A rebuild refused because the application is stopping
-     * leaves them marked, which is what startup reconciliation re-queues.
+     * <p>Marking documents and invalidating the old generation share the queue monitor, so an old
+     * run cannot publish READY between them. A refused rebuild leaves metadata unchanged.
      *
      * @return how many documents were accepted for re-indexing at the time of the request
      */
     @Override
     public int reindexAll() {
-        List<Document> documents = registry.findAll();
-        for (Document document : documents) {
-            status.transition(document.id(), d -> d.withStatusAt(DocumentStatus.PENDING_REINDEX, now())
-                    .withStatusMessage("index rebuild").withError(null).withChunkCount(null).withIndexedAt(null));
-        }
-        if (!queue.requestRebuild()) {
-            throw new ServiceStoppingException("index rebuild");
-        }
-        log.info("Index rebuild requested: {} documents accepted for re-indexing", documents.size());
-        return documents.size();
+        List<Change> changes = queue.requestRebuild(() -> registry.findAll().stream()
+                .map(document -> registry.update(document.id(), d -> d.withStatusAt(DocumentStatus.PENDING_REINDEX, now())
+                        .withStatusMessage("index rebuild").withError(null).withChunkCount(null).withIndexedAt(null)))
+                .toList()).orElseThrow(() -> new ServiceStoppingException("index rebuild"));
+        changes.forEach(status::announce);
+        log.info("Index rebuild requested: {} documents accepted for re-indexing", changes.size());
+        return changes.size();
     }
 
     @Override
