@@ -1,6 +1,6 @@
 package com.personal.chatbot.utils;
 
-/** Text shaping shared by prompts, tool output and citation quotes. */
+/** Text shaping shared by prompts, diagnostics and citation quotes. */
 public final class Texts {
 
     /** Appended where text was cut off. */
