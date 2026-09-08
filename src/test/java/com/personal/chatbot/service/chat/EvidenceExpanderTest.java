@@ -5,7 +5,6 @@ import com.personal.chatbot.config.ChatbotProperties;
 import com.personal.chatbot.models.agent.Evidence;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.models.chat.AnswerLanguage;
-import com.personal.chatbot.models.chat.AnswerMode;
 import com.personal.chatbot.models.retrieval.ExpansionStrategy;
 import com.personal.chatbot.models.retrieval.Provenance;
 import com.personal.chatbot.models.retrieval.RetrievalMode;
@@ -15,11 +14,11 @@ import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.service.retrieval.Retriever;
 import com.personal.chatbot.service.retrieval.SearchExpander;
+import com.personal.chatbot.support.ChatSettings;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 
@@ -34,10 +33,10 @@ class EvidenceExpanderTest {
     private final Retriever retriever = query -> result(query.query(), true);
 
     private EvidenceExpander expander(ExpansionStrategy strategy) {
-        ChatbotProperties.Chat chat = new ChatbotProperties.Chat(AnswerMode.DETERMINISTIC, AnswerLanguage.AUTO, 4, 0.2,
-                0.1, 6000, 600, 10, 1000, Duration.ofHours(24), new ChatbotProperties.ExpandSearch(strategy, 3));
+        ChatbotProperties.Chat chat = ChatSettings.of(new ChatbotProperties.ExpandSearch(strategy, 3),
+                ChatSettings.NO_DECOMPOSITION, ChatSettings.NO_COMPARISON);
         return new EvidenceExpander(new SearchExpander(retriever, new RetrievalTraceStore(20), RETRIEVAL),
-                new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO), new GroundingInstructions(4, 3), chat,
+                new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO), new GroundingInstructions(4, 3, 3, 4), chat,
                 new SimpleMeterRegistry());
     }
 

@@ -25,7 +25,7 @@ class ConversationQueryRewriterTest {
 
     private final GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(6000, 2, AnswerLanguage.AUTO);
     private final ConversationQueryRewriter rewriter = new ConversationQueryRewriter(prompt,
-            new GroundingInstructions(4, 3), 2, new SimpleMeterRegistry());
+            new GroundingInstructions(4, 3, 3, 4), 2, new SimpleMeterRegistry());
     private final OperationContext context = mock(OperationContext.class, RETURNS_DEEP_STUBS);
 
     private UserQuestion question(String text) {
@@ -54,7 +54,7 @@ class ConversationQueryRewriterTest {
         assertThat(rewriter.rewrite(first, context)).isSameAs(first);
         UserQuestion standalone = question("Describe all required steps to safely restart the payments service during business hours without losing any pending transactions or active customer sessions.");
         assertThat(rewriter.rewrite(standalone, context)).isSameAs(standalone);
-        ConversationQueryRewriter disabled = new ConversationQueryRewriter(prompt, new GroundingInstructions(4, 3),
+        ConversationQueryRewriter disabled = new ConversationQueryRewriter(prompt, new GroundingInstructions(4, 3, 3, 4),
                 0, new SimpleMeterRegistry());
         assertThat(disabled.rewrite(question("Restart it?"), context).effectiveQuery()).isEqualTo("Restart it?");
         verifyNoInteractions(context);
@@ -127,7 +127,7 @@ class ConversationQueryRewriterTest {
     @Test
     void aOneTurnBudgetCanResolveTheSubjectFromTheLastAssistantMessage() {
         var oneTurn = new ConversationQueryRewriter(new GroundedAnswerPrompt(6000, 1, AnswerLanguage.AUTO),
-                new GroundingInstructions(4, 3), 1, new SimpleMeterRegistry());
+                new GroundingInstructions(4, 3, 3, 4), 1, new SimpleMeterRegistry());
         assertThat(oneTurn.shouldRewrite(question("How do I restart it?"))).isTrue();
     }
 }

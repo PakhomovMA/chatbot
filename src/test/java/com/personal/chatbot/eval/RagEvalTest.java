@@ -3,7 +3,9 @@ package com.personal.chatbot.eval;
 import com.embabel.agent.api.common.OperationContext;
 import com.embabel.common.ai.model.LlmOptions;
 import com.personal.chatbot.config.ChatbotProperties;
+import com.personal.chatbot.models.agent.Evidence;
 import com.personal.chatbot.models.agent.StandaloneQuery;
+import com.personal.chatbot.models.agent.SubQuestions;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.models.chat.AnswerLanguage;
 import com.personal.chatbot.models.chat.ConversationTurn;
@@ -19,6 +21,7 @@ import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.service.chat.ConversationQueryRewriter;
 import com.personal.chatbot.service.chat.GroundedAnswerPrompt;
 import com.personal.chatbot.service.chat.GroundingInstructions;
+import com.personal.chatbot.service.chat.QuestionDecomposer;
 import com.personal.chatbot.service.embedding.EmbabelEmbeddingServiceAdapter;
 import com.personal.chatbot.service.embedding.PromptedEmbeddingService;
 import com.personal.chatbot.service.embedding.onnx.OnnxModelFiles;
@@ -29,6 +32,8 @@ import com.personal.chatbot.service.parsing.ProvenanceChunkTransformer;
 import com.personal.chatbot.service.retrieval.RetrievalService;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.service.retrieval.SearchExpander;
+import com.personal.chatbot.service.retrieval.SubQuestionSearch;
+import com.personal.chatbot.support.ChatSettings;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
@@ -79,6 +84,8 @@ class RagEvalTest {
     private static final int NDCG_K = 10;
     /** The production default of chatbot.chat.expand-search.queries. */
     private static final int EXPANSION_QUERIES = 3;
+    /** An evidence budget too small for a multi-part question, standing in for a larger corpus. */
+    private static final int TIGHT_TOP_K = 3;
 
     /** @param expectedDocument null marks a negative question: nothing in the corpus answers it. */
     record Question(String id, String question, @Nullable String expectedDocument, List<String> mustContain) {
@@ -249,7 +256,7 @@ class RagEvalTest {
                 Files.readString(Path.of("src/test/resources/eval/questions-conversation.json")), ConversationSet.class);
         var rewriter = new ConversationQueryRewriter(
                 new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO),
-                new GroundingInstructions(4, 3), 10, new SimpleMeterRegistry());
+                new GroundingInstructions(4, 3, 3, 4), 10, new SimpleMeterRegistry());
         var context = Mockito.mock(OperationContext.class,
                 Mockito.RETURNS_DEEP_STUBS);
         List<Map<String, Object>> outcomes = new ArrayList<>();
@@ -541,6 +548,185 @@ class RagEvalTest {
                 recallHits / positives, reciprocalRanks / positives, covered / positives, coveredInBudget / positives,
                 negatives == 0 ? 0 : (double) negativeSufficient / negatives, percentile(latencies, 0.5),
                 percentile(modelLatencies, 0.5));
+    }
+
+    /** A question that asks for several things; every part carries its own relevance judgement. */
+    record MultiPartCase(String id, String question, List<Question> parts) {
+    }
+
+    record MultiPartSet(String description, List<MultiPartCase> questions) {
+    }
+
+    /**
+     * What {@code decomposeQuestion} (Phase 9d) does to a question set. The baseline is one search for
+     * the whole question, the behaviour before this phase; coverage is counted per part, because that
+     * is what a multi-part question loses when its parts share one query.
+     *
+     * @param topK                hits the question is answered from: the production default, and a
+     *                            deliberately tight budget, where the parts have to compete for it
+     * @param fired               questions the shipped heuristic decided to split
+     * @param partsCovered        answerable parts with a relevant passage anywhere in the result
+     * @param partsCoveredInBudget the same, counting only passages that fit the prompt's evidence budget
+     * @param partsRecallAt5      answerable parts with a relevant passage in the first five hits
+     * @param fullyCovered        questions whose every answerable part is covered within the budget
+     * @param sufficientShare     share of questions whose merged evidence clears the sufficiency floor
+     * @param modelP50Ms          median wall time of the splitting call, zero for the baseline
+     */
+    record DecompositionSummary(String questionSet, int topK, boolean decomposed, int questions, int parts, int fired,
+                                double partsCovered, double partsCoveredInBudget, double partsRecallAt5,
+                                double fullyCovered, double sufficientShare, double p50Ms, double modelP50Ms) {
+    }
+
+    /**
+     * Phase 9d gate: searching a multi-part question per part must not cost the golden set anything
+     * where the heuristic fires on it, and must cover more of the parts where they have to compete
+     * for the evidence budget. Everything below the model call is the shipped code — the same
+     * heuristic, the same instructions, the same merge; only Embabel's transport is replaced.
+     *
+     * <p>Measured at two budgets, because whether the parts compete at all is a property of the corpus:
+     * at the production {@code top-k} these five small documents cover both parts of every question
+     * from a single query, and the tight budget is an attempt to make them compete. Neither shows a
+     * gain here (docs/eval-log.md), so the assertion is non-degradation and the numbers decide the
+     * default, as they did for neighbour expansion.
+     */
+    @Test
+    void decompositionCoversMorePartsWithoutCostingTheGoldenSet() throws IOException {
+        assumeTrue(EvalQueryWriter.ollamaAvailable(), "Ollama required for question decomposition eval");
+        MultiPartSet multiPart = JsonMapper.builder().build().readValue(
+                Files.readString(Path.of("src/test/resources/eval/questions-multipart.json")), MultiPartSet.class);
+        List<MultiPartCase> golden = questionSet.questions().stream()
+                .filter(q -> !q.isNegative())
+                .map(q -> new MultiPartCase(q.id(), q.question(), List.of(q)))
+                .toList();
+        List<DecompositionSummary> summaries = new ArrayList<>();
+        List<Map<String, Object>> outcomes = new ArrayList<>();
+        // The split is the model's, so it is asked once per question and reused across the budgets.
+        Map<String, List<String>> splits = new LinkedHashMap<>();
+        try (EvalQueryWriter writer = new EvalQueryWriter(System.getProperty("eval.llm", "qwen3:14b"), 0.0, EXPANSION_QUERIES)) {
+            for (int topK : List.of(retrievalSettings.topK(), TIGHT_TOP_K)) {
+                for (Map.Entry<String, List<MultiPartCase>> set
+                        : Map.of("multipart", multiPart.questions(), "golden", golden).entrySet()) {
+                    summaries.add(measureDecomposition(set.getKey(), set.getValue(), topK, false, writer, splits, outcomes));
+                    summaries.add(measureDecomposition(set.getKey(), set.getValue(), topK, true, writer, splits, outcomes));
+                }
+            }
+        }
+        Path reports = Path.of("build/reports/rag-eval");
+        Files.createDirectories(reports);
+        Files.writeString(reports.resolve("decompose-question.json"), JsonMapper.builder()
+                .enable(SerializationFeature.INDENT_OUTPUT).build()
+                .writeValueAsString(Map.of("summary", summaries, "outcomes", outcomes)));
+        for (DecompositionSummary summary : summaries) {
+            log.info(String.format(Locale.ROOT,
+                    "%-9s top-k %-2d %-10s parts=%d fired=%d/%d partsCovered=%.3f inBudget=%.3f partRecall@5=%.3f fullyCovered=%.3f sufficient=%.2f p50=%.0fms (model %.0fms)",
+                    summary.questionSet(), summary.topK(), summary.decomposed() ? "decomposed" : "baseline",
+                    summary.parts(), summary.fired(), summary.questions(), summary.partsCovered(),
+                    summary.partsCoveredInBudget(), summary.partsRecallAt5(), summary.fullyCovered(),
+                    summary.sufficientShare(), summary.p50Ms(), summary.modelP50Ms()));
+        }
+        for (int topK : List.of(retrievalSettings.topK(), TIGHT_TOP_K)) {
+            for (String set : List.of("multipart", "golden")) {
+                DecompositionSummary baseline = summaryOf(summaries, set, topK, false);
+                DecompositionSummary decomposed = summaryOf(summaries, set, topK, true);
+                assertThat(decomposed.partsCoveredInBudget())
+                        .as("%s parts within the evidence budget at top-k %d", set, topK)
+                        .isGreaterThanOrEqualTo(baseline.partsCoveredInBudget());
+                assertThat(decomposed.fullyCovered()).as("%s questions fully covered at top-k %d", set, topK)
+                        .isGreaterThanOrEqualTo(baseline.fullyCovered());
+            }
+        }
+        assertThat(summaryOf(summaries, "golden", retrievalSettings.topK(), true).partsRecallAt5())
+                .as("golden recall@5").isGreaterThanOrEqualTo(minRecall);
+    }
+
+    private static DecompositionSummary summaryOf(List<DecompositionSummary> summaries, String set, int topK,
+                                                  boolean decomposed) {
+        return summaries.stream().filter(s -> s.questionSet().equals(set) && s.topK() == topK && s.decomposed() == decomposed)
+                .findFirst().orElseThrow();
+    }
+
+    private DecompositionSummary measureDecomposition(String setName, List<MultiPartCase> cases, int topK,
+                                                      boolean decomposed, EvalQueryWriter writer,
+                                                      Map<String, List<String>> splits,
+                                                      List<Map<String, Object>> outcomes) {
+        GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(EVIDENCE_CHAR_BUDGET, 0, AnswerLanguage.EN);
+        QuestionDecomposer decomposer = new QuestionDecomposer(retrieval,
+                new SubQuestionSearch(new RetrievalTraceStore(500), retrievalSettings), prompt,
+                new GroundingInstructions(4, EXPANSION_QUERIES, 3, 4),
+                ChatSettings.of(ChatSettings.NO_EXPANSION, new ChatbotProperties.Decompose(true, 3, 4),
+                        ChatSettings.NO_COMPARISON),
+                new SimpleMeterRegistry());
+        OperationContext context = Mockito.mock(OperationContext.class, Mockito.RETURNS_DEEP_STUBS);
+        var splitCall = context.ai().withLlm(ArgumentMatchers.any(LlmOptions.class))
+                .withPromptContributor(ArgumentMatchers.any()).creating(SubQuestions.class);
+        Mockito.doAnswer(call -> {
+            // The passes run in parallel in production; sequentially here, so the numbers are stable.
+            List<RetrievalQuery> queries = List.copyOf(call.<List<RetrievalQuery>>getArgument(0));
+            return queries.stream().map(retrieval::search).toList();
+        }).when(context).parallelMap(ArgumentMatchers.any(), ArgumentMatchers.anyInt(), ArgumentMatchers.any());
+
+        int fired = 0;
+        int parts = 0;
+        double covered = 0;
+        double coveredInBudget = 0;
+        double recallHits = 0;
+        double fullyCovered = 0;
+        double sufficient = 0;
+        List<Long> latencies = new ArrayList<>();
+        List<Long> modelLatencies = new ArrayList<>();
+        for (MultiPartCase item : cases) {
+            UserQuestion question = new UserQuestion("eval", item.id(), item.question(), List.of(), topK, null);
+            long started = System.nanoTime();
+            RetrievalResult result;
+            if (decomposed && decomposer.shouldDecompose(question)) {
+                fired++;
+                boolean asked = !splits.containsKey(item.id());
+                List<String> subQuestions = splits.computeIfAbsent(item.id(), _ -> writer.split(item.question(), 3));
+                Mockito.doAnswer(_ -> new SubQuestions(subQuestions)).when(splitCall)
+                        .fromPrompt(ArgumentMatchers.anyString());
+                Evidence evidence = decomposer.decompose(question, context);
+                result = evidence.retrieval();
+                if (asked) {
+                    modelLatencies.add(writer.lastCallMs());
+                }
+            } else {
+                result = retrieval.search(question.retrievalQuery());
+            }
+            latencies.add((System.nanoTime() - started) / 1_000_000);
+            sufficient += result.evidenceSufficient() ? 1 : 0;
+
+            List<RetrievedChunk> hits = result.hits();
+            List<RetrievedChunk> inBudget = hits.subList(0, prompt.includedHits(hits));
+            int answerable = 0;
+            int coveredParts = 0;
+            for (Question part : item.parts()) {
+                if (part.isNegative()) {
+                    continue;
+                }
+                answerable++;
+                parts++;
+                covered += hits.stream().anyMatch(hit -> isRelevant(hit, part)) ? 1 : 0;
+                boolean inBudgetHit = inBudget.stream().anyMatch(hit -> isRelevant(hit, part));
+                coveredInBudget += inBudgetHit ? 1 : 0;
+                coveredParts += inBudgetHit ? 1 : 0;
+                int firstRelevant = hits.stream().filter(RetrievedChunk::isHit).filter(hit -> isRelevant(hit, part))
+                        .mapToInt(RetrievedChunk::rank).min().orElse(-1);
+                recallHits += firstRelevant > 0 && firstRelevant <= RECALL_K ? 1 : 0;
+                if (!inBudgetHit) {
+                    log.info("[{} top-k {} {}] {} misses part '{}'", setName, topK,
+                            decomposed ? "decomposed" : "baseline", item.id(), part.question());
+                }
+            }
+            fullyCovered += answerable > 0 && coveredParts == answerable ? 1 : 0;
+            outcomes.add(Map.of("set", setName, "topK", topK, "id", item.id(), "decomposed", decomposed,
+                    "subQuestions", result.decomposed() ? result.decomposition().subQuestions() : List.of(),
+                    "coveredParts", coveredParts, "answerableParts", answerable, "query", result.query()));
+        }
+        latencies.sort(null);
+        modelLatencies.sort(null);
+        return new DecompositionSummary(setName, topK, decomposed, cases.size(), parts, fired, covered / parts,
+                coveredInBudget / parts, recallHits / parts, fullyCovered / cases.size(), sufficient / cases.size(),
+                percentile(latencies, 0.5), percentile(modelLatencies, 0.5));
     }
 
     private ModeSummary evaluate(RetrievalMode mode, List<QuestionOutcome> outcomes) {

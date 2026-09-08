@@ -137,6 +137,8 @@ public record ChatbotProperties(
      * Chat defaults (docs/system-plan.md D10, D12).
      *
      * @param expandSearch       second retrieval pass when the first one found weak evidence (Phase 9a)
+     * @param decompose          retrieval per part of a question that asks for several things (Phase 9d)
+     * @param compareSources     comparison of the sources before the answer is written (Phase 9d)
      * @param mode               default answer mode: DETERMINISTIC (retrieve-then-generate) or AGENTIC (ToolishRag, Phase 9c)
      * @param answerLanguage     language of the answer: AUTO follows the question, RU or EN force it
      * @param agenticMaxSearches searches the model is told it may issue in agentic mode
@@ -159,7 +161,9 @@ public record ChatbotProperties(
             @Min(0) @DefaultValue("10") int historyTurns,
             @Min(1) @DefaultValue("1000") int maxConversations,
             @DefaultValue("24h") Duration conversationTtl,
-            @Valid @DefaultValue ExpandSearch expandSearch
+            @Valid @DefaultValue ExpandSearch expandSearch,
+            @Valid @DefaultValue Decompose decompose,
+            @Valid @DefaultValue CompareSources compareSources
     ) {
     }
 
@@ -183,6 +187,47 @@ public record ChatbotProperties(
         public boolean enabled() {
             return strategy != ExpansionStrategy.NONE;
         }
+    }
+
+    /**
+     * The {@code decomposeQuestion} branch of the agent (docs/system-plan.md Phase 9d): a question that
+     * asks for several things is split into its parts, each part is searched for on its own and the
+     * passes are merged. It costs one model call and one search per part, paid only on questions whose
+     * wording says they ask for more than one thing.
+     *
+     * <p>Off by default, like neighbour expansion and for the same reason: on a corpus of five short
+     * documents a single query already returns every part's passages inside the evidence budget, so the
+     * split only moved them up the ranking and cost a model call (docs/eval-log.md). Worth switching on
+     * where the parts of a question really compete for the budget.
+     *
+     * @param maxSubQuestions       parts the model may split a question into
+     * @param maxConcurrentSearches searches of the split run at once (they share the index read lock)
+     */
+    public record Decompose(
+            @DefaultValue("false") boolean enabled,
+            @Min(2) @DefaultValue("3") int maxSubQuestions,
+            @Min(1) @DefaultValue("4") int maxConcurrentSearches
+    ) {
+    }
+
+    /**
+     * The {@code compareSources} branch of the agent (docs/system-plan.md Phase 9d): when the question
+     * asks how things relate and the evidence shown to the model comes from several documents, the
+     * sources are compared before the answer is drafted. Costs one model call on such questions.
+     *
+     * <p>Off by default: it makes the answer name both sides in detail, but on this corpus — where no
+     * two documents actually disagree — the plain answer already covered both, and the extra call plus
+     * the longer answer cost a local 14B model several times the latency (docs/eval-log.md). Worth
+     * switching on for a corpus whose documents overlap and contradict each other.
+     *
+     * @param minDocuments documents the shown passages must come from before comparing is worth a call
+     * @param maxAspects   points of comparison kept from the model's answer
+     */
+    public record CompareSources(
+            @DefaultValue("false") boolean enabled,
+            @Min(2) @DefaultValue("2") int minDocuments,
+            @Min(1) @DefaultValue("4") int maxAspects
+    ) {
     }
 
     /**

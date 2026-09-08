@@ -19,9 +19,10 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Writes the answer draft for the deterministic branch (docs/system-plan.md D10): retrieved evidence
- * in, model draft out. Streams token by token when the caller asked for it and the platform supports
- * it, and otherwise asks for a structured draft; both shapes end up as a {@link GroundedAnswerDraft},
- * so the verifier cannot tell them apart.
+ * in, model draft out; where {@code compareSources} has related the sources, its comparison goes into
+ * the prompt with them (Phase 9d). Streams token by token when the caller asked for it and the
+ * platform supports it, and otherwise asks for a structured draft; both shapes end up as a
+ * {@link GroundedAnswerDraft}, so the verifier cannot tell them apart.
  */
 public class AnswerDrafter {
 
@@ -49,7 +50,7 @@ public class AnswerDrafter {
         question.notifyStage(AnswerStages.GENERATING);
         question.abortIfCancelled();
         PromptRunner runner = context.ai().withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()));
-        String userPrompt = prompt.build(question.question(), question.history(), evidence.hits());
+        String userPrompt = prompt.build(question.question(), question.history(), evidence.hits(), evidence.comparison());
         long started = System.nanoTime();
         String operation = "draft-answer";
         try {

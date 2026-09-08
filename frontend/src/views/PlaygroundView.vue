@@ -57,6 +57,10 @@ const fmt = (n?: number | null) => (n == null ? '—' : n.toFixed(3))
         searched again ({{ result.expansion.strategy }}, +{{ result.expansion.addedHits }} hits, {{ result.expansion.tookMs }} ms):
         <span v-for="q in result.expansion.queries" :key="q"><code>{{ q }}</code> </span>
       </div>
+      <div v-if="result.decomposition" class="small muted" style="margin-bottom: 10px">
+        searched per part (+{{ result.decomposition.addedHits }} hits, {{ result.decomposition.tookMs }} ms):
+        <span v-for="q in result.decomposition.subQuestions" :key="q"><code>{{ q }}</code> </span>
+      </div>
       <p v-if="!result.hits.length" class="muted">No hits.</p>
       <table v-else class="docs">
         <thead><tr><th>#</th><th>Document › section</th><th>cos</th><th>BM25</th><th>fused</th><th>Text</th></tr></thead>

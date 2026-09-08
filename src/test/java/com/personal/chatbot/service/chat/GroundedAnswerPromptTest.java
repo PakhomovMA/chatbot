@@ -1,5 +1,6 @@
 package com.personal.chatbot.service.chat;
 
+import com.personal.chatbot.models.agent.SourceComparison;
 import com.personal.chatbot.models.chat.AnswerLanguage;
 import com.personal.chatbot.models.chat.ConversationTurn;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
@@ -64,6 +65,40 @@ class GroundedAnswerPromptTest {
         assertThat(forced.build("Как перезапустить сервис payments?", List.of(), hits))
                 .endsWith("Write the answer in English, even if the passages are in another language.");
         assertThat(forced.languageFor("Как перезапустить сервис payments?")).isEqualTo(AnswerLanguage.EN);
+    }
+
+    /** Phase 9d: what compareSources found is rendered between the passages and the question. */
+    @Test
+    void theSourceComparisonIsRenderedWithTheEvidenceItPointsAt() {
+        List<RetrievedChunk> hits = List.of(
+                GroundingVerifierTest.hit(1, "A rollback takes six minutes."),
+                GroundingVerifierTest.hit(2, "An aborted canary rolls back on its own."));
+        SourceComparison comparison = new SourceComparison(List.of(
+                new SourceComparison.Aspect("who triggers it", "The runbook is manual, the guide automatic.",
+                        List.of(1, 2), false),
+                new SourceComparison.Aspect("how long it takes", "Six minutes against thirty.", List.of(1), true)));
+
+        String rendered = prompt.build("How do they differ?", List.of(), hits, comparison);
+
+        assertThat(rendered)
+                .contains(GroundedAnswerPrompt.COMPARISON_HEADER)
+                .contains("- who triggers it: The runbook is manual, the guide automatic. [1, 2]")
+                .contains("- how long it takes (sources disagree): Six minutes against thirty. [1]");
+        assertThat(rendered.indexOf("[1] Document")).isLessThan(rendered.indexOf(GroundedAnswerPrompt.COMPARISON_HEADER));
+        assertThat(rendered.indexOf(GroundedAnswerPrompt.COMPARISON_HEADER)).isLessThan(rendered.indexOf("Question: How do they differ?"));
+        assertThat(prompt.build("How do they differ?", List.of(), hits))
+                .isEqualTo(prompt.build("How do they differ?", List.of(), hits, SourceComparison.none()))
+                .doesNotContain(GroundedAnswerPrompt.COMPARISON_HEADER);
+    }
+
+    @Test
+    void theComparisonPromptCarriesTheNumberedPassagesAndNoAnswerLanguage() {
+        List<RetrievedChunk> hits = List.of(GroundingVerifierTest.hit(1, "A rollback takes six minutes."));
+        assertThat(prompt.buildForComparison(" How do they differ? ", hits))
+                .startsWith("Evidence passages:")
+                .contains("[1] Document \"Runbook\" › Restart")
+                .endsWith("Question: How do they differ?");
+        assertThat(prompt.buildForDecomposition("  Restart and roll back?  ")).isEqualTo("Question: Restart and roll back?");
     }
 
     @Test

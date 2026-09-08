@@ -3,6 +3,7 @@ package com.personal.chatbot.eval;
 import com.personal.chatbot.models.agent.HypotheticalPassage;
 import com.personal.chatbot.models.agent.RewrittenQueries;
 import com.personal.chatbot.models.agent.StandaloneQuery;
+import com.personal.chatbot.models.agent.SubQuestions;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.service.chat.GroundedAnswerPrompt;
 import com.personal.chatbot.service.chat.GroundingInstructions;
@@ -41,7 +42,7 @@ final class EvalQueryWriter implements AutoCloseable {
     EvalQueryWriter(String model, double temperature, int queries) {
         this.model = model;
         this.temperature = temperature;
-        this.instructions = new GroundingInstructions(4, queries);
+        this.instructions = new GroundingInstructions(4, queries, 3, 4);
     }
 
     static String baseUrl() {
@@ -75,6 +76,20 @@ final class EvalQueryWriter implements AutoCloseable {
         HypotheticalPassage passage = generate(instructions.hypotheticalPassage().contribution(),
                 prompt.buildForExpansion(question) + "\n\nReply with JSON: {\"passage\": \"...\"}", HypotheticalPassage.class);
         return passage.passage() == null || passage.passage().isBlank() ? List.of() : List.of(passage.passage().strip());
+    }
+
+    /** The model half of {@code decomposeQuestion} (Phase 9d): the parts of a multi-part question. */
+    List<String> split(String question, int max) {
+        SubQuestions parts = generate(instructions.questionDecomposition().contribution(),
+                prompt.buildForDecomposition(question) + "\n\nReply with JSON: {\"questions\": [\"...\"]}",
+                SubQuestions.class);
+        List<String> split = parts.questionsOrEmpty().stream()
+                .filter(part -> part != null && !part.isBlank())
+                .map(String::strip)
+                .limit(max)
+                .toList();
+        // As in production: a single part is the question again, which is the widening branch's job.
+        return split.size() < 2 ? List.of() : split;
     }
 
     StandaloneQuery resolveConversation(UserQuestion question) {

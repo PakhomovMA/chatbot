@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 
 class GroundingInstructionsTest {
 
-    private final GroundingInstructions instructions = new GroundingInstructions(7, 3);
+    private final GroundingInstructions instructions = new GroundingInstructions(7, 3, 3, 4);
 
     /**
      * Catches template path drift, which the mocked-LLM tests cannot see: the strict renderer
@@ -27,7 +27,9 @@ class GroundingInstructionsTest {
             GroundingInstructions.AGENTIC_RESEARCH_TEMPLATE,
             GroundingInstructions.REWRITE_TEMPLATE,
             GroundingInstructions.HYDE_TEMPLATE,
-            GroundingInstructions.CONVERSATION_REWRITE_TEMPLATE})
+            GroundingInstructions.CONVERSATION_REWRITE_TEMPLATE,
+            GroundingInstructions.DECOMPOSE_TEMPLATE,
+            GroundingInstructions.COMPARE_SOURCES_TEMPLATE})
     void everyTemplateResolvesFromTheDefaultPromptsLocation(String template) {
         TemplateRenderer renderer = new JinjavaTemplateRenderer(new JinjaProperties("classpath:/prompts/", ".jinja", true));
         assertThatCode(() -> renderer.load(template)).doesNotThrowAnyException();
@@ -74,10 +76,21 @@ class GroundingInstructionsTest {
                 .contains("at most 7 searches in total");
     }
 
+    /** Phase 9d: both branches say what they are for and, above all, what they must not do. */
+    @Test
+    void theDecompositionAndComparisonBranchesAreToldNotToAnswer() {
+        assertThat(instructions.questionDecomposition().contribution())
+                .contains("at most 3", "Never answer the question")
+                .doesNotContain("evidenceSufficient");
+        assertThat(instructions.sourceComparison().contribution())
+                .contains("at most 4 aspects", "Use only numbers that appear in the evidence list",
+                        "do not answer the question");
+    }
+
     @Test
     void anUnknownTemplateFailsAtConstructionRatherThanAtTheFirstQuestion() {
         TemplateRenderer renderer = new JinjavaTemplateRenderer(new JinjaProperties("classpath:/nowhere/", ".jinja", true));
-        assertThatCode(() -> new GroundingInstructions(renderer, 4, 3))
+        assertThatCode(() -> new GroundingInstructions(renderer, 4, 3, 3, 4))
                 .isInstanceOf(NoSuchTemplateException.class);
     }
 }

@@ -28,6 +28,8 @@ public final class GroundingInstructions {
     static final String REWRITE_TEMPLATE = "expand-search-rewrite";
     static final String HYDE_TEMPLATE = "expand-search-hyde";
     static final String CONVERSATION_REWRITE_TEMPLATE = "conversation-query-rewrite";
+    static final String DECOMPOSE_TEMPLATE = "decompose-question";
+    static final String COMPARE_SOURCES_TEMPLATE = "compare-sources";
 
     private static final String ROLE = "grounding_instructions";
 
@@ -37,18 +39,23 @@ public final class GroundingInstructions {
     private final PromptContributor queryRewrite;
     private final PromptContributor hypotheticalPassage;
     private final PromptContributor conversationRewrite;
+    private final PromptContributor questionDecomposition;
+    private final PromptContributor sourceComparison;
 
-    public GroundingInstructions(int agenticMaxSearches, int expansionQueries) {
-        this(strictRenderer(), agenticMaxSearches, expansionQueries);
+    public GroundingInstructions(int agenticMaxSearches, int expansionQueries, int subQuestions, int comparisonAspects) {
+        this(strictRenderer(), agenticMaxSearches, expansionQueries, subQuestions, comparisonAspects);
     }
 
-    GroundingInstructions(TemplateRenderer renderer, int agenticMaxSearches, int expansionQueries) {
+    GroundingInstructions(TemplateRenderer renderer, int agenticMaxSearches, int expansionQueries, int subQuestions,
+                          int comparisonAspects) {
         this.groundedAnswer = render(renderer, GROUNDED_ANSWER_TEMPLATE, Map.of());
         this.streamingAnswer = render(renderer, STREAMING_ANSWER_TEMPLATE, Map.of());
         this.agenticResearch = render(renderer, AGENTIC_RESEARCH_TEMPLATE, Map.of("maxSearches", agenticMaxSearches));
         this.queryRewrite = render(renderer, REWRITE_TEMPLATE, Map.of("queries", expansionQueries));
         this.hypotheticalPassage = render(renderer, HYDE_TEMPLATE, Map.of());
         this.conversationRewrite = render(renderer, CONVERSATION_REWRITE_TEMPLATE, Map.of());
+        this.questionDecomposition = render(renderer, DECOMPOSE_TEMPLATE, Map.of("subQuestions", subQuestions));
+        this.sourceComparison = render(renderer, COMPARE_SOURCES_TEMPLATE, Map.of("aspects", comparisonAspects));
     }
 
     /** Instructions for the deterministic branch asking for a structured draft. */
@@ -73,6 +80,16 @@ public final class GroundingInstructions {
 
     public PromptContributor conversationRewrite() {
         return conversationRewrite;
+    }
+
+    /** Instructions for {@code decomposeQuestion}: the parts a multi-part question falls into (Phase 9d). */
+    public PromptContributor questionDecomposition() {
+        return questionDecomposition;
+    }
+
+    /** Instructions for {@code compareSources}: what the passages of several documents say per aspect (Phase 9d). */
+    public PromptContributor sourceComparison() {
+        return sourceComparison;
     }
 
     /** Instructions for the HYDE expansion strategy: the passage that would answer the question. */

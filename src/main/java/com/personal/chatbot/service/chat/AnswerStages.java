@@ -5,8 +5,10 @@ public final class AnswerStages {
 
     public static final String REWRITING = "rewriting";
 
+    public static final String DECOMPOSING = "decomposing";
     public static final String RETRIEVING = "retrieving";
     public static final String EXPANDING = "expanding";
+    public static final String COMPARING = "comparing";
     public static final String GENERATING = "generating";
     public static final String RESEARCHING = "researching";
     public static final String VERIFYING = "verifying";

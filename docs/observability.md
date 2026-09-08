@@ -33,8 +33,11 @@ Overall-статус агрегируется Spring: OUT_OF_SERVICE/DOWN люб
 | Метрика | Тип | Теги | Смысл |
 |---|---|---|---|
 | `chatbot.chat` | timer | `grounding`, `mode` (sync/stream) | полное время ответа |
-| `chatbot.llm` | timer | `operation` (draft-answer / draft-answer-stream / conversation-query-rewrite) | генерация и отдельная стоимость восстановления вопроса из истории |
+| `chatbot.llm` | timer | `operation` (draft-answer / draft-answer-stream / research-agentic / conversation-query-rewrite / expand-search-rewrite / expand-search-hyde / decompose-question / compare-sources) | генерация ответа и стоимость каждой вспомогательной ветки отдельно |
 | `chatbot.chat.query.rewrite` | counter | `outcome` (rewritten / unchanged / fallback) | результат попытки восстановления вопроса; вопросы без попытки не учитываются |
+| `chatbot.retrieval.expansion` | counter | `strategy`, `outcome` (sufficient / insufficient) | сработавшее расширение поиска (Phase 9a) |
+| `chatbot.chat.decomposition` | counter | `outcome` (split / single / failed) | разбор многосоставного вопроса (Phase 9d); вопросы без попытки не учитываются |
+| `chatbot.chat.comparison` | counter | `outcome` (conflict / agreement / none / failed) | сравнение источников перед ответом (Phase 9d) |
 | `chatbot.retrieval` | timer | `mode` | vector + text + fusion |
 | `chatbot.retrieval.hits` | summary | — | hits на запрос |
 | `chatbot.embedding` | timer | `mode` (query/document), `provider`, `model` | один батч эмбеддинга |

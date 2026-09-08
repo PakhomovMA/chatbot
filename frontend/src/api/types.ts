@@ -75,6 +75,13 @@ export interface SearchExpansion {
   tookMs: number
 }
 
+/** What a retrieval per part of the question did; absent on a result that was searched as a whole. */
+export interface QuestionDecomposition {
+  subQuestions: string[]
+  addedHits: number
+  tookMs: number
+}
+
 export interface Provenance {
   documentId: string
   documentTitle: string
@@ -108,6 +115,7 @@ export interface RetrievalResult {
   timings: { vectorMs: number; textMs: number; fusionMs: number; totalMs: number }
   at: string
   expansion?: SearchExpansion | null
+  decomposition?: QuestionDecomposition | null
 }
 
 export interface Citation {

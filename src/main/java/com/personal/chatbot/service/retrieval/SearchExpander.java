@@ -4,20 +4,14 @@ import com.personal.chatbot.config.ChatbotProperties;
 import com.personal.chatbot.models.retrieval.ExpansionStrategy;
 import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
-import com.personal.chatbot.models.retrieval.RetrievalTimings;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.models.retrieval.SearchExpansion;
-import com.personal.chatbot.utils.RankFusion;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -26,10 +20,7 @@ import java.util.UUID;
  * <em>whether</em> to widen and <em>how</em> to phrase the extra queries happens above this class;
  * everything here is deterministic and goes through {@link Retriever} like any other search (INV-01).
  *
- * <p>Passes are merged by reciprocal rank, the same rule that fuses the vector and lexical facets, so
- * a chunk that several passes agree on rises above one that only the weak first pass found. The merged
- * hits therefore carry an RRF-over-passes {@code fusedScore}; the per-facet scores stay as the pass
- * that found the chunk reported them, and a hit keeps the neighbours it was returned with.
+ * <p>Merging is {@link PassFusion}, shared with the per-part passes of {@code decomposeQuestion}.
  */
 public class SearchExpander {
 
@@ -46,7 +37,8 @@ public class SearchExpander {
     }
 
     /**
-     * True when a second pass could still help: the evidence is weak and has not been widened yet.
+     * True when a second pass could still help: the evidence is weak and the question has not been
+     * searched more than once yet — whether that was a widened pass or a pass per part of it.
      *
      * <p>A pass that returned nothing at all is not widened. With the noise floors at their defaults an
      * empty result means the corpus — or the document filter the question came with — has nothing to
@@ -54,7 +46,7 @@ public class SearchExpander {
      * spending a model call.
      */
     public boolean worthExpanding(RetrievalResult first) {
-        return !first.hits().isEmpty() && !first.evidenceSufficient() && !first.expanded();
+        return !first.hits().isEmpty() && !first.evidenceSufficient() && !first.multiPass();
     }
 
     /**
@@ -100,49 +92,16 @@ public class SearchExpander {
 
     private RetrievalResult merge(List<RetrievalResult> passes, ExpansionStrategy strategy, List<String> extraQueries,
                                   int topK, long tookMs) {
-        Map<String, RetrievedChunk> byId = new LinkedHashMap<>();
-        Map<String, List<RetrievedChunk>> neighbours = new LinkedHashMap<>();
-        List<List<String>> rankings = new ArrayList<>(passes.size());
-        for (RetrievalResult pass : passes) {
-            List<String> ranking = new ArrayList<>();
-            for (RetrievedChunk chunk : pass.hits()) {
-                if (chunk.isHit()) {
-                    byId.putIfAbsent(chunk.chunkId(), chunk);
-                    ranking.add(chunk.chunkId());
-                } else {
-                    neighbours.computeIfAbsent(chunk.neighbourOf(), _ -> new ArrayList<>()).add(chunk);
-                }
-            }
-            rankings.add(ranking);
-        }
-        Set<String> firstPass = new LinkedHashSet<>(rankings.getFirst());
-
-        List<RetrievedChunk> hits = new ArrayList<>();
-        int added = 0;
-        int rank = 0;
-        for (RankFusion.Fused fused : RankFusion.reciprocalRank(rankings, settings.rrfK())) {
-            if (rank == topK) {
-                break;
-            }
-            RetrievedChunk hit = byId.get(fused.key()).withRanking(fused.score(), ++rank);
-            hits.add(hit);
-            if (!firstPass.contains(hit.chunkId())) {
-                added++;
-            }
-            for (RetrievedChunk neighbour : neighbours.getOrDefault(hit.chunkId(), List.of())) {
-                if (!byId.containsKey(neighbour.chunkId())) {
-                    hits.add(neighbour.withRanking(hit.fusedScore(), hit.rank()));
-                }
-            }
-        }
+        PassFusion.Merged merged = PassFusion.merge(passes, topK, settings.rrfK());
+        List<RetrievedChunk> hits = merged.hits();
         double maxVector = RetrievalService.maxVectorScore(hits);
         RetrievalResult first = passes.getFirst();
         return new RetrievalResult(UUID.randomUUID().toString(),
-                String.join(" | ", prepend(first.query(), extraQueries).stream().distinct().toList()), first.mode(), topK,
-                passes.stream().mapToInt(RetrievalResult::candidates).sum(), List.copyOf(hits),
+                PassFusion.query(first.query(), extraQueries), first.mode(), topK,
+                passes.stream().mapToInt(RetrievalResult::candidates).sum(), hits,
                 RetrievalService.sufficient(hits, maxVector, settings.sufficientCosine()), maxVector,
-                totalTimings(passes, tookMs), Instant.now(),
-                new SearchExpansion(strategy, extraQueries, added, tookMs));
+                PassFusion.timings(passes, tookMs), Instant.now(),
+                new SearchExpansion(strategy, extraQueries, merged.addedHits(), tookMs));
     }
 
     /** The unchanged first pass, marked as widened so the answer path does not try again. */
@@ -152,20 +111,5 @@ public class SearchExpander {
                 first.timings(), Instant.now(), expansion);
         traces.record(marked);
         return marked;
-    }
-
-    private static RetrievalTimings totalTimings(List<RetrievalResult> passes, long tookMs) {
-        return new RetrievalTimings(
-                passes.stream().mapToLong(p -> p.timings().vectorMs()).sum(),
-                passes.stream().mapToLong(p -> p.timings().textMs()).sum(),
-                passes.stream().mapToLong(p -> p.timings().fusionMs()).sum(),
-                passes.getFirst().timings().totalMs() + tookMs);
-    }
-
-    private static List<String> prepend(String head, List<String> tail) {
-        List<String> all = new ArrayList<>(tail.size() + 1);
-        all.add(head);
-        all.addAll(tail);
-        return all;
     }
 }

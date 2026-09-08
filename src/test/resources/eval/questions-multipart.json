@@ -1,0 +1,101 @@
+{
+  "description": "Questions that ask for several things at once, the case the decomposeQuestion branch exists for (docs/system-plan.md Phase 9d). Each part carries its own expectedDocument and mustContain, so coverage is measured per part: a single query for the whole question tends to answer the strongest part and drop the rest. Parts without an expectedDocument are negatives — the corpus does not answer that part, and no split may turn it into evidence.",
+  "questions": [
+    {
+      "id": "multi-01",
+      "question": "How do I restart the payments service and how long does a rollback of a release take?",
+      "parts": [
+        {"id": "multi-01a", "question": "How do I restart the payments service?", "expectedDocument": "payments-runbook", "mustContain": ["rollout restart"]},
+        {"id": "multi-01b", "question": "How long does a rollback of a payments release take?", "expectedDocument": "payments-runbook", "mustContain": ["about six minutes"]}
+      ]
+    },
+    {
+      "id": "multi-02",
+      "question": "How much production traffic does the canary get and when is it aborted automatically?",
+      "parts": [
+        {"id": "multi-02a", "question": "How much production traffic goes to the canary?", "expectedDocument": "deployment-guide", "mustContain": ["five percent"]},
+        {"id": "multi-02b", "question": "When is the canary aborted automatically?", "expectedDocument": "deployment-guide", "mustContain": ["0.5 percentage points"]}
+      ]
+    },
+    {
+      "id": "multi-03",
+      "question": "Who is paged when an incident is declared and how quickly must the primary on-call respond?",
+      "parts": [
+        {"id": "multi-03a", "question": "Who is paged when an incident is declared?", "expectedDocument": "incident-process", "mustContain": ["pages the incident commander"]},
+        {"id": "multi-03b", "question": "How quickly must the primary on-call respond to a page?", "expectedDocument": "onboarding-handbook", "mustContain": ["fifteen minutes"]}
+      ]
+    },
+    {
+      "id": "multi-04",
+      "question": "Which header prevents duplicate orders and how many requests per minute may a client send?",
+      "parts": [
+        {"id": "multi-04a", "question": "Which header prevents duplicate orders?", "expectedDocument": "api-reference", "mustContain": ["Idempotency-Key"]},
+        {"id": "multi-04b", "question": "How many requests per minute may an API client send?", "expectedDocument": "api-reference", "mustContain": ["600 requests per minute"]}
+      ]
+    },
+    {
+      "id": "multi-05",
+      "question": "Where are secrets stored and how do I get access to AWS and Vault as a new joiner?",
+      "parts": [
+        {"id": "multi-05a", "question": "Where are service secrets stored?", "expectedDocument": "deployment-guide", "mustContain": ["HashiCorp Vault"]},
+        {"id": "multi-05b", "question": "How does a new joiner get access to AWS and Vault?", "expectedDocument": "onboarding-handbook", "mustContain": ["access-requests"]}
+      ]
+    },
+    {
+      "id": "multi-06",
+      "question": "What is the difference between rolling back a payments release and an aborted canary rolling itself back?",
+      "parts": [
+        {"id": "multi-06a", "question": "How is a payments release rolled back?", "expectedDocument": "payments-runbook", "mustContain": ["--rollback --to previous"]},
+        {"id": "multi-06b", "question": "What happens when a canary is aborted?", "expectedDocument": "deployment-guide", "mustContain": ["rolls back on its own"]}
+      ]
+    },
+    {
+      "id": "multi-07",
+      "question": "Как повторить неудавшуюся отправку settlement и что делать, если эквайер отклонил её дважды?",
+      "parts": [
+        {"id": "multi-07a", "question": "Как повторить неудавшуюся отправку settlement?", "expectedDocument": "payments-runbook", "mustContain": ["settlement-retry"]},
+        {"id": "multi-07b", "question": "Что делать, если эквайер отклонил batch дважды?", "expectedDocument": "payments-runbook", "mustContain": ["escalate to the acquirer support line"]}
+      ]
+    },
+    {
+      "id": "multi-08",
+      "question": "How many approvals does a change to payment code need and how long may a flaky test stay quarantined?",
+      "parts": [
+        {"id": "multi-08a", "question": "How many approvals does a change to payment code need?", "expectedDocument": "onboarding-handbook", "mustContain": ["need two"]},
+        {"id": "multi-08b", "question": "How long may a flaky test stay quarantined?", "expectedDocument": "onboarding-handbook", "mustContain": ["two weeks"]}
+      ]
+    },
+    {
+      "id": "multi-09",
+      "question": "When is a postmortem required and what is the target time to mitigate a SEV-1?",
+      "parts": [
+        {"id": "multi-09a", "question": "When is a postmortem required?", "expectedDocument": "incident-process", "mustContain": ["within five working days"]},
+        {"id": "multi-09b", "question": "What is the target time to mitigate a SEV-1?", "expectedDocument": "incident-process", "mustContain": ["thirty minutes to mitigate"]}
+      ]
+    },
+    {
+      "id": "multi-10",
+      "question": "Чем отличается hotfix-релиз от обычного и что происходит с миграциями базы при откате?",
+      "parts": [
+        {"id": "multi-10a", "question": "Чем отличается hotfix-релиз от обычного?", "expectedDocument": "deployment-guide", "mustContain": ["skips the staging approval"]},
+        {"id": "multi-10b", "question": "Что происходит с миграциями базы данных при откате релиза?", "expectedDocument": "deployment-guide", "mustContain": ["backward compatible"]}
+      ]
+    },
+    {
+      "id": "multi-11",
+      "question": "How are webhook deliveries signed and how much do we pay per successful webhook delivery?",
+      "parts": [
+        {"id": "multi-11a", "question": "How are webhook deliveries signed?", "expectedDocument": "api-reference", "mustContain": ["HMAC-SHA256"]},
+        {"id": "multi-11b", "question": "How much do we pay per successful webhook delivery?", "expectedDocument": null, "mustContain": []}
+      ]
+    },
+    {
+      "id": "multi-12",
+      "question": "Which feature flags does the payments service have and which of them did the CFO approve last quarter?",
+      "parts": [
+        {"id": "multi-12a", "question": "Which feature flags does the payments service have?", "expectedDocument": "payments-runbook", "mustContain": ["3ds_enforced"]},
+        {"id": "multi-12b", "question": "Which payments feature flags did the CFO approve last quarter?", "expectedDocument": null, "mustContain": []}
+      ]
+    }
+  ]
+}

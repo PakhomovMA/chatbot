@@ -5,9 +5,11 @@ import com.personal.chatbot.models.chat.ChatRequest;
 import com.personal.chatbot.models.chat.ChatResponse;
 import com.personal.chatbot.models.chat.ChatStreamEvent;
 import com.personal.chatbot.models.chat.ConversationTurn;
+import com.personal.chatbot.models.chat.Citation;
 import com.personal.chatbot.models.chat.Grounding;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
 import com.personal.chatbot.models.retrieval.ExpansionStrategy;
+import com.personal.chatbot.models.retrieval.QuestionDecomposition;
 import com.personal.chatbot.models.retrieval.SearchExpansion;
 import com.personal.chatbot.service.chat.ChatService;
 import com.personal.chatbot.service.knowledge.DocumentRegistry;
@@ -68,6 +70,9 @@ class ChatE2eTest {
         registry.add("chatbot.data-dir", () -> dataDir.toString());
         registry.add("chatbot.index.in-memory", () -> "true");
         registry.add("chatbot.embedding.onnx.model-dir", () -> modelDir().toString());
+        // Both Phase 9d branches ship off (docs/eval-log.md); the tests below are what exercises them.
+        registry.add("chatbot.chat.decompose.enabled", () -> "true");
+        registry.add("chatbot.chat.compare-sources.enabled", () -> "true");
         registry.add("server.port", () -> "0");
     }
 
@@ -83,7 +88,7 @@ class ChatE2eTest {
         assumeTrue(ollamaHasModel("qwen3:14b"), "Ollama with qwen3:14b not reachable");
     }
 
-    private static boolean ollamaHasModel(String name) {
+    static boolean ollamaHasModel(String name) {
         try (HttpClient client = HttpClient.newHttpClient()) {
             HttpResponse<String> response = client.send(HttpRequest.newBuilder(URI.create("http://localhost:11434/api/tags"))
                     .timeout(Duration.ofSeconds(3)).build(), HttpResponse.BodyHandlers.ofString());
@@ -131,6 +136,51 @@ class ChatE2eTest {
         assertThat(expansion.strategy()).isEqualTo(ExpansionStrategy.REWRITE);
         assertThat(response.citations()).isNotEmpty();
         assertThat(response.answer().toLowerCase(Locale.ROOT)).containsAnyOf("five percent", "5 percent", "5%");
+    }
+
+    /**
+     * Phase 9d: a question that asks for two things is split, each part is searched for, and the answer
+     * covers both — the second part is the one a single query loses.
+     */
+    @Test
+    void aQuestionWithTwoPartsIsAnsweredOnBothOfThem() throws IOException {
+        seedDocuments();
+        String question = ChatBranchesOffE2eTest.TWO_PART_QUESTION;
+        ChatResponse response = chat.chat(new ChatRequest(null, question,
+                new ChatRequest.Options(null, null, true, AnswerMode.DETERMINISTIC)));
+
+        QuestionDecomposition decomposition = response.diagnostics() != null
+                ? response.diagnostics().decomposition() : null;
+        log.info("[decomposeQuestion] Q: {}\n   -> {} in {} ms, split into {}: {}", question, response.grounding(),
+                response.timings().totalMs(), decomposition == null ? "nothing" : decomposition.subQuestions(),
+                response.answer().replace('\n', ' '));
+        assertThat(decomposition).as("a two-part question should be searched per part").isNotNull();
+        assertThat(decomposition.subQuestions()).hasSizeGreaterThanOrEqualTo(2);
+        String answer = response.answer().toLowerCase(Locale.ROOT);
+        assertThat(answer).contains("rollout restart");
+        assertThat(answer).containsAnyOf("five percent", "5 percent", "5%");
+        assertThat(response.citations()).extracting(Citation::documentTitle)
+                .contains("payments-runbook", "deployment-guide");
+    }
+
+    /**
+     * Phase 9d: a question that asks how two documents differ is compared before it is answered, and
+     * the answer keeps both sides instead of following the strongest passage.
+     */
+    @Test
+    void aQuestionThatComparesTwoDocumentsKeepsBothSidesInTheAnswer() throws IOException {
+        seedDocuments();
+        String question = ChatBranchesOffE2eTest.COMPARING_QUESTION;
+        ChatResponse response = chat.chat(new ChatRequest(null, question,
+                new ChatRequest.Options(null, null, true, AnswerMode.DETERMINISTIC)));
+
+        log.info("[compareSources] Q: {}\n   -> {} in {} ms ({} citations): {}", question, response.grounding(),
+                response.timings().totalMs(), response.citations().size(), response.answer().replace('\n', ' '));
+        String answer = response.answer().toLowerCase(Locale.ROOT);
+        assertThat(answer).containsAnyOf("deploy.sh", "--rollback", "previous image tag");
+        assertThat(answer).contains("canary");
+        assertThat(response.citations()).extracting(Citation::documentTitle)
+                .contains("payments-runbook", "deployment-guide");
     }
 
     /** Phase 9b: real stored history, Embabel rewrite, retrieval, grounding and topic switch. */

@@ -3,7 +3,8 @@
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
 Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
 
-Current state: **Phase 9a + 9b + 9c** (search widening, conversation query rewriting, agentic RAG) — Chat (streamed, cited
+Current state: **Phase 9a–9d** (search widening, conversation query rewriting, agentic RAG, question
+decomposition and source comparison) — Chat (streamed, cited
 answers; deterministic or ToolishRag-driven agentic mode), Knowledge Base (upload, live status, re-index, delete) and a Retrieval playground on top of the
 Embabel agent, hybrid retrieval and the Lucene index, with health components, RAG metrics, request
 correlation and optional tracing.
@@ -134,6 +135,27 @@ passes are merged by reciprocal rank and answered as one evidence list; the merg
 trace, tagged with the strategy and the queries it used. It runs at most once per question, never for a question
 that retrieved nothing, and a failed model call simply leaves the first pass in place. What each strategy is
 worth, and what it costs on questions the corpus cannot answer: `docs/eval-log.md`.
+
+**Splitting a multi-part question** (`chatbot.chat.decompose.enabled`, **off by default**, Phase 9d): a question whose wording asks for
+several things — two question marks, or eight words and a joining word such as “and”, “и” or “difference” —
+is split by the model into at most `max-sub-questions` standalone search questions (stage `decomposing`,
+prompt `prompts/decompose-question.jinja`). The whole question and every part are searched in parallel and
+merged by reciprocal rank, so a part the other one would have crowded out of the evidence keeps its own best
+passages; the merged search is its own retrieval trace, carrying the parts it used. A split the model declines
+to make leaves the plain single search, and search widening then works as before. It ships off because on this
+corpus a single query already returns every part inside the evidence budget — switch it on for a corpus where
+the parts of one question crowd each other out (`docs/eval-log.md`).
+
+**Comparing the sources** (`chatbot.chat.compare-sources.enabled`, **off by default**, Phase 9d): when the question asks how things
+relate (“difference”, “versus”, “отличается”) and the passages that fit the prompt budget come from at least
+`min-documents` documents, one model call relates them per aspect before the answer is drafted (stage
+`comparing`, prompt `prompts/compare-sources.jinja`). The result — aspect, finding, passage numbers, whether
+the sources disagree — goes into the answer prompt between the evidence and the question, so the answer keeps
+the second document instead of following the strongest passage. References outside the numbered passages are
+dropped, the comparison adds no facts of its own, and the citations are verified against the evidence as
+always. Both branches run at most once per question and fall back to the plain answer when the model call fails.
+Comparison ships off too: it makes the answer name both sides in detail, but it costs a local 14B model several
+times the answer latency, and this corpus holds no two documents that contradict each other (`docs/eval-log.md`).
 
 **Agentic mode** (`options.mode: "AGENTIC"`, or `chatbot.chat.mode`; UI selector "agentic (tools)"): instead of
 one deterministic retrieval, the model researches the question itself through Embabel `ToolishRag` tools built

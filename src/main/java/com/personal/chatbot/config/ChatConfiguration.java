@@ -8,9 +8,13 @@ import com.personal.chatbot.service.chat.EvidenceExpander;
 import com.personal.chatbot.service.chat.GroundedAnswerPrompt;
 import com.personal.chatbot.service.chat.GroundingInstructions;
 import com.personal.chatbot.service.chat.GroundingVerifier;
+import com.personal.chatbot.service.chat.QuestionDecomposer;
+import com.personal.chatbot.service.chat.SourceComparator;
 import com.personal.chatbot.service.index.LockedSearchOperations;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
+import com.personal.chatbot.service.retrieval.Retriever;
 import com.personal.chatbot.service.retrieval.SearchExpander;
+import com.personal.chatbot.service.retrieval.SubQuestionSearch;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -39,7 +43,8 @@ class ChatConfiguration {
 
     @Bean
     GroundingInstructions groundingInstructions(ChatbotProperties.Chat chat) {
-        return new GroundingInstructions(chat.agenticMaxSearches(), chat.expandSearch().queries());
+        return new GroundingInstructions(chat.agenticMaxSearches(), chat.expandSearch().queries(),
+                chat.decompose().maxSubQuestions(), chat.compareSources().maxAspects());
     }
 
     @Bean
@@ -58,6 +63,19 @@ class ChatConfiguration {
                                       GroundingInstructions instructions, ChatbotProperties.Chat chat,
                                       MeterRegistry meterRegistry) {
         return new EvidenceExpander(expander, prompt, instructions, chat, meterRegistry);
+    }
+
+    @Bean
+    QuestionDecomposer questionDecomposer(Retriever retriever, SubQuestionSearch search, GroundedAnswerPrompt prompt,
+                                          GroundingInstructions instructions, ChatbotProperties.Chat chat,
+                                          MeterRegistry meterRegistry) {
+        return new QuestionDecomposer(retriever, search, prompt, instructions, chat, meterRegistry);
+    }
+
+    @Bean
+    SourceComparator sourceComparator(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
+                                      ChatbotProperties.Chat chat, MeterRegistry meterRegistry) {
+        return new SourceComparator(prompt, instructions, chat, meterRegistry);
     }
 
     @Bean
