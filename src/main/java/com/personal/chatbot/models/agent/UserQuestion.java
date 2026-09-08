@@ -19,6 +19,7 @@ import java.util.Set;
  * @param stream       progress sink for streaming callers, null otherwise (not part of the data model)
  * @param cancellation the request's completion signal, polled before every expensive step (not part
  *                     of the data model)
+ * @param effectiveQuery standalone search text after conversation reference resolution; never answer evidence
  */
 public record UserQuestion(
         String conversationId,
@@ -29,8 +30,21 @@ public record UserQuestion(
         @Nullable Set<String> documentIds,
         AnswerMode mode,
         @JsonIgnore @Nullable AnswerStreamSink stream,
-        @JsonIgnore ChatCancellation cancellation
+        @JsonIgnore ChatCancellation cancellation,
+        String effectiveQuery
 ) {
+
+    public UserQuestion(String conversationId, String messageId, String question, List<ConversationTurn> history,
+                        @Nullable Integer topK, @Nullable Set<String> documentIds, AnswerMode mode,
+                        @Nullable AnswerStreamSink stream, ChatCancellation cancellation) {
+        this(conversationId, messageId, question, history, topK, documentIds, mode, stream, cancellation, question);
+    }
+
+    /** Changes search text only; the original question still controls the answer, language and history. */
+    public UserQuestion withEffectiveQuery(String query) {
+        return new UserQuestion(conversationId, messageId, question, history, topK, documentIds, mode, stream,
+                cancellation, query);
+    }
 
     public UserQuestion(String conversationId, String messageId, String question, List<ConversationTurn> history,
                         @Nullable Integer topK, @Nullable Set<String> documentIds) {
@@ -40,7 +54,7 @@ public record UserQuestion(
 
     /** The retrieval this question asks for; the first pass and any widening of it share the options. */
     public RetrievalQuery retrievalQuery() {
-        return new RetrievalQuery(question, topK, null, documentIds);
+        return new RetrievalQuery(effectiveQuery, topK, null, documentIds);
     }
 
     public void notifyStage(String stage) {

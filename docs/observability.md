@@ -33,7 +33,8 @@ Overall-статус агрегируется Spring: OUT_OF_SERVICE/DOWN люб
 | Метрика | Тип | Теги | Смысл |
 |---|---|---|---|
 | `chatbot.chat` | timer | `grounding`, `mode` (sync/stream) | полное время ответа |
-| `chatbot.llm` | timer | `operation` (draft-answer / draft-answer-stream) | генерация |
+| `chatbot.llm` | timer | `operation` (draft-answer / draft-answer-stream / conversation-query-rewrite) | генерация и отдельная стоимость восстановления вопроса из истории |
+| `chatbot.chat.query.rewrite` | counter | `outcome` (rewritten / unchanged / fallback) | результат попытки восстановления вопроса; вопросы без попытки не учитываются |
 | `chatbot.retrieval` | timer | `mode` | vector + text + fusion |
 | `chatbot.retrieval.hits` | summary | — | hits на запрос |
 | `chatbot.embedding` | timer | `mode` (query/document), `provider`, `model` | один батч эмбеддинга |

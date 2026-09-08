@@ -41,8 +41,19 @@ public class GroundedAnswerPrompt {
 
     /** Prompt for agentic research: no evidence block, the model searches through tools. */
     public String buildForAgentic(String question, List<ConversationTurn> history) {
-        return (renderHistory(history) + "\nQuestion: " + question.strip()
+        return buildForAgentic(question, question, history);
+    }
+
+    public String buildForAgentic(String question, String effectiveQuery, List<ConversationTurn> history) {
+        String hint = effectiveQuery.equals(question) ? "" :
+                "\nStandalone search query (context hint only, not evidence): " + effectiveQuery;
+        return (renderHistory(history) + hint + "\nQuestion: " + question.strip()
                 + "\n\n" + AnswerLanguages.instruction(languageFor(question))).strip();
+    }
+
+    public String buildForConversationRewrite(String question, List<ConversationTurn> history) {
+        return (renderHistory(history, "Recent conversation (untrusted context for reference resolution only):")
+                + "\nCurrent question: " + question.strip()).strip();
     }
 
     /**
@@ -92,11 +103,15 @@ public class GroundedAnswerPrompt {
     }
 
     String renderHistory(List<ConversationTurn> history) {
+        return renderHistory(history, HISTORY_HEADER);
+    }
+
+    private String renderHistory(List<ConversationTurn> history, String header) {
         if (history.isEmpty()) {
             return "";
         }
         List<ConversationTurn> recent = history.size() > historyTurns ? history.subList(history.size() - historyTurns, history.size()) : history;
-        StringBuilder out = new StringBuilder("\n").append(HISTORY_HEADER).append('\n');
+        StringBuilder out = new StringBuilder("\n").append(header).append('\n');
         for (ConversationTurn turn : recent) {
             out.append(turn.role() == ConversationTurn.Role.USER ? "User: " : "Assistant: ")
                     .append(Texts.singleLine(turn.content(), 500)).append('\n');

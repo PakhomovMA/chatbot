@@ -1,0 +1,137 @@
+{
+  "description": "Phase 9b paired retrieval: the same followup before and after reference resolution. Fixed history prevents prior answer variance from affecting retrieval comparison. Includes RU/EN, topic changes and an out-of-corpus question.",
+  "questions": [
+    {
+      "id": "conv-01",
+      "history": [
+        "Tell me about the payments service.",
+        "The payments service processes card authorisations and settlements."
+      ],
+      "question": "How do I restart it?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "rollout restart"
+      ]
+    },
+    {
+      "id": "conv-02",
+      "history": [
+        "Where are service secrets stored?",
+        "Service secrets are stored in HashiCorp Vault."
+      ],
+      "question": "How often are they rotated?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "ninety days"
+      ]
+    },
+    {
+      "id": "conv-03",
+      "history": [
+        "How do Shop API clients authenticate?",
+        "They use bearer access tokens."
+      ],
+      "question": "When do they expire?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "sixty minutes"
+      ]
+    },
+    {
+      "id": "conv-04",
+      "history": [
+        "Tell me about Shop API webhooks.",
+        "The Shop API delivers signed webhook events."
+      ],
+      "question": "How long are they retried?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "24 hours"
+      ]
+    },
+    {
+      "id": "conv-05",
+      "history": [
+        "Расскажи про сервис payments.",
+        "Сервис payments обрабатывает платежи."
+      ],
+      "question": "А как его перезапустить?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "rollout restart"
+      ]
+    },
+    {
+      "id": "conv-06",
+      "history": [
+        "Где хранятся секреты сервисов?",
+        "Секреты хранятся в HashiCorp Vault."
+      ],
+      "question": "Как часто их меняют?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "ninety days"
+      ]
+    },
+    {
+      "id": "conv-07",
+      "history": [
+        "Tell me about payments.",
+        "The payments service processes card transactions."
+      ],
+      "question": "Which header prevents duplicate orders?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "Idempotency-Key"
+      ]
+    },
+    {
+      "id": "conv-08",
+      "history": [
+        "Tell me about service secrets.",
+        "They are managed with Vault.",
+        "Now tell me about Shop API access tokens.",
+        "Clients obtain bearer access tokens with client credentials."
+      ],
+      "question": "When do they expire?",
+      "expectedDocument": "api-reference",
+      "mustContain": [
+        "sixty minutes"
+      ]
+    },
+    {
+      "id": "conv-09",
+      "history": [
+        "Tell me about the payments service.",
+        "It processes card transactions."
+      ],
+      "question": "What is the capital of Iceland?",
+      "expectedDocument": null,
+      "mustContain": []
+    },
+    {
+      "id": "conv-10",
+      "history": [
+        "What happens during a payments release rollback?",
+        "The payments rollback script restores the previous image tag."
+      ],
+      "question": "How long does it take?",
+      "expectedDocument": "payments-runbook",
+      "mustContain": [
+        "six minutes"
+      ]
+    },
+    {
+      "id": "conv-11",
+      "history": [
+        "Tell me about the deployment pipeline.",
+        "The deployment pipeline builds, tests and promotes services through environments."
+      ],
+      "question": "How long does it take?",
+      "expectedDocument": "deployment-guide",
+      "mustContain": [
+        "forty-five minutes"
+      ]
+    }
+  ]
+}

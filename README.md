@@ -3,7 +3,7 @@
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
 Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
 
-Current state: **Phase 9a + 9c** (condition-driven search widening, agentic RAG) — Chat (streamed, cited
+Current state: **Phase 9a + 9b + 9c** (search widening, conversation query rewriting, agentic RAG) — Chat (streamed, cited
 answers; deterministic or ToolishRag-driven agentic mode), Knowledge Base (upload, live status, re-index, delete) and a Retrieval playground on top of the
 Embabel agent, hybrid retrieval and the Lucene index, with health components, RAG metrics, request
 correlation and optional tracing.
@@ -103,10 +103,10 @@ Errors are RFC 9457 problem details.
 | `POST /api/chat/stream` (same body) | Server-sent events: `status` (`{stage, detail?}`, stages `retrieving` / `expanding` / `researching` / `generating` / `verifying`), `delta` (`{text}`), `final` (`{response}` with the same shape as `POST /api/chat`), or `error` (`{message}`); a `:keep-alive` comment every 15 s while nothing else is sent |
 | `GET /api/conversations/{id}` / `DELETE` | In-memory conversation history (last 10 turns, 24 h idle TTL) |
 
-The flow is deterministic retrieve → generate → verify (`agents/KnowledgeAssistantAgent`): retrieval never
-involves the model, the model only sees numbered evidence passages, and `[n]` markers that do not point at
-a shown passage are removed before the answer is returned. A question with no retrieved evidence is answered
-without calling the model. Prompts: persona and grounding rules are Jinja templates under
+The flow is prepare query → retrieve → generate → verify (`agents/KnowledgeAssistantAgent`). Retrieval itself
+is deterministic; the answer model sees numbered evidence passages, and `[n]` markers that do not point at
+a shown passage are removed before the answer is returned. A question with no retrieved evidence skips
+answer generation. Prompts: persona and grounding rules are Jinja templates under
 `src/main/resources/prompts/` (`grounded-answer.jinja` for structured output, `grounded-answer-stream.jinja` for
 streaming — a trailing `INSUFFICIENT: …` line marks missing evidence; both `{% include %}` the shared
 `_grounding_rules.jinja`). They are rendered at startup and sent as Embabel prompt contributors, i.e. in the
@@ -115,6 +115,16 @@ system message; history, numbered evidence and the question are assembled in Jav
 
 Streaming uses Embabel's streaming prompt runner when the model supports it and falls back to the
 structured path (one `delta` with the whole answer) otherwise; verification is identical.
+
+**Conversation query rewriting** (Phase 9b): before either answer mode, a question with recent history is
+resolved into standalone search text if it is short (at most 120 characters and 12 words) or contains an
+English/Russian reference such as “it”, “they” or “его”. First turns and long standalone questions cost no
+rewrite call. The model uses the last `chatbot.chat.history-turns` messages (500 characters each), at
+temperature 0; `history-turns: 0` disables this context. Invalid output or model failure falls back to the
+original question. The original question still controls the answer language and is stored in history;
+`topK` and document filters are preserved. The standalone query also feeds search widening and is supplied
+as a context hint to agentic research. SSE reports stage `rewriting`; deterministic diagnostics show the
+search text in `query`. See `docs/eval-log.md` for the paired retrieval comparison and real conversation tests.
 
 **Widening a weak search** (`chatbot.chat.expand-search.strategy`, default `REWRITE`): when the first retrieval's
 best cosine stays under `chatbot.retrieval.sufficient-cosine`, the planner inserts a second pass before drafting

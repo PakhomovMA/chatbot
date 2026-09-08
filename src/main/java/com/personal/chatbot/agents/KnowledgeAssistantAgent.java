@@ -8,12 +8,14 @@ import com.embabel.agent.api.common.OperationContext;
 import com.personal.chatbot.models.agent.AnswerAttempt;
 import com.personal.chatbot.models.agent.Evidence;
 import com.personal.chatbot.models.agent.GroundedAnswer;
+import com.personal.chatbot.models.agent.PreparedQuestion;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.models.chat.AnswerMode;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.service.chat.AgenticResearcher;
 import com.personal.chatbot.service.chat.AnswerDrafter;
 import com.personal.chatbot.service.chat.AnswerStages;
+import com.personal.chatbot.service.chat.ConversationQueryRewriter;
 import com.personal.chatbot.service.chat.EvidenceExpander;
 import com.personal.chatbot.service.chat.GroundingVerifier;
 import com.personal.chatbot.service.retrieval.Retriever;
@@ -46,14 +48,16 @@ public class KnowledgeAssistantAgent {
     private final EvidenceExpander expander;
     private final AgenticResearcher researcher;
     private final GroundingVerifier verifier;
+    private final ConversationQueryRewriter rewriter;
 
     public KnowledgeAssistantAgent(Retriever retrievalService, AnswerDrafter drafter, EvidenceExpander expander,
-                                   AgenticResearcher researcher, GroundingVerifier verifier) {
+                                   AgenticResearcher researcher, GroundingVerifier verifier, ConversationQueryRewriter rewriter) {
         this.retrievalService = retrievalService;
         this.drafter = drafter;
         this.expander = expander;
         this.researcher = researcher;
         this.verifier = verifier;
+        this.rewriter = rewriter;
     }
 
     // Two explicit conditions instead of a negated expression: Embabel's default expression parser
@@ -78,10 +82,18 @@ public class KnowledgeAssistantAgent {
         return !expander.shouldExpand(evidence);
     }
 
+    // ---- shared preparation ----------------------------------------------------------------------
+
+    @Action(description = "Resolve conversational references into a standalone search query", readOnly = true)
+    public PreparedQuestion prepareQuestion(UserQuestion question, OperationContext context) {
+        return new PreparedQuestion(rewriter.rewrite(question, context));
+    }
+
     // ---- deterministic path ----------------------------------------------------------------------
 
     @Action(description = "Retrieve evidence for the question from the knowledge base", readOnly = true, pre = DETERMINISTIC_CONDITION)
-    public Evidence retrieveEvidence(UserQuestion question) {
+    public Evidence retrieveEvidence(PreparedQuestion prepared) {
+        UserQuestion question = prepared.question();
         question.abortIfCancelled();
         question.notifyStage(AnswerStages.RETRIEVING);
         RetrievalResult result = retrievalService.search(question.retrievalQuery());
@@ -110,8 +122,8 @@ public class KnowledgeAssistantAgent {
     // ---- agentic path (ToolishRag) -----------------------------------------------------------------
 
     @Action(description = "Research the question with the knowledge-base search tools and draft an answer", pre = AGENTIC_CONDITION)
-    public AnswerAttempt researchIteratively(UserQuestion question, OperationContext context) {
-        return researcher.research(question, context);
+    public AnswerAttempt researchIteratively(PreparedQuestion prepared, OperationContext context) {
+        return researcher.research(prepared.question(), context);
     }
 
     // ---- shared verification -----------------------------------------------------------------------

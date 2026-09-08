@@ -2,6 +2,7 @@ package com.personal.chatbot.config;
 
 import com.personal.chatbot.service.chat.AgenticResearcher;
 import com.personal.chatbot.service.chat.AnswerDrafter;
+import com.personal.chatbot.service.chat.ConversationQueryRewriter;
 import com.personal.chatbot.service.chat.ConversationStore;
 import com.personal.chatbot.service.chat.EvidenceExpander;
 import com.personal.chatbot.service.chat.GroundedAnswerPrompt;
@@ -19,6 +20,12 @@ import java.time.Clock;
 /** Chat-side beans (docs/system-plan.md D10, D12). */
 @Configuration(proxyBeanMethods = false)
 class ChatConfiguration {
+
+    @Bean
+    ConversationQueryRewriter conversationQueryRewriter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
+                                                       ChatbotProperties.Chat chat, MeterRegistry meterRegistry) {
+        return new ConversationQueryRewriter(prompt, instructions, chat.historyTurns(), meterRegistry);
+    }
 
     @Bean
     ConversationStore conversationStore(ChatbotProperties.Chat chat, Clock clock) {

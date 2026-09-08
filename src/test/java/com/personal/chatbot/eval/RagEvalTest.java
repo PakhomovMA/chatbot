@@ -1,6 +1,12 @@
 package com.personal.chatbot.eval;
 
+import com.embabel.agent.api.common.OperationContext;
+import com.embabel.common.ai.model.LlmOptions;
 import com.personal.chatbot.config.ChatbotProperties;
+import com.personal.chatbot.models.agent.StandaloneQuery;
+import com.personal.chatbot.models.agent.UserQuestion;
+import com.personal.chatbot.models.chat.AnswerLanguage;
+import com.personal.chatbot.models.chat.ConversationTurn;
 import com.personal.chatbot.models.embedding.EmbeddingFingerprint;
 import com.personal.chatbot.models.index.IndexManifest;
 import com.personal.chatbot.models.knowledge.Document;
@@ -10,8 +16,9 @@ import com.personal.chatbot.models.retrieval.RetrievalMode;
 import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
-import com.personal.chatbot.models.chat.AnswerLanguage;
+import com.personal.chatbot.service.chat.ConversationQueryRewriter;
 import com.personal.chatbot.service.chat.GroundedAnswerPrompt;
+import com.personal.chatbot.service.chat.GroundingInstructions;
 import com.personal.chatbot.service.embedding.EmbabelEmbeddingServiceAdapter;
 import com.personal.chatbot.service.embedding.PromptedEmbeddingService;
 import com.personal.chatbot.service.embedding.onnx.OnnxModelFiles;
@@ -23,14 +30,16 @@ import com.personal.chatbot.service.retrieval.RetrievalService;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.service.retrieval.SearchExpander;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentMatchers;
+import org.mockito.Mockito;
 import org.slf4j.Logger;
-import org.jspecify.annotations.Nullable;
 import org.slf4j.LoggerFactory;
 import org.springframework.util.unit.DataSize;
 import tools.jackson.databind.SerializationFeature;
@@ -223,6 +232,104 @@ class RagEvalTest {
         }
         ModeSummary hybrid = summaries.stream().filter(s -> s.mode() == RetrievalMode.HYBRID).findFirst().orElseThrow();
         assertThat(hybrid.recallAt5()).as("HYBRID recall@5").isGreaterThanOrEqualTo(minRecall);
+    }
+
+    record ConversationCase(String id, List<String> history, String question, @Nullable String expectedDocument,
+                            List<String> mustContain) {
+    }
+
+    record ConversationSet(String description, List<ConversationCase> questions) {
+    }
+
+    /** Paired Phase 9b gate with real embeddings and Ollama; production gate, validation and fallback run unchanged. */
+    @Test
+    void conversationRewritingDoesNotDegradeRetrieval() throws IOException {
+        assumeTrue(EvalQueryWriter.ollamaAvailable(), "Ollama required for conversational rewriting eval");
+        var cases = JsonMapper.builder().build().readValue(
+                Files.readString(Path.of("src/test/resources/eval/questions-conversation.json")), ConversationSet.class);
+        var rewriter = new ConversationQueryRewriter(
+                new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO),
+                new GroundingInstructions(4, 3), 10, new SimpleMeterRegistry());
+        var context = Mockito.mock(OperationContext.class,
+                Mockito.RETURNS_DEEP_STUBS);
+        List<Map<String, Object>> outcomes = new ArrayList<>();
+        double baselineRecall = 0, rewrittenRecall = 0, baselineMrr = 0, rewrittenMrr = 0;
+        double baselineCoverage = 0, rewrittenCoverage = 0;
+        int positives = 0, baselineNegative = 0, rewrittenNegative = 0;
+        var budget = new GroundedAnswerPrompt(EVIDENCE_CHAR_BUDGET, 10, AnswerLanguage.AUTO);
+        try (var writer = new EvalQueryWriter(System.getProperty("eval.llm", "qwen3:14b"), 0.0, 3)) {
+            // No-history questions must be byte-for-byte identical before/after preparation, with no model calls.
+            for (Question golden : questionSet.questions()) {
+                var input = new UserQuestion("eval", golden.id(), golden.question(),
+                        List.of(), null, null);
+                assertThat(rewriter.rewrite(input, context)).isSameAs(input);
+            }
+            Mockito.verifyNoInteractions(context);
+            var output = context.ai().withLlm(ArgumentMatchers.any(LlmOptions.class))
+                    .withPromptContributor(ArgumentMatchers.any()).creating(StandaloneQuery.class);
+            for (ConversationCase item : cases.questions()) {
+                List<ConversationTurn> history = new ArrayList<>();
+                for (int i = 0; i < item.history().size(); i++) {
+                    history.add(i % 2 == 0
+                            ? ConversationTurn.user(item.history().get(i), Instant.EPOCH)
+                            : ConversationTurn.assistant(item.history().get(i), List.of(), Instant.EPOCH));
+                }
+                var input = new UserQuestion("eval", item.id(), item.question(), history, null, null);
+                // Only Embabel's transport is replaced; the model uses the shipped instructions, temperature and history prompt.
+                Mockito.doAnswer(_ -> writer.resolveConversation(input)).when(output).fromPrompt(ArgumentMatchers.anyString());
+                long started = System.nanoTime();
+                var prepared = rewriter.rewrite(input, context);
+                long rewriteMs = (System.nanoTime() - started) / 1_000_000;
+                if (!item.id().equals("conv-07") && !item.id().equals("conv-09")) {
+                    assertThat(prepared.effectiveQuery()).as("resolved reference for %s", item.id())
+                            .isNotEqualTo(item.question());
+                }
+                RetrievalResult before = retrieval.search(input.retrievalQuery());
+                RetrievalResult after = retrieval.search(prepared.retrievalQuery());
+                Question relevance = new Question(item.id(), item.question(), item.expectedDocument(), item.mustContain());
+                int beforeRank = relevantRank(before, relevance), afterRank = relevantRank(after, relevance);
+                if (!relevance.isNegative()) {
+                    positives++;
+                    baselineRecall += beforeRank > 0 && beforeRank <= RECALL_K ? 1 : 0;
+                    rewrittenRecall += afterRank > 0 && afterRank <= RECALL_K ? 1 : 0;
+                    baselineMrr += beforeRank > 0 ? 1.0 / beforeRank : 0;
+                    rewrittenMrr += afterRank > 0 ? 1.0 / afterRank : 0;
+                    baselineCoverage += before.hits().stream().limit(budget.includedHits(before.hits()))
+                            .anyMatch(h -> isRelevant(h, relevance)) ? 1 : 0;
+                    rewrittenCoverage += after.hits().stream().limit(budget.includedHits(after.hits()))
+                            .anyMatch(h -> isRelevant(h, relevance)) ? 1 : 0;
+                } else {
+                    baselineNegative += before.evidenceSufficient() ? 1 : 0;
+                    rewrittenNegative += after.evidenceSufficient() ? 1 : 0;
+                }
+                outcomes.add(Map.of("id", item.id(), "question", item.question(), "effectiveQuery", prepared.effectiveQuery(),
+                        "beforeRank", beforeRank, "afterRank", afterRank, "rewriteMs", rewriteMs));
+            }
+        }
+        Map<String, Object> report = Map.of("outcomes", outcomes, "positives", positives,
+                "baselineRecallAt5", baselineRecall / positives, "rewrittenRecallAt5", rewrittenRecall / positives,
+                "baselineMrr", baselineMrr / positives, "rewrittenMrr", rewrittenMrr / positives,
+                "baselineAnswerInBudget", baselineCoverage / positives, "rewrittenAnswerInBudget", rewrittenCoverage / positives,
+                "baselineNegativeSufficient", baselineNegative, "rewrittenNegativeSufficient", rewrittenNegative);
+        Path reports = Path.of("build/reports/rag-eval");
+        Files.createDirectories(reports);
+        Files.writeString(reports.resolve("conversation-rewrite.json"), JsonMapper.builder()
+                .enable(SerializationFeature.INDENT_OUTPUT).build().writeValueAsString(report));
+        log.info("Conversation rewriting eval: {}", report);
+        assertThat(rewrittenRecall).as("paired Recall@5").isGreaterThanOrEqualTo(baselineRecall);
+        assertThat(rewrittenMrr).as("paired MRR").isGreaterThanOrEqualTo(baselineMrr);
+        assertThat(rewrittenCoverage).as("paired answer evidence within budget").isGreaterThanOrEqualTo(baselineCoverage);
+        assertThat(rewrittenRecall / positives).isGreaterThanOrEqualTo(minRecall);
+        assertThat(rewrittenNegative).as("negative sufficiency").isLessThanOrEqualTo(baselineNegative);
+    }
+
+    private static int relevantRank(RetrievalResult result, Question question) {
+        for (int i = 0; i < result.hits().size(); i++) {
+            if (isRelevant(result.hits().get(i), question)) {
+                return i + 1;
+            }
+        }
+        return -1;
     }
 
     /**

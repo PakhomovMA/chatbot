@@ -3,6 +3,8 @@ package com.personal.chatbot;
 import com.personal.chatbot.models.chat.AnswerMode;
 import com.personal.chatbot.models.chat.ChatRequest;
 import com.personal.chatbot.models.chat.ChatResponse;
+import com.personal.chatbot.models.chat.ChatStreamEvent;
+import com.personal.chatbot.models.chat.ConversationTurn;
 import com.personal.chatbot.models.chat.Grounding;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
 import com.personal.chatbot.models.retrieval.ExpansionStrategy;
@@ -30,6 +32,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Locale;
 import java.util.stream.Stream;
 
@@ -128,6 +131,45 @@ class ChatE2eTest {
         assertThat(expansion.strategy()).isEqualTo(ExpansionStrategy.REWRITE);
         assertThat(response.citations()).isNotEmpty();
         assertThat(response.answer().toLowerCase(Locale.ROOT)).containsAnyOf("five percent", "5 percent", "5%");
+    }
+
+    /** Phase 9b: real stored history, Embabel rewrite, retrieval, grounding and topic switch. */
+    @Test
+    void followupsUseHistoryWithoutPullingANewTopicBackToTheOldOne() throws IOException {
+        seedDocuments();
+        ChatResponse first = chat.chat(new ChatRequest(null, "Where are service secrets stored?", null));
+        ChatResponse followup = chat.chat(new ChatRequest(first.conversationId(), "How often are they rotated?",
+                new ChatRequest.Options(null, null, true, AnswerMode.DETERMINISTIC)));
+        assertThat(followup.diagnostics().query().toLowerCase(Locale.ROOT)).contains("secret");
+        assertThat(followup.answer().toLowerCase(Locale.ROOT)).containsAnyOf("ninety days", "90 days");
+        assertThat(followup.citations()).anyMatch(c -> c.documentTitle().equals("deployment-guide"));
+        ChatResponse switched = chat.chat(new ChatRequest(first.conversationId(), "Which header prevents duplicate orders?",
+                new ChatRequest.Options(null, null, true, AnswerMode.DETERMINISTIC)));
+        assertThat(switched.answer()).containsIgnoringCase("Idempotency-Key");
+        assertThat(switched.citations()).anyMatch(c -> c.documentTitle().equals("api-reference"));
+        assertThat(chat.conversation(first.conversationId()).messages())
+                .filteredOn(t -> t.role() == ConversationTurn.Role.USER).extracting(ConversationTurn::content)
+                .containsExactly("Where are service secrets stored?", "How often are they rotated?",
+                        "Which header prevents duplicate orders?");
+        log.info("[conversation rewrite] followup query: {}; topic switch query: {}", followup.diagnostics().query(),
+                switched.diagnostics().query());
+    }
+
+    @Test
+    void russianFollowupStreamsAGroundedAnswerFromResolvedSubject() throws IOException {
+        seedDocuments();
+        ChatResponse first = chat.chat(new ChatRequest(null, "Расскажи про сервис payments.", null));
+        List<ChatStreamEvent> events = new ArrayList<>();
+        chat.stream(new ChatRequest(first.conversationId(), "А как его перезапустить?",
+                new ChatRequest.Options(null, null, true, AnswerMode.DETERMINISTIC)), events::add);
+        assertThat(events.getLast()).isInstanceOf(ChatStreamEvent.Final.class);
+        ChatResponse response = ((ChatStreamEvent.Final) events.getLast()).response();
+        assertThat(events).anyMatch(e -> e instanceof ChatStreamEvent.Status s && s.stage().equals("rewriting"));
+        assertThat(response.diagnostics().query().toLowerCase(Locale.ROOT)).contains("payments");
+        assertThat(response.answer()).contains("rollout restart");
+        assertThat(response.answer()).containsPattern("[А-Яа-я]{3,}");
+        assertThat(response.citations()).anyMatch(c -> c.documentTitle().equals("payments-runbook"));
+        log.info("[conversation rewrite RU/SSE] query: {}; answer: {}", response.diagnostics().query(), response.answer());
     }
 
     private void run(AnswerMode mode, int minGrounded) throws IOException {

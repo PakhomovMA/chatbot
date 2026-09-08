@@ -26,7 +26,8 @@ class GroundingInstructionsTest {
             GroundingInstructions.STREAMING_ANSWER_TEMPLATE,
             GroundingInstructions.AGENTIC_RESEARCH_TEMPLATE,
             GroundingInstructions.REWRITE_TEMPLATE,
-            GroundingInstructions.HYDE_TEMPLATE})
+            GroundingInstructions.HYDE_TEMPLATE,
+            GroundingInstructions.CONVERSATION_REWRITE_TEMPLATE})
     void everyTemplateResolvesFromTheDefaultPromptsLocation(String template) {
         TemplateRenderer renderer = new JinjavaTemplateRenderer(new JinjaProperties("classpath:/prompts/", ".jinja", true));
         assertThatCode(() -> renderer.load(template)).doesNotThrowAnyException();

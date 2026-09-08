@@ -85,7 +85,7 @@ public class EvidenceExpander {
         try {
             return switch (strategy) {
                 case NONE -> List.of();
-                case NEIGHBOURS -> List.of(question.question());
+                case NEIGHBOURS -> List.of(question.effectiveQuery());
                 case REWRITE -> rewrite(question, context);
                 case HYDE -> hypothetical(question, context);
             };
@@ -100,11 +100,11 @@ public class EvidenceExpander {
         RewrittenQueries rewritten = timed("expand-search-rewrite", () ->
                 runner(context).withPromptContributor(instructions.queryRewrite())
                         .creating(RewrittenQueries.class)
-                        .fromPrompt(prompt.buildForExpansion(question.question())));
+                        .fromPrompt(prompt.buildForExpansion(question.effectiveQuery())));
         List<String> queries = rewritten.queriesOrEmpty().stream()
                 .filter(q -> q != null && !q.isBlank())
                 .map(String::strip)
-                .filter(q -> !q.equalsIgnoreCase(question.question().strip()))
+                .filter(q -> !q.equalsIgnoreCase(question.effectiveQuery().strip()))
                 .limit(settings.expandSearch().queries())
                 .toList();
         log.debug("Rewrote [{}] into {}", question.messageId(), queries);
@@ -115,7 +115,7 @@ public class EvidenceExpander {
         HypotheticalPassage passage = timed("expand-search-hyde", () ->
                 runner(context).withPromptContributor(instructions.hypotheticalPassage())
                         .creating(HypotheticalPassage.class)
-                        .fromPrompt(prompt.buildForExpansion(question.question())));
+                        .fromPrompt(prompt.buildForExpansion(question.effectiveQuery())));
         if (passage.passage() == null || passage.passage().isBlank()) {
             return List.of();
         }

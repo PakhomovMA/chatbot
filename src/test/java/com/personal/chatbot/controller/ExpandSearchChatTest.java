@@ -3,6 +3,9 @@ package com.personal.chatbot.controller;
 import com.jayway.jsonpath.JsonPath;
 import com.personal.chatbot.models.agent.GroundedAnswerDraft;
 import com.personal.chatbot.models.agent.RewrittenQueries;
+import com.personal.chatbot.models.agent.StandaloneQuery;
+import com.personal.chatbot.models.chat.ConversationTurn;
+import com.personal.chatbot.service.chat.ConversationStore;
 import com.personal.chatbot.support.AbstractChatbotIntegrationTest;
 import com.personal.chatbot.support.TestDocuments;
 import org.hamcrest.Matchers;
@@ -20,6 +23,7 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 
 import static org.awaitility.Awaitility.await;
@@ -56,6 +60,8 @@ class ExpandSearchChatTest extends AbstractChatbotIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+    @Autowired
+    private ConversationStore conversations;
 
     private static String documentId;
 
@@ -99,5 +105,28 @@ class ExpandSearchChatTest extends AbstractChatbotIntegrationTest {
                 .andExpect(jsonPath("$.grounding").value("INSUFFICIENT_EVIDENCE"))
                 .andExpect(jsonPath("$.citations", Matchers.empty()));
         verify(llmOperations, never()).createObject(any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void expansionKeepsTheSubjectResolvedFromHistory() throws Exception {
+        try (var lease = conversations.begin("expansion-with-history")) {
+            lease.record(ConversationTurn.user("Tell me about payments", Instant.now()),
+                    ConversationTurn.assistant("The payments service processes transactions.", List.of(), Instant.now()));
+        }
+        whenCreateObject(p -> p.contains("Current question: How do I restart it?"), StandaloneQuery.class)
+                .thenReturn(new StandaloneQuery("How do I restart the payment service?"));
+        whenCreateObject(p -> p.equals("Question: How do I restart the payment service?"), RewrittenQueries.class)
+                .thenReturn(new RewrittenQueries(List.of("systemctl restart payments")));
+        whenCreateObject(p -> p.contains("Question: How do I restart it?"), GroundedAnswerDraft.class)
+                .thenReturn(new GroundedAnswerDraft("Run `systemctl restart payments` [1].", List.of(1), true, null));
+
+        mockMvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON).content("""
+                        {"conversationId":"expansion-with-history","message":"How do I restart it?",
+                         "options":{"includeDiagnostics":true}}
+                        """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.diagnostics.query").value(Matchers.containsString("payment service")))
+                .andExpect(jsonPath("$.diagnostics.expansion.queries", Matchers.contains("systemctl restart payments")))
+                .andExpect(jsonPath("$.citations", Matchers.hasSize(1)));
     }
 }

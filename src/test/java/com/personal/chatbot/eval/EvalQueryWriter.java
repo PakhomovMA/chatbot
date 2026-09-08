@@ -2,6 +2,8 @@ package com.personal.chatbot.eval;
 
 import com.personal.chatbot.models.agent.HypotheticalPassage;
 import com.personal.chatbot.models.agent.RewrittenQueries;
+import com.personal.chatbot.models.agent.StandaloneQuery;
+import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.service.chat.GroundedAnswerPrompt;
 import com.personal.chatbot.service.chat.GroundingInstructions;
 import com.personal.chatbot.models.chat.AnswerLanguage;
@@ -31,7 +33,7 @@ final class EvalQueryWriter implements AutoCloseable {
 
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final GroundingInstructions instructions;
-    private final GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(6000, 0, AnswerLanguage.AUTO);
+    private final GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO);
     private final String model;
     private final double temperature;
     private long lastCallMs;
@@ -73,6 +75,12 @@ final class EvalQueryWriter implements AutoCloseable {
         HypotheticalPassage passage = generate(instructions.hypotheticalPassage().contribution(),
                 prompt.buildForExpansion(question) + "\n\nReply with JSON: {\"passage\": \"...\"}", HypotheticalPassage.class);
         return passage.passage() == null || passage.passage().isBlank() ? List.of() : List.of(passage.passage().strip());
+    }
+
+    StandaloneQuery resolveConversation(UserQuestion question) {
+        return generate(instructions.conversationRewrite().contribution(),
+                prompt.buildForConversationRewrite(question.question(), question.history())
+                        + "\n\nReply with JSON: {\"query\": \"...\"}", StandaloneQuery.class);
     }
 
     /** Wall time of the last model call, the price the branch pays before it can search again. */

@@ -27,6 +27,7 @@ public final class GroundingInstructions {
     static final String AGENTIC_RESEARCH_TEMPLATE = "agentic-research";
     static final String REWRITE_TEMPLATE = "expand-search-rewrite";
     static final String HYDE_TEMPLATE = "expand-search-hyde";
+    static final String CONVERSATION_REWRITE_TEMPLATE = "conversation-query-rewrite";
 
     private static final String ROLE = "grounding_instructions";
 
@@ -35,6 +36,7 @@ public final class GroundingInstructions {
     private final PromptContributor agenticResearch;
     private final PromptContributor queryRewrite;
     private final PromptContributor hypotheticalPassage;
+    private final PromptContributor conversationRewrite;
 
     public GroundingInstructions(int agenticMaxSearches, int expansionQueries) {
         this(strictRenderer(), agenticMaxSearches, expansionQueries);
@@ -46,6 +48,7 @@ public final class GroundingInstructions {
         this.agenticResearch = render(renderer, AGENTIC_RESEARCH_TEMPLATE, Map.of("maxSearches", agenticMaxSearches));
         this.queryRewrite = render(renderer, REWRITE_TEMPLATE, Map.of("queries", expansionQueries));
         this.hypotheticalPassage = render(renderer, HYDE_TEMPLATE, Map.of());
+        this.conversationRewrite = render(renderer, CONVERSATION_REWRITE_TEMPLATE, Map.of());
     }
 
     /** Instructions for the deterministic branch asking for a structured draft. */
@@ -66,6 +69,10 @@ public final class GroundingInstructions {
     /** Instructions for the REWRITE expansion strategy: other ways to ask a question that found nothing. */
     public PromptContributor queryRewrite() {
         return queryRewrite;
+    }
+
+    public PromptContributor conversationRewrite() {
+        return conversationRewrite;
     }
 
     /** Instructions for the HYDE expansion strategy: the passage that would answer the question. */

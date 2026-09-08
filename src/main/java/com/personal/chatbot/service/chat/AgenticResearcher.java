@@ -94,7 +94,7 @@ public class AgenticResearcher {
                     .withTools(CancellableTool.wrapAll(rag.tools(), question.cancellation(), question.messageId()))
                     .withPromptContributors(List.of(instructions.agenticResearch(), rag))
                     .creating(AgenticDraft.class)
-                    .fromPrompt(prompt.buildForAgentic(question.question(), question.history()));
+                    .fromPrompt(prompt.buildForAgentic(question.question(), question.effectiveQuery(), question.history()));
         } finally {
             Timer.builder("chatbot.llm").tag("operation", "research-agentic").register(meterRegistry)
                     .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);

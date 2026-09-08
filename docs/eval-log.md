@@ -276,3 +276,79 @@ structured output Embabel (схема в промпте, tool loop) и холо�
 вопросах ниже порога), помогает, когда срабатывает, и не портит ранжирование; `NONE` — для тех, кому
 важнее не платить лишний вызов модели за вопрос без ответа. HYDE оставлен как опция: на корпусе связной
 прозы с длинными статьями он может выглядеть иначе, чем на коротких runbook-ах.
+
+## 2026-09-08 — Phase 9b, query rewriting с историей
+
+Перед поиском короткий или анафоричный вопрос с историей преобразуется в самостоятельный запрос.
+Подготовка обязательна для обеих веток агента, но LLM вызывается только при срабатывании дешёвого
+RU/EN-фильтра (§6.2 плана). Исходный вопрос определяет ответ, его язык и запись в `ConversationStore`;
+восстановленный запрос используется для retrieval, последующего `expandSearch` и как подсказка поиска
+в agentic research. История и результат переписывания не становятся evidence.
+
+**Парный eval:** `questions-conversation.json`, 11 случаев (10 позитивов и 1 негатив), 5 прежних документов,
+25 чанков, chunk/overlap = 800/100, EmbeddingGemma ONNX, HYBRID topK=8, evidence budget=6000,
+`qwen3:14b`, temperature=0. Сравнивается один поиск по исходному follow-up с одним поиском после
+переписывания; `expandSearch` здесь не смешивается с эффектом истории. Контекст задан фиксированными
+парами user/assistant: RU/EN-ссылки, смена темы, выбор последнего предмета разговора, отсутствие знания
+и два одинаковых вопроса «How long does it take?» с разной историей.
+
+В eval исполняются production-эвристика, валидация результата и fallback. Транспорт Embabel заменён
+вызовом Ollama JSON mode через тестовый адаптер; standing instructions, user prompt и температура
+совпадают с приложением. Реальный structured-output путь Embabel проверяется отдельно в e2e.
+
+| Метрика | Исходный follow-up | После rewriting |
+|---|---:|---:|
+| Recall@5 | 0.800 | **1.000** |
+| MRR | 0.800 | **0.933** |
+| Релевантная evidence в бюджете | 0.800 | **1.000** |
+| Негативы, признанные достаточными | 0/1 | 0/1 |
+
+Медиана дополнительного LLM-вызова — **1.635 с**, максимум в этом запуске — **2.493 с**.
+Все 9 вопросов с пропущенным предметом получили самостоятельный запрос; короткий вопрос со сменой
+темы и далёкий от корпуса негатив остались неизменными. Примеры:
+
+| История | Follow-up | Поисковый запрос | Ранг нужного пассажа до → после |
+|---|---|---|---:|
+| Payments rollback | How long does it take? | How long does a payments release rollback take? | нет в top-8 → 1 |
+| Deployment pipeline | How long does it take? | How long does the deployment pipeline take to build, test and promote services through environments? | нет в top-8 → 3 |
+| Сервис payments | А как его перезапустить? | Как перезапустить сервис payments? | 1 → 1 |
+| Payments → новый вопрос об API | Which header prevents duplicate orders? | без изменения | 1 → 1 |
+
+Первые 8 позитивов и до изменения находились на ранге 1; выигрыш дал именно неоднозначный вопрос о
+длительности. Это небольшой regression-набор, а не оценка качества на произвольных диалогах.
+
+**Регрессия без истории:** для всех 44 golden-вопросов подготовка возвращает исходный объект без
+модельного вызова. Прежний golden gate: HYBRID Recall@5=1.000, MRR=0.974, nDCG@10=0.981;
+38 позитивов, 6 негативов, ни один негатив не превысил sufficiency-порог. Полный `./gradlew ragEval`
+(включая сравнения Phase 9a) прошёл. После расширения диалогового набора повторены целевые проверки:
+
+```sh
+./gradlew ragEval --tests '*conversationRewritingDoesNotDegradeRetrieval' --tests '*hybridRetrievalMeetsRecallTarget'
+```
+
+Отчёты последнего запуска: `build/reports/rag-eval/conversation-rewrite.json`,
+`build/reports/rag-eval/eval-20260908-181905-c800-o100.json`.
+
+Hermetic gate `./gradlew clean build`: **213 backend-тестов и 14 frontend-тестов**, без ошибок/пропусков.
+Покрыты обязательность подготовки в обеих GOAP-ветках, одинаковый результат sync/SSE, исходная история,
+фильтры и topK, сохранение предмета в `expandSearch`, RU/EN-эвристика, отключённая/ограниченная история,
+литеральные Jinja-фрагменты, неверный ответ/ошибка модели и отмена до/во время вызова.
+INV-01/03/08: у подготовки нет search/write tools, поиск остаётся за прежним service boundary,
+цитаты проверяются только по evidence, действие помечено read-only. Публичные DTO и версии зависимостей
+сохранены.
+
+Реальный gate `./gradlew test -PincludeTags=e2e`: **7 тестов прошли, без пропусков**, 7 мин 6 с.
+Оба режима ответили на 5 golden-вопросов каждый; прежний weak-evidence сценарий сохранил `expandSearch`.
+Новые сценарии используют настоящий `ConversationStore` и production Embabel:
+
+- После «Where are service secrets stored?» вопрос «How often are they rotated?» превратился в
+  «How often are service secrets rotated in HashiCorp Vault under `secret/<service>/<environment>`?»;
+  ответ содержит ninety/90 days и цитату из deployment-guide. Следующий вопрос об `Idempotency-Key`
+  остался новым предметом разговора и получил цитату из api-reference.
+- После «Расскажи про сервис payments.» follow-up «А как его перезапустить?» в SSE превратился в
+  «Как перезапустить сервис payments?». Финальный ответ на русском содержит `rollout restart` и
+  цитаты из payments-runbook; в потоке присутствует стадия `rewriting`.
+
+`./gradlew bootRun` проверен на порту 18080 с временным data-dir и in-memory индексом; модель читалась
+из штатного каталога. Discovery нашёл `qwen3:14b`, `/actuator/health` вернул **UP** для приложения,
+Ollama, embedding и Lucene. Проверочный процесс остановлен; пользовательское хранилище не менялось.
