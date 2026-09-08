@@ -49,7 +49,11 @@ public class ConversationStore {
         }
     }
 
-    /** Serialises the requests of one conversation and dates the leases a deletion invalidates. */
+    /**
+     * Serialises the requests of one conversation and dates the leases a deletion invalidates. A
+     * {@link ReentrantLock} rather than a monitor because a lease is taken in one method and released
+     * in another, which a synchronized block cannot express (docs/concurrency-plan.md C09).
+     */
     private static final class Turnstile {
         final ReentrantLock lock = new ReentrantLock();
         int holders;

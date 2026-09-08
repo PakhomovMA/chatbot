@@ -1,6 +1,7 @@
 package com.personal.chatbot.service.knowledge;
 
 import com.personal.chatbot.exceptions.DocumentNotFoundException;
+import com.personal.chatbot.exceptions.ServiceStoppingException;
 import com.personal.chatbot.models.knowledge.Document;
 import com.personal.chatbot.models.knowledge.DocumentEvent;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
@@ -21,9 +22,12 @@ import java.util.List;
  * serves the admin operations of the knowledge-base API. The work itself belongs to its
  * collaborators — {@link IngestionQueue} (single writer, INV-11), {@link DocumentIngestionPipeline}
  * (one document, all-or-nothing, INV-09) and {@link IndexReconciler} (startup repair).
+ *
+ * <p>Not the queue's owner: stopping it belongs to the shutdown sequence, which drives the queue
+ * itself (docs/concurrency-plan.md C08).
  */
 @Service
-public class IngestionService implements IngestionOperations, AutoCloseable {
+public class IngestionService implements IngestionOperations {
 
     private static final Logger log = LoggerFactory.getLogger(IngestionService.class);
 
@@ -93,7 +97,7 @@ public class IngestionService implements IngestionOperations, AutoCloseable {
     @Override
     public int reindexAll() {
         if (!queue.requestRebuild()) {
-            throw new IllegalStateException("Ingestion is shutting down; index rebuild was not accepted");
+            throw new ServiceStoppingException("index rebuild");
         }
         List<Document> documents = registry.findAll();
         for (Document document : documents) {
@@ -121,10 +125,5 @@ public class IngestionService implements IngestionOperations, AutoCloseable {
 
     private Instant now() {
         return Instant.now(clock);
-    }
-
-    @Override
-    public void close() {
-        queue.close();
     }
 }

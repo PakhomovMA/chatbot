@@ -4,6 +4,7 @@ import com.personal.chatbot.exceptions.ConversationNotFoundException;
 import com.personal.chatbot.exceptions.DocumentNotFoundException;
 import com.personal.chatbot.exceptions.IndexUnavailableException;
 import com.personal.chatbot.exceptions.InvalidUploadException;
+import com.personal.chatbot.exceptions.ServiceStoppingException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -54,6 +55,14 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
         problem.setTitle("Index unavailable");
         problem.setProperty("indexState", e.state().name());
+        return problem;
+    }
+
+    @ExceptionHandler(ServiceStoppingException.class)
+    ProblemDetail serviceStopping(ServiceStoppingException e) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
+        problem.setTitle("Shutting down");
+        problem.setProperty("component", e.what());
         return problem;
     }
 

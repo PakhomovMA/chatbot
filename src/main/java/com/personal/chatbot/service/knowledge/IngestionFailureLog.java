@@ -5,7 +5,12 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
 
-/** Bounded ring of recent ingestion failures for the knowledge-base status (docs/system-plan.md D14). */
+/**
+ * Bounded ring of recent ingestion failures for the knowledge-base status (docs/system-plan.md D14).
+ *
+ * <p>The ingestion worker writes, HTTP threads read; the deque's own monitor keeps the append and
+ * the trim that follows it one step, and hands readers a copy (docs/concurrency-plan.md C09).
+ */
 public class IngestionFailureLog {
 
     public record Failure(String documentId, String stage, String message, Instant at) {

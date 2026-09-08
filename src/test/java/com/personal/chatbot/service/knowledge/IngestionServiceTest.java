@@ -6,6 +6,7 @@ import com.personal.chatbot.models.knowledge.DocumentEvent;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
 import com.personal.chatbot.models.knowledge.dto.UploadResponse;
 import com.personal.chatbot.service.index.LuceneIndexStore;
+import com.personal.chatbot.service.lifecycle.ShutdownSequence;
 import com.personal.chatbot.service.parsing.DocumentParser;
 import com.personal.chatbot.support.FailingTextEmbedder;
 import com.personal.chatbot.support.FakeTextEmbedder;
@@ -45,6 +46,7 @@ class IngestionServiceTest {
     private DocumentRegistry registry;
     private BlobStore blobStore;
     private LuceneIndexStore indexStore;
+    private IngestionQueue queue;
     private IngestionService ingestion;
     private DocumentService documents;
 
@@ -75,7 +77,7 @@ class IngestionServiceTest {
         IngestionFailureLog failures = new IngestionFailureLog();
         DocumentIngestionPipeline pipeline = new DocumentIngestionPipeline(registry, blobStore, parser,
                 indexStore, status, failures, Clock.systemUTC(), new SimpleMeterRegistry());
-        IngestionQueue queue = new IngestionQueue(pipeline::process, () -> {
+        queue = new IngestionQueue(pipeline::process, () -> {
             if (rebuildFails.get()) {
                 throw new IllegalStateException("simulated rebuild failure");
             }
@@ -97,8 +99,13 @@ class IngestionServiceTest {
 
     @AfterEach
     void tearDown() {
-        ingestion.close();
+        stopIngestion();
         indexStore.close();
+    }
+
+    /** Stops the worker the way the application does, so a test never leaves one running. */
+    private ShutdownSequence.Result stopIngestion() {
+        return new ShutdownSequence(List.of(queue), Duration.ofSeconds(5), Duration.ofSeconds(5)).stop();
     }
 
     private UploadResponse upload(String name, byte[] bytes) {
@@ -150,7 +157,7 @@ class IngestionServiceTest {
 
     @Test
     void embeddingFailureIsRecordedAndPurged() {
-        ingestion.close();
+        stopIngestion();
         indexStore.close();
         wire(IndexStores.store(dir.resolve("index2"), new FailingTextEmbedder(16, "Rollback")));
         String id = upload("runbook.md", TestDocuments.markdown()).documentId();
@@ -230,7 +237,7 @@ class IngestionServiceTest {
 
     @Test
     void incompatibleIndexParksDocumentsUntilRebuild() {
-        ingestion.close();
+        stopIngestion();
         indexStore.close();
         try (LuceneIndexStore old = IndexStores.store(dir.resolve("index3"), new FakeTextEmbedder(8)).open()) {
             old.writeDocument(new DocumentParser().parse(
@@ -246,6 +253,34 @@ class IngestionServiceTest {
         assertThat(registry.findById(id).orElseThrow().status()).isEqualTo(DocumentStatus.UPLOADED);
 
         ingestion.reindexAll();
+        awaitStatus(id, DocumentStatus.READY);
+    }
+
+    /**
+     * Shutdown while a document is being ingested (docs/concurrency-plan.md C08): the run is
+     * interrupted, but no failure is recorded for it — the document keeps its ingestion stage, which
+     * is exactly what startup reconciliation knows how to pick up again.
+     */
+    @Test
+    void shutdownDuringIngestionLeavesTheDocumentForReconciliation() {
+        parser.pauseNext(1);
+        String id = upload("runbook.md", TestDocuments.markdown()).documentId();
+        parser.awaitParsing();
+        awaitStatus(id, DocumentStatus.PARSING);
+
+        ShutdownSequence.Result stopped = new ShutdownSequence(List.of(queue), Duration.ofMillis(200),
+                Duration.ofSeconds(5)).stop();
+
+        assertThat(stopped.complete()).isTrue();
+        assertThat(registry.findById(id).orElseThrow().status()).isEqualTo(DocumentStatus.PARSING);
+        assertThat(registry.findById(id).orElseThrow().error()).isNull();
+        assertThat(ingestion.enqueue(id)).isFalse();
+        assertThat(ingestion.recentFailures()).isEmpty();
+
+        // What the next start makes of it: an interrupted stage is re-queued and indexed.
+        indexStore.close();
+        wire(IndexStores.store(dir.resolve("index"), new FakeTextEmbedder(16)));
+        ingestion.reconcile();
         awaitStatus(id, DocumentStatus.READY);
     }
 

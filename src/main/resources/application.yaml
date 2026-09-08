@@ -1,11 +1,19 @@
 spring:
   application:
     name: chatbot
+  lifecycle:
+    # Upper bound for one shutdown phase; the ordered stop of background work (C08) fits inside it
+    # with 25 s, and the graceful drain below gets its own phase.
+    timeout-per-shutdown-phase: 30s
 
 # Local-first: bind to loopback only (docs/system-plan.md D13).
 server:
   address: 127.0.0.1
   port: 8080
+  # Stop accepting requests and let the ones in flight finish instead of cutting them off
+  # (docs/concurrency-plan.md C08). Chat requests are cancelled and event streams closed before this
+  # drain starts, so an open browser tab does not hold the shutdown for the whole timeout.
+  shutdown: graceful
 
 chatbot:
   # Root for Lucene index, document registry, uploaded originals and model files (§9).

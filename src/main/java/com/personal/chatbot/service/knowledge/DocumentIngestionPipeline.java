@@ -30,10 +30,12 @@ import java.util.concurrent.TimeUnit;
  * All-or-nothing — on any failure the document's partial index content is purged and the registry
  * records the failing stage (INV-09).
  *
- * <p>Concurrency is the queue's business, but two things are this class's: every registry change is
+ * <p>Concurrency is the queue's business, but three things are this class's: every registry change is
  * conditional on the version this run started from, so a run cannot push an older version back or
- * resurrect a deleted document; and the final {@code READY} is published through the run's claim, so
- * a run that a deletion, a replacement or a rebuild has taken over commits nothing.
+ * resurrect a deleted document; the final {@code READY} is published through the run's claim, so a
+ * run that a deletion, a replacement or a rebuild has taken over commits nothing; and a run stopped
+ * by an interrupt records no failure, so shutdown leaves the document where reconciliation can pick
+ * it up again (docs/concurrency-plan.md C08).
  */
 public class DocumentIngestionPipeline {
 
@@ -153,6 +155,14 @@ public class DocumentIngestionPipeline {
     }
 
     private void fail(IngestionClaim claim, Document document, String stage, @Nullable String message) {
+        if (Thread.currentThread().isInterrupted()) {
+            // Shutdown interrupted this run (docs/concurrency-plan.md C08). The document stays in its
+            // ingestion stage, which startup reconciliation recognises and re-queues; FAILED would sit
+            // there until somebody asked for a re-index by hand.
+            log.warn("Ingestion of {} was interrupted at stage {}; leaving it in {} for startup reconciliation",
+                    document.id(), stage, document.status());
+            return;
+        }
         indexStore.deleteDocument(DocumentParser.uriOf(document.id()));
         Counter.builder("chatbot.ingestion.failures").tag("stage", stage).register(meterRegistry).increment();
         String detail = message != null ? message : "unknown error";

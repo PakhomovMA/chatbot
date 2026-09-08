@@ -26,10 +26,12 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -39,6 +41,12 @@ import java.util.stream.Collectors;
  * or in memory, keeps the {@code manifest.json} that pins the embedding fingerprint and chunker
  * (INV-05), serialises writers behind a read/write lock (INV-11), verifies that every chunk got a
  * vector (INV-09), recovers from a corrupt directory and rebuilds on demand.
+ *
+ * <p>Two locks, each with its own job (docs/concurrency-plan.md C09). The read/write lock keeps
+ * writers, rebuilds and {@link #close()} apart from everything else; searches take it for read and
+ * so run alongside each other as far as this class is concerned. The search monitor inside it is
+ * what actually serialises queries: the Embabel store closes and reopens one shared reader per
+ * query, so two concurrent queries would pull the reader out from under each other.
  */
 public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, AutoCloseable {
 
@@ -46,6 +54,8 @@ public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, Auto
 
     static final String LUCENE_DIR = "lucene";
     static final String STORE_NAME = "knowledge";
+    /** How long {@link #close()} waits for a write or a search in flight (docs/concurrency-plan.md C08). */
+    static final Duration CLOSE_WAIT = Duration.ofSeconds(5);
 
     private final @Nullable Path indexDir;
     private final EmbeddingFingerprint fingerprint;
@@ -295,9 +305,26 @@ public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, Auto
         return fingerprint;
     }
 
+    /**
+     * Closes the store once no write or search is using it. By the time the context destroys this
+     * bean the shutdown sequence has already stopped the ingestion worker and the chat threads, so
+     * the lock is normally free; if it is not, the store stays open rather than closing a reader out
+     * from under an operation still running (docs/concurrency-plan.md C08). Idempotent.
+     */
     @Override
     public void close() {
-        lock.writeLock().lock();
+        boolean locked;
+        try {
+            locked = lock.writeLock().tryLock(CLOSE_WAIT.toNanos(), TimeUnit.NANOSECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            locked = false;
+        }
+        if (!locked) {
+            log.error("Index at {} is still in use after {}; leaving it open rather than closing it under an"
+                    + " active operation", indexDir, CLOSE_WAIT);
+            return;
+        }
         try {
             closeOperations();
         } finally {

@@ -18,6 +18,10 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@link #isCancelled()} before work that is pointless for a caller who has left, while a reactive
  * pipeline registers an {@link #onCancel} listener, so a model that has gone quiet is dropped
  * without waiting for a next token. Listeners run on the cancelling thread and must be cheap.
+ *
+ * <p>The listener list has a monitor of its own, held only while the list is taken over or added to
+ * (docs/concurrency-plan.md C09): the invariant is that every listener runs exactly once — by
+ * {@link #cancel} if it was registered in time, by {@link #onCancel} itself if it was not.
  */
 public final class ChatCancellation {
 

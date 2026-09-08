@@ -1,9 +1,11 @@
 package com.personal.chatbot.service.knowledge;
 
+import com.personal.chatbot.service.lifecycle.ActiveWork;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,8 +32,11 @@ import java.util.function.Supplier;
  * the rebuild callback reports — including those uploaded while it was waiting.
  *
  * <p>Lock order: the queue monitor may be held while taking the registry lock, never the reverse.
+ *
+ * <p>The queue owns its worker thread and nothing else stops it: {@link ActiveWork} is the whole
+ * lifecycle (docs/concurrency-plan.md C08), driven by the shutdown sequence.
  */
-public class IngestionQueue implements AutoCloseable {
+public class IngestionQueue implements ActiveWork {
 
     private static final Logger log = LoggerFactory.getLogger(IngestionQueue.class);
 
@@ -173,7 +178,16 @@ public class IngestionQueue implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public String name() {
+        return "ingestion";
+    }
+
+    /**
+     * Stops taking requests and wakes the worker. A run in flight is left to finish: its result is
+     * still wanted, and interrupting it mid-write is what {@link #interruptActive()} is for.
+     */
+    @Override
+    public void stopAccepting() {
         synchronized (monitor) {
             if (stopping) {
                 return;
@@ -183,6 +197,26 @@ public class IngestionQueue implements AutoCloseable {
             rerun = null;
             monitor.notifyAll();
         }
+    }
+
+    /** The worker ends once the run in flight is over, so its thread dying is what "quiet" means. */
+    @Override
+    public boolean awaitQuiet(Duration timeout) {
+        try {
+            return worker.join(timeout);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return !worker.isAlive();
+        }
+    }
+
+    /**
+     * Interrupts the run in flight. What it leaves behind is a document still in its ingestion stage:
+     * the pipeline does not record a failure for an interrupted run, so startup reconciliation sees
+     * an interrupted ingestion and re-queues it.
+     */
+    @Override
+    public void interruptActive() {
         worker.interrupt();
     }
 

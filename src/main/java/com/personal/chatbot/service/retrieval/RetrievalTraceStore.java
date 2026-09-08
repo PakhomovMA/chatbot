@@ -8,7 +8,13 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
 
-/** Bounded in-memory ring of recent retrieval results for the diagnostics API (docs/system-plan.md D14). */
+/**
+ * Bounded in-memory ring of recent retrieval results for the diagnostics API (docs/system-plan.md D14).
+ *
+ * <p>Retrieval threads write and the diagnostics endpoint reads, so the deque is guarded by its own
+ * monitor: adding an entry and trimming the oldest are one step, and a reader copies rather than
+ * iterating a deque somebody is trimming (docs/concurrency-plan.md C09).
+ */
 public class RetrievalTraceStore {
 
     private final int capacity;

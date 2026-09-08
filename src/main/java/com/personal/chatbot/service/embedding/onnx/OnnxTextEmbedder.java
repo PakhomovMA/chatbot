@@ -164,6 +164,12 @@ public final class OnnxTextEmbedder implements TextEmbedder {
         return encode(List.of(text))[0].getIds();
     }
 
+    /**
+     * The DJL tokenizer is not documented as safe for concurrent use and wraps native state, so
+     * batches are encoded one at a time. Inference itself is not serialised — ONNX Runtime handles
+     * concurrent {@code run} calls, and the batch limit above it is the real throttle
+     * (docs/concurrency-plan.md C09).
+     */
     private Encoding[] encode(List<String> texts) {
         synchronized (tokenizer) {
             return tokenizer.batchEncode(texts);

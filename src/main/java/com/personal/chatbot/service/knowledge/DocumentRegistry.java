@@ -21,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
@@ -32,10 +32,13 @@ import java.util.stream.Collectors;
  * previous file as {@code .bak}, move temp into place). On load a corrupt main file falls back to
  * the backup; if both are unreadable startup fails rather than silently starting empty.
  *
- * <p>All changes go through the write lock, and so do the compound operations built on top of it:
- * {@link #update} for conditional single-entry changes and {@link #exclusively} for a caller that
- * has to read, decide and write as one step. Lock order in the ingestion path is <em>queue monitor →
- * registry lock</em>; nothing may wait for the ingestion worker or the index while holding this lock.
+ * <p>Every change goes through one lock, and so do the compound operations built on top of it:
+ * {@link #update} for conditional single-entry changes and {@link #exclusively} for a caller that has
+ * to read, decide and write as one step. It is a plain reentrant lock, not a read/write one: reads
+ * are served by the concurrent map without any lock at all, so a read side would only add cost
+ * (docs/concurrency-plan.md C09). Reentrancy is used — {@link #update} holds the lock while
+ * {@link #save} takes it again. Lock order in the ingestion path is <em>queue monitor → registry
+ * lock</em>; nothing may wait for the ingestion worker or the index while holding this lock.
  */
 public class DocumentRegistry {
 
@@ -80,7 +83,7 @@ public class DocumentRegistry {
     private final Path file;
     private final JsonMapper mapper;
     private final Map<String, Document> documents = new ConcurrentHashMap<>();
-    private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
+    private final ReentrantLock lock = new ReentrantLock();
 
     public DocumentRegistry(Path directory) {
         this.file = directory.resolve(FILE_NAME);
@@ -95,7 +98,7 @@ public class DocumentRegistry {
 
     /** Stores {@code document} unconditionally; the in-memory map only changes if the file was written. */
     public Document save(Document document) {
-        lock.writeLock().lock();
+        lock.lock();
         try {
             Document previous = documents.put(document.id(), document);
             try {
@@ -106,7 +109,7 @@ public class DocumentRegistry {
             }
             return document;
         } finally {
-            lock.writeLock().unlock();
+            lock.unlock();
         }
     }
 
@@ -120,7 +123,7 @@ public class DocumentRegistry {
 
     /** {@link #update(String, UnaryOperator)}, but only while the document is at {@code expectedVersion}. */
     public Change update(String id, int expectedVersion, UnaryOperator<Document> change) {
-        lock.writeLock().lock();
+        lock.lock();
         try {
             Document current = documents.get(id);
             if (current == null) {
@@ -131,7 +134,7 @@ public class DocumentRegistry {
             }
             return new Change.Applied(save(change.apply(current)));
         } finally {
-            lock.writeLock().unlock();
+            lock.unlock();
         }
     }
 
@@ -141,16 +144,16 @@ public class DocumentRegistry {
      * between. Keep the callback short and free of index or queue calls (see the class comment).
      */
     public <T> T exclusively(Supplier<T> work) {
-        lock.writeLock().lock();
+        lock.lock();
         try {
             return work.get();
         } finally {
-            lock.writeLock().unlock();
+            lock.unlock();
         }
     }
 
     public boolean delete(String id) {
-        lock.writeLock().lock();
+        lock.lock();
         try {
             Document previous = documents.remove(id);
             if (previous == null) {
@@ -164,7 +167,7 @@ public class DocumentRegistry {
             }
             return true;
         } finally {
-            lock.writeLock().unlock();
+            lock.unlock();
         }
     }
 
@@ -237,7 +240,7 @@ public class DocumentRegistry {
         }
     }
 
-    /** Must be called under the write lock. */
+    /** Must be called under the lock. */
     private void restore(String id, @Nullable Document previous) {
         if (previous == null) {
             documents.remove(id);
@@ -246,7 +249,7 @@ public class DocumentRegistry {
         }
     }
 
-    /** Must be called under the write lock. */
+    /** Must be called under the lock. */
     private void persist() {
         Path temp = file.resolveSibling(file.getFileName() + TEMP_SUFFIX);
         Path backup = file.resolveSibling(file.getFileName() + BACKUP_SUFFIX);

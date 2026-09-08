@@ -44,9 +44,10 @@ class IngestionConfiguration {
 
     /**
      * The rebuild runs as a command of this queue rather than beside it, so it cannot delete the
-     * result of a document still being ingested (docs/concurrency-plan.md C03).
+     * result of a document still being ingested (docs/concurrency-plan.md C03). No destroy method:
+     * the worker is stopped by the shutdown sequence, before anything it writes to is closed (C08).
      */
-    @Bean(destroyMethod = "close")
+    @Bean
     IngestionQueue ingestionQueue(DocumentIngestionPipeline pipeline, LuceneIndexStore indexStore, DocumentRegistry registry) {
         return new IngestionQueue(pipeline::process, () -> {
             indexStore.rebuild();

@@ -10,6 +10,10 @@ import java.util.function.Supplier;
  * batch embedder swallows exceptions and silently indexes chunks without vectors; the ingestion
  * path runs inside {@link #record(Supplier)} and compares the audit with the number of chunks
  * written (docs/system-plan.md §5.4, INV-09).
+ *
+ * <p>Embabel embeds a document's batches from more than one thread, so the counter is atomic and the
+ * failure list is guarded by its own monitor; the audit is read after the scope ends, but only after
+ * a copy taken under that monitor (docs/concurrency-plan.md C09).
  */
 public final class EmbeddingAudit {
 

@@ -4,13 +4,18 @@ import com.personal.chatbot.utils.EmbeddingModeScope;
 import com.personal.chatbot.utils.EmbeddingPrompts;
 import com.personal.chatbot.utils.VectorMath;
 
+import com.personal.chatbot.support.BlockingTextEmbedder;
 import com.personal.chatbot.support.FakeTextEmbedder;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.within;
 
 class PromptedEmbeddingServiceTest {
@@ -80,5 +85,73 @@ class PromptedEmbeddingServiceTest {
     void emptyInputIsEmptyOutput() {
         assertThat(service(8).embed(List.of())).isEmpty();
         assertThat(backend.batches()).isEmpty();
+    }
+
+    // ---- shutdown (docs/concurrency-plan.md C08) ----------------------------------------------
+
+    /**
+     * The one thing shutdown must not do: close a backend that is still computing. Interrupting the
+     * thread proves nothing — a native call ignores it — so close() has to wait, and give up rather
+     * than close while the call is inside.
+     */
+    @Test
+    void neverClosesTheBackendWhileItIsEmbedding() throws InterruptedException {
+        BlockingTextEmbedder blocking = new BlockingTextEmbedder(4);
+        PromptedEmbeddingService service = new PromptedEmbeddingService(blocking, 8, 2, true, registry);
+        Thread embedding = Thread.ofPlatform().name("embedding").start(() -> service.embed("held open"));
+        blocking.awaitEntered();
+
+        embedding.interrupt();
+        assertThat(service.closeWithin(Duration.ofMillis(200))).isFalse();
+        assertThat(blocking.closed()).isFalse();
+
+        blocking.release();
+        assertThat(embedding.join(Duration.ofSeconds(20))).isTrue();
+        assertThat(blocking.wasInterrupted()).isTrue();
+
+        assertThat(service.closeWithin(Duration.ofSeconds(5))).isTrue();
+        assertThat(blocking.closed()).isTrue();
+        assertThat(blocking.closedWhileRunning()).isFalse();
+    }
+
+    /** A call that was queued behind the last free slot must not reach a backend that is closing. */
+    @Test
+    void aCallWaitingForCapacityDoesNotReachAClosingBackend() throws InterruptedException {
+        BlockingTextEmbedder blocking = new BlockingTextEmbedder(4);
+        PromptedEmbeddingService service = new PromptedEmbeddingService(blocking, 8, 1, true, registry);
+        Thread first = Thread.ofPlatform().start(() -> service.embed("first"));
+        blocking.awaitEntered();
+
+        AtomicReference<Throwable> refused = new AtomicReference<>();
+        Thread second = Thread.ofPlatform().start(() -> {
+            try {
+                service.embed("second");
+            } catch (RuntimeException e) {
+                refused.set(e);
+            }
+        });
+        assertThat(service.closeWithin(Duration.ofMillis(200))).isFalse();
+
+        blocking.release();
+        assertThat(first.join(Duration.ofSeconds(20))).isTrue();
+        assertThat(second.join(Duration.ofSeconds(20))).isTrue();
+        assertThat(refused.get()).isInstanceOf(IllegalStateException.class).hasMessageContaining("closing");
+        assertThat(blocking.batches()).hasSize(1);
+        assertThat(service.closeWithin(Duration.ofSeconds(5))).isTrue();
+        assertThat(blocking.closedWhileRunning()).isFalse();
+    }
+
+    /** A refused call must hand back the capacity it claimed, or the next one waits for a slot forever. */
+    @Test
+    @Timeout(20)
+    void closeIsIdempotentAndRefusesLaterCallsWithoutHoldingCapacity() {
+        PromptedEmbeddingService service = new PromptedEmbeddingService(backend, 8, 1, true, registry);
+        service.close();
+        service.close();
+        for (String text : List.of("too late", "still too late")) {
+            assertThatThrownBy(() -> service.embed(text))
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessageContaining("closing");
+        }
     }
 }

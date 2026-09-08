@@ -1,10 +1,12 @@
 package com.personal.chatbot.controller;
 
+import com.personal.chatbot.exceptions.ServiceStoppingException;
 import com.personal.chatbot.models.agent.ChatCancellation;
 import com.personal.chatbot.models.chat.ChatRequest;
 import com.personal.chatbot.models.chat.ChatResponse;
 import com.personal.chatbot.models.chat.ConversationView;
 import com.personal.chatbot.service.chat.ChatService;
+import com.personal.chatbot.service.lifecycle.ActiveWork;
 import com.personal.chatbot.service.sse.SseConnection;
 import com.personal.chatbot.service.sse.SseConnections;
 import jakarta.validation.Valid;
@@ -30,10 +32,15 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
-/** Chat API (docs/system-plan.md §8, D11): synchronous answers and a server-sent-events variant. */
+/**
+ * Chat API (docs/system-plan.md §8, D11): synchronous answers and a server-sent-events variant.
+ *
+ * <p>The controller owns the threads behind the streaming variant, so it is also the {@link ActiveWork}
+ * that stops them (docs/concurrency-plan.md C08).
+ */
 @RestController
 @RequestMapping("/api")
-public class ChatController implements AutoCloseable {
+public class ChatController implements ActiveWork {
 
     /** How long a streaming request may run in total; stages do not extend it. */
     static final Duration STREAM_TIMEOUT = Duration.ofMinutes(10);
@@ -47,6 +54,7 @@ public class ChatController implements AutoCloseable {
             Thread.ofVirtual().name("chat-heartbeat", 0).factory());
     /** Requests still running, so shutdown ends them instead of waiting for them. */
     private final Set<ChatCancellation> running = ConcurrentHashMap.newKeySet();
+    private volatile boolean stopping;
 
     public ChatController(ChatService chatService, SseConnections connections) {
         this.chatService = chatService;
@@ -110,13 +118,46 @@ public class ChatController implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public String name() {
+        return "chat";
+    }
+
+    /** Refuses new questions and cancels the ones being answered; both are idempotent. */
+    @Override
+    public void stopAccepting() {
+        stopping = true;
         running.forEach(cancellation -> cancellation.cancel("application shutdown"));
-        heartbeats.shutdownNow();
+        heartbeats.shutdown();
+        streamExecutor.shutdown();
+    }
+
+    /**
+     * Waits for the streaming requests, which run on threads of this controller. A synchronous
+     * request runs on a container thread instead: cancelling it above is what lets it end early, and
+     * draining it is the server's own graceful shutdown — hence the second condition, which reports
+     * such a request as still running rather than pretending the work is over.
+     */
+    @Override
+    public boolean awaitQuiet(Duration timeout) {
+        try {
+            return streamExecutor.awaitTermination(timeout.toNanos(), TimeUnit.NANOSECONDS) && running.isEmpty();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** Interrupts the streaming threads; a synchronous request on a container thread is out of reach. */
+    @Override
+    public void interruptActive() {
         streamExecutor.shutdownNow();
+        heartbeats.shutdownNow();
     }
 
     private ChatCancellation start() {
+        if (stopping) {
+            throw new ServiceStoppingException("chat");
+        }
         ChatCancellation cancellation = new ChatCancellation();
         running.add(cancellation);
         return cancellation;

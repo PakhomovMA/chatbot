@@ -29,10 +29,18 @@ import java.util.stream.IntStream;
  * Backend-agnostic {@link KnowledgeEmbeddingService}: applies EmbeddingGemma prefixes for the ambient
  * {@link EmbeddingMode}, batches inputs (longest first, to minimise padding), bounds backend
  * concurrency, L2-normalises the result and records Micrometer timings.
+ *
+ * <p>It also guards the backend's lifetime (docs/concurrency-plan.md C08): every backend call is
+ * registered, {@link #close()} waits for the calls in flight, and no call may start once closing has
+ * begun. An ONNX session closed under a running inference does not throw — it takes the JVM down —
+ * and inference ignores interruption, so waiting is the only way to know it is safe.
  */
 public final class PromptedEmbeddingService implements KnowledgeEmbeddingService {
 
     private static final Logger log = LoggerFactory.getLogger(PromptedEmbeddingService.class);
+
+    /** How long {@link #close()} waits for embeddings in flight before it gives up on the backend. */
+    static final Duration CLOSE_WAIT = Duration.ofSeconds(10);
 
     private final TextEmbedder backend;
     private final int batchSize;
@@ -41,6 +49,12 @@ public final class PromptedEmbeddingService implements KnowledgeEmbeddingService
     private final Map<EmbeddingMode, Timer> timers = new EnumMap<>(EmbeddingMode.class);
     private final Counter textsCounter;
     private volatile Duration warmupDuration;
+
+    /** Guards {@link #inFlight} and {@link #closing}; held only around bookkeeping and the close itself. */
+    private final Object activity = new Object();
+    private int inFlight;
+    private boolean closing;
+    private boolean closed;
 
     public PromptedEmbeddingService(
             TextEmbedder backend,
@@ -96,7 +110,10 @@ public final class PromptedEmbeddingService implements KnowledgeEmbeddingService
     private List<float[]> embedBatch(List<String> batch, EmbeddingMode mode) {
         acquire();
         long started = System.nanoTime();
+        boolean registered = false;
         try {
+            begin();
+            registered = true;
             List<float[]> vectors = backend.embed(batch);
             if (vectors.size() != batch.size()) {
                 throw new IllegalStateException("Backend returned " + vectors.size()
@@ -113,8 +130,34 @@ public final class PromptedEmbeddingService implements KnowledgeEmbeddingService
             }
             return out;
         } finally {
+            // begin() refuses a call that arrives while closing, so the capacity it claimed has to be
+            // given back here rather than by end().
+            if (registered) {
+                end();
+            }
             concurrency.release();
             timers.get(mode).record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
+        }
+    }
+
+    /**
+     * Registers a call about to reach the backend. Claiming capacity first and registering here means
+     * a call that was waiting for capacity while {@link #close()} started never touches the backend.
+     */
+    private void begin() {
+        synchronized (activity) {
+            if (closing) {
+                throw new IllegalStateException("Embedding service is closing; " + backend.modelName()
+                        + " is no longer available");
+            }
+            inFlight++;
+        }
+    }
+
+    private void end() {
+        synchronized (activity) {
+            inFlight--;
+            activity.notifyAll();
         }
     }
 
@@ -164,10 +207,48 @@ public final class PromptedEmbeddingService implements KnowledgeEmbeddingService
 
     @Override
     public void close() {
-        try {
-            backend.close();
-        } catch (Exception e) {
-            log.warn("Error closing embedding backend {}: {}", backend.modelName(), e.toString());
+        closeWithin(CLOSE_WAIT);
+    }
+
+    /**
+     * Closes the backend once nothing is embedding any more. Refuses new calls immediately, then
+     * waits up to {@code timeout} for the ones in flight; if one is still running the backend is
+     * left open — an incomplete stop is a diagnosable state, a native session closed under an active
+     * call is not. Idempotent, and safe to retry once the call has finished.
+     *
+     * @return true if the backend is closed
+     */
+    public boolean closeWithin(Duration timeout) {
+        synchronized (activity) {
+            if (closed) {
+                return true;
+            }
+            closing = true;
+            long deadline = System.nanoTime() + timeout.toNanos();
+            while (inFlight > 0) {
+                long left = deadline - System.nanoTime();
+                if (left <= 0) {
+                    break;
+                }
+                try {
+                    TimeUnit.NANOSECONDS.timedWait(activity, left);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            if (inFlight > 0) {
+                log.error("{} embedding call(s) still running after {}; leaving {} open rather than closing it"
+                        + " while it is in use", inFlight, timeout, backend.modelName());
+                return false;
+            }
+            closed = true;
+            try {
+                backend.close();
+            } catch (Exception e) {
+                log.warn("Error closing embedding backend {}: {}", backend.modelName(), e.toString());
+            }
+            return true;
         }
     }
 }

@@ -19,6 +19,11 @@ import java.util.function.Consumer;
  * by any {@code ToolishRag} tool (vectorSearch, textSearch, broadenChunk, zoomOut), de-duplicated by
  * chunk id, so the evidence used for citation verification is exactly what the model saw (INV-02, INV-03).
  * Also keeps a log of the searches the model issued for diagnostics.
+ *
+ * <p>Embabel may run tool calls of one request on more than one thread, so both collections are
+ * guarded by one monitor: a step and the chunks it contributed are recorded together, and a reader
+ * never sees half of a tool result (docs/concurrency-plan.md C09). The progress callback runs
+ * outside the monitor — it reaches an SSE connection, which must never be fed under a lock.
  */
 public final class EvidenceCollector implements ResultsListener {
 
