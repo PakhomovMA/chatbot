@@ -79,17 +79,12 @@ final class EvalQueryWriter implements AutoCloseable {
     }
 
     /** The model half of {@code decomposeQuestion} (Phase 9d): the parts of a multi-part question. */
-    List<String> split(String question, int max) {
+    List<String> split(String question) {
         SubQuestions parts = generate(instructions.questionDecomposition().contribution(),
                 prompt.buildForDecomposition(question) + "\n\nReply with JSON: {\"questions\": [\"...\"]}",
                 SubQuestions.class);
-        List<String> split = parts.questionsOrEmpty().stream()
-                .filter(part -> part != null && !part.isBlank())
-                .map(String::strip)
-                .limit(max)
-                .toList();
-        // As in production: a single part is the question again, which is the widening branch's job.
-        return split.size() < 2 ? List.of() : split;
+        // Pass raw model output to QuestionDecomposer: only production code should validate and cap it.
+        return parts == null ? List.of() : parts.questionsOrEmpty();
     }
 
     StandaloneQuery resolveConversation(UserQuestion question) {

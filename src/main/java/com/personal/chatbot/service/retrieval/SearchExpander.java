@@ -100,7 +100,7 @@ public class SearchExpander {
                 PassFusion.query(first.query(), extraQueries), first.mode(), topK,
                 passes.stream().mapToInt(RetrievalResult::candidates).sum(), hits,
                 RetrievalService.sufficient(hits, maxVector, settings.sufficientCosine()), maxVector,
-                PassFusion.timings(passes, tookMs), Instant.now(),
+                PassFusion.timings(passes, first.timings().totalMs() + tookMs), Instant.now(),
                 new SearchExpansion(strategy, extraQueries, merged.addedHits(), tookMs));
     }
 

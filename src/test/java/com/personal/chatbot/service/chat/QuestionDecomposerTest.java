@@ -26,6 +26,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Arrays;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -106,7 +107,7 @@ class QuestionDecomposerTest {
     @Test
     void everyPartIsSearchedForAlongsideTheWholeQuestionAndTheHitsAreMerged() {
         splitsInto(new SubQuestions(List.of("  roll back the payments service  ", "", "canary abort rules",
-                "roll back the payments service", "a fourth part beyond the limit")));
+                "roll back the payments service", "CANARY ABORT RULES")));
         UserQuestion question = question("How do I roll back payments and when is the canary aborted?");
 
         Evidence evidence = decomposer(true).decompose(question, context);
@@ -135,6 +136,49 @@ class QuestionDecomposerTest {
             // Unmarked, so the widening branch of Phase 9a may still do its own work on this evidence.
             assertThat(evidence.retrieval().decomposed()).isFalse();
         }
+    }
+
+    @Test
+    void repeatedOrEchoedPartsDoNotDisableSearchExpansion() {
+        UserQuestion question = question("How do I roll back payments and when is the canary aborted?");
+        for (SubQuestions split : List.of(
+                new SubQuestions(List.of("rollback", " ROLLBACK ")),
+                new SubQuestions(List.of(question.question(), "rollback")))) {
+            searched.clear();
+            splitsInto(split);
+            Evidence evidence = decomposer(true).decompose(question, context);
+            assertThat(searched).containsExactly(question.question());
+            assertThat(evidence.retrieval().multiPass()).isFalse();
+        }
+    }
+
+    @Test
+    void invalidAndDuplicatePartsDoNotConsumeTheLimit() {
+        UserQuestion question = question("How do I roll back payments and when is the canary aborted?");
+        splitsInto(new SubQuestions(Arrays.asList(null, "x".repeat(1001), "bad\u0000query",
+                question.question(), "rollback", "ROLLBACK", "canary", "restart", "fourth")));
+
+        Evidence evidence = decomposer(true).decompose(question, context);
+
+        assertThat(searched).containsExactly(question.question(), "rollback", "canary", "restart");
+        assertThat(evidence.retrieval().decomposition().subQuestions()).hasSize(3);
+    }
+
+    @Test
+    void cancellationDuringParallelSearchPreventsQueuedPassesAndFallback() {
+        splitsInto(new SubQuestions(List.of("first part", "second part")));
+        UserQuestion question = question("Who declares an incident? Who writes the postmortem?");
+        doAnswer(call -> {
+            List<RetrievalQuery> queries = call.getArgument(0);
+            kotlin.jvm.functions.Function1<RetrievalQuery, RetrievalResult> transform = call.getArgument(2);
+            transform.invoke(queries.getFirst());
+            question.cancellation().cancel("disconnected");
+            return List.of(transform.invoke(queries.get(1)), transform.invoke(queries.get(2)));
+        }).when(context).parallelMap(any(), anyInt(), any());
+
+        assertThatThrownBy(() -> decomposer(true).decompose(question, context))
+                .isInstanceOf(ChatCancelledException.class);
+        assertThat(searched).containsExactly(question.question());
     }
 
     @Test

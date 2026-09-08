@@ -73,11 +73,15 @@ public record SourceComparison(
             if (kept.size() == maxAspects) {
                 break;
             }
+            if (aspect == null || aspect.aspect() == null || aspect.aspect().isBlank()
+                    || aspect.finding() == null || aspect.finding().isBlank()) {
+                continue;
+            }
             // Nulls are dropped before sorting: a list from the model may hold anything.
             List<Integer> refs = aspect.passagesOrEmpty().stream()
                     .filter(n -> n != null && n >= 1 && n <= passagesShown)
                     .distinct().sorted().toList();
-            if (refs.isEmpty() || aspect.aspect() == null || aspect.finding() == null || aspect.finding().isBlank()) {
+            if (refs.isEmpty()) {
                 continue;
             }
             kept.add(new Aspect(Texts.singleLine(aspect.aspect(), ASPECT_CHARS),

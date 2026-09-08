@@ -137,6 +137,20 @@ class SourceComparatorTest {
                 .isInstanceOf(ChatCancelledException.class);
     }
 
+    @Test
+    void malformedAspectsDoNotDiscardValidComparisonFindings() {
+        compares(new SourceComparison(Arrays.asList(null,
+                new SourceComparison.Aspect(" ", "Missing aspect.", List.of(1), false),
+                new SourceComparison.Aspect("trigger", "The canary rolls back automatically.", List.of(2), false))));
+        Evidence original = evidence("What is the difference?", hit(1, "doc-a"), hit(2, "doc-b"));
+
+        Evidence compared = comparator(true).compare(original, context);
+
+        assertThat(compared.comparison().aspectsOrEmpty()).extracting(SourceComparison.Aspect::aspect)
+                .containsExactly("trigger");
+        assertThat(compared.hits()).isEqualTo(original.hits());
+    }
+
     static RetrievedChunk hit(int rank, String documentId) {
         return hit(rank, documentId, "text of passage " + rank);
     }

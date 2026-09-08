@@ -55,6 +55,7 @@ class SubQuestionSearchTest {
         assertThat(merged.decomposition().subQuestions()).containsExactly("roll back a release", "abort the canary");
         assertThat(merged.decomposition().addedHits()).isEqualTo(2);
         assertThat(merged.decomposition().tookMs()).isGreaterThanOrEqualTo(90);
+        assertThat(merged.timings().totalMs()).isEqualTo(merged.decomposition().tookMs());
         assertThat(merged.query()).isEqualTo("how do I roll back and abort the canary | roll back a release | abort the canary");
         assertThat(merged.candidates()).isEqualTo(36);
         assertThat(merged.decomposed()).isTrue();

@@ -18,6 +18,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
@@ -101,7 +103,7 @@ public class QuestionDecomposer {
         String outcome;
         try {
             result = search.search(question.retrievalQuery(), parts == null ? List.of() : parts, buildMs,
-                    queries -> passes(queries, context));
+                    queries -> passes(queries, question, context));
             outcome = result.decomposed() ? "split" : parts == null ? "failed" : "single";
         } catch (Exception e) {
             // A pass that fails takes the whole split with it: the question is answered from the
@@ -115,6 +117,7 @@ public class QuestionDecomposer {
             result = retriever.search(question.retrievalQuery());
             outcome = "failed";
         }
+        question.abortIfCancelled();
         meterRegistry.counter("chatbot.chat.decomposition", "outcome", outcome).increment();
         return new Evidence(question, result);
     }
@@ -130,9 +133,14 @@ public class QuestionDecomposer {
                     .creating(SubQuestions.class)
                     .fromPrompt(prompt.buildForDecomposition(question.effectiveQuery()));
             question.abortIfCancelled();
+            Set<String> seen = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+            seen.add(question.effectiveQuery().strip());
             List<String> parts = split == null ? List.of() : split.questionsOrEmpty().stream()
                     .filter(part -> part != null && !part.isBlank())
                     .map(String::strip)
+                    // Reject broken output rather than truncating it into a different search intent.
+                    .filter(part -> part.length() <= 1000 && part.codePoints().noneMatch(Character::isISOControl))
+                    .filter(seen::add)
                     .limit(settings.decompose().maxSubQuestions())
                     .toList();
             // One part is the question again, said differently; that is the widening branch's job, not this one.
@@ -158,11 +166,17 @@ public class QuestionDecomposer {
      * platform's asyncer, which carries the agent process onto the worker threads. Each search takes
      * the index read lock and sets its own embedding mode, so nothing here is shared between them.
      */
-    private List<RetrievalResult> passes(List<RetrievalQuery> queries, OperationContext context) {
+    private List<RetrievalResult> passes(List<RetrievalQuery> queries, UserQuestion question, OperationContext context) {
         if (queries.size() == 1) {
+            question.abortIfCancelled();
             return List.of(retriever.search(queries.getFirst()));
         }
         return context.parallelMap(queries, Math.min(queries.size(), settings.decompose().maxConcurrentSearches()),
-                retriever::search);
+                query -> {
+                    question.abortIfCancelled();
+                    RetrievalResult result = retriever.search(query);
+                    question.abortIfCancelled();
+                    return result;
+                });
     }
 }

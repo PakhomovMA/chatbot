@@ -2,6 +2,7 @@ package com.personal.chatbot.controller;
 
 import com.jayway.jsonpath.JsonPath;
 import com.personal.chatbot.models.agent.GroundedAnswerDraft;
+import com.personal.chatbot.models.agent.RewrittenQueries;
 import com.personal.chatbot.models.agent.SourceComparison;
 import com.personal.chatbot.models.agent.SubQuestions;
 import com.personal.chatbot.support.AbstractChatbotIntegrationTest;
@@ -23,8 +24,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.ArrayList;
 
 import static org.awaitility.Awaitility.await;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -61,8 +64,9 @@ class DecomposeAndCompareChatTest extends AbstractChatbotIntegrationTest {
         registry.add("chatbot.data-dir", () -> dataDir.toString());
         registry.add("chatbot.chat.decompose.enabled", () -> "true");
         registry.add("chatbot.chat.compare-sources.enabled", () -> "true");
-        // Keep the widening branch of Phase 9a out of the way: this test is about the other two.
-        registry.add("chatbot.chat.expand-search.strategy", () -> "NONE");
+        // Exercise the interaction with 9a: a valid split prevents widening, an unusable one permits it.
+        registry.add("chatbot.chat.expand-search.strategy", () -> "REWRITE");
+        registry.add("chatbot.retrieval.sufficient-cosine", () -> "0.99");
     }
 
     @Autowired
@@ -109,6 +113,7 @@ class DecomposeAndCompareChatTest extends AbstractChatbotIntegrationTest {
                 .andExpect(jsonPath("$.diagnostics.hits", Matchers.not(Matchers.empty())));
         // The question does not ask how the documents relate, so nothing is compared.
         verify(llmOperations, never()).createObject(any(), any(), eq(SourceComparison.class), any(), any());
+        verify(llmOperations, never()).createObject(any(), any(), eq(RewrittenQueries.class), any(), any());
     }
 
     @Test
@@ -141,6 +146,8 @@ class DecomposeAndCompareChatTest extends AbstractChatbotIntegrationTest {
 
     @Test
     void anOrdinaryQuestionIsRetrievedOnceAndCostsNeitherBranchAModelCall() throws Exception {
+        whenCreateObject(p -> p.contains("Question:"), RewrittenQueries.class)
+                .thenReturn(new RewrittenQueries(List.of()));
         whenCreateObject(p -> p.contains("Evidence passages:"), GroundedAnswerDraft.class)
                 .thenReturn(new GroundedAnswerDraft("Run `systemctl restart payments` [1].", List.of(1), true, null));
 
@@ -151,5 +158,36 @@ class DecomposeAndCompareChatTest extends AbstractChatbotIntegrationTest {
                 .andExpect(jsonPath("$.diagnostics.decomposition").doesNotExist());
         verify(llmOperations, never()).createObject(any(), any(), eq(SubQuestions.class), any(), any());
         verify(llmOperations, never()).createObject(any(), any(), eq(SourceComparison.class), any(), any());
+    }
+
+    @Test
+    void duplicatePartsFallBackToExpansionBeforeTheSourcesAreCompared() throws Exception {
+        String question = "What is the difference between the runbook rollback and the canary rollback?";
+        List<String> stages = new ArrayList<>();
+        whenCreateObject(p -> p.equals("Question: " + question), SubQuestions.class).thenAnswer(_ -> {
+            stages.add("decompose");
+            return new SubQuestions(List.of("rollback", "ROLLBACK"));
+        });
+        whenCreateObject(p -> p.equals("Question: " + question), RewrittenQueries.class).thenAnswer(_ -> {
+            stages.add("expand");
+            return new RewrittenQueries(List.of("rollback payments runbook", "canary rollback deployment guide"));
+        });
+        whenCreateObject(p -> p.contains("Evidence passages:"), SourceComparison.class).thenAnswer(_ -> {
+            stages.add("compare");
+            return new SourceComparison(List.of(new SourceComparison.Aspect("trigger",
+                    "The canary rolls back automatically.", List.of(1, 2), false)));
+        });
+        whenCreateObject(p -> p.contains("How the sources relate"), GroundedAnswerDraft.class).thenAnswer(_ -> {
+            stages.add("draft");
+            return new GroundedAnswerDraft("The canary rolls back automatically [1].", List.of(1), true, null);
+        });
+
+        mockMvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"message\":\"" + question + "\",\"options\":{\"includeDiagnostics\":true}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.diagnostics.decomposition").doesNotExist())
+                .andExpect(jsonPath("$.diagnostics.expansion.strategy").value("REWRITE"))
+                .andExpect(jsonPath("$.citations", Matchers.hasSize(1)));
+        assertThat(stages).containsExactly("decompose", "expand", "compare", "draft");
     }
 }

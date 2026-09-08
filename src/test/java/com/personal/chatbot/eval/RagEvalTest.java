@@ -681,7 +681,7 @@ class RagEvalTest {
             if (decomposed && decomposer.shouldDecompose(question)) {
                 fired++;
                 boolean asked = !splits.containsKey(item.id());
-                List<String> subQuestions = splits.computeIfAbsent(item.id(), _ -> writer.split(item.question(), 3));
+                List<String> subQuestions = splits.computeIfAbsent(item.id(), _ -> writer.split(item.question()));
                 Mockito.doAnswer(_ -> new SubQuestions(subQuestions)).when(splitCall)
                         .fromPrompt(ArgumentMatchers.anyString());
                 Evidence evidence = decomposer.decompose(question, context);
