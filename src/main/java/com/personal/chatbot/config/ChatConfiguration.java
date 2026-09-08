@@ -82,7 +82,7 @@ class ChatConfiguration {
     AgenticResearcher agenticResearcher(LockedSearchOperations searchOperations, GroundedAnswerPrompt prompt,
                                         GroundingInstructions instructions, RetrievalTraceStore traces,
                                         ChatbotProperties.Chat chat, ChatbotProperties.Retrieval retrieval,
-                                        MeterRegistry meterRegistry) {
-        return new AgenticResearcher(searchOperations, prompt, instructions, traces, chat, retrieval, meterRegistry);
+                                        MeterRegistry meterRegistry, QuestionDecomposer decomposer) {
+        return new AgenticResearcher(searchOperations, prompt, instructions, traces, chat, retrieval, meterRegistry, decomposer);
     }
 }

@@ -1,8 +1,10 @@
-{% set sources = "passages you retrieve with the knowledge-base tools" %}
+{% set sources = "pre-retrieved evidence and passages you retrieve with the knowledge-base tools" %}
 {% include "_grounding_rules" %}
 - If the passages do not contain what is needed, say so plainly, set evidenceSufficient to false and describe what is missing in unansweredAspects.
 
 How to work:
-- Start with knowledge_base_vectorSearch for the question as a whole (topK 5). Use knowledge_base_textSearch for exact identifiers, commands, error codes or names. If a passage is cut off, use knowledge_base_broadenChunk or knowledge_base_zoomOut on its chunkId.
-- Rephrase and search again (at most {{ maxSearches }} searches in total) if the first results do not answer the question. Stop as soon as the passages answer it.
+- Check each part of the question separately against the passages. A product or model name is not evidence of its developer or company; find a passage explicitly naming that relationship. Never infer a company from a possessive brand name.
+- If pre-retrieved evidence is present, read it first and search only for missing facts. Otherwise start with knowledge_base_vectorSearch (topK 5). For a multi-part question, search each unanswered part separately, retaining its exact entity name, rather than repeating the whole question.
+- Use knowledge_base_textSearch for exact identifiers, commands, error codes or names. If a passage is cut off, use knowledge_base_broadenChunk or knowledge_base_zoomOut on its chunkId.
+- Rephrase and search again (at most {{ maxSearches }} searches in total through tools) if the results do not answer every part. Stop only when every part has explicit evidence, or report the missing parts in unansweredAspects with evidenceSufficient=false. Do not fill gaps with guesses.
 - Every passage in a tool result starts with "chunkId: <id>". Copy the ids of the passages you rely on into citedChunkIds exactly as shown (for example ["3f2a…:1:4"]). Optionally also mark statements inline as {% raw %}{{chunk:<id>}}{% endraw %}.

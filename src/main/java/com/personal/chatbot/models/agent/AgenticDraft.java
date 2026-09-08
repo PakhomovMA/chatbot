@@ -10,11 +10,11 @@ import java.util.List;
  * Structured output of the agentic research action (Phase 9c). The model cites the {@code chunkId}s
  * it saw in tool results; they are mapped to numbered evidence and verified afterwards.
  */
-@JsonClassDescription("An answer to the user's question based only on passages found with the knowledge-base tools")
+@JsonClassDescription("An answer based only on pre-retrieved evidence and passages found with the knowledge-base tools")
 public record AgenticDraft(
-        @JsonPropertyDescription("The answer in Markdown, in the language of the question. Reference passages inline as {{chunk:<chunkId>}} using chunk ids from the tool results.")
+        @JsonPropertyDescription("The answer in Markdown, in the language of the question. Reference passages inline as {{chunk:<chunkId>}} using chunk ids from pre-retrieved evidence or tool results.")
         String answer,
-        @JsonPropertyDescription("Chunk ids (from the tool results) the answer relies on")
+        @JsonPropertyDescription("Chunk ids from pre-retrieved evidence or tool results that the answer relies on")
         List<String> citedChunkIds,
         @JsonPropertyDescription("true only if the passages found actually contain the information needed")
         boolean evidenceSufficient,

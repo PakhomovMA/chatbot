@@ -61,9 +61,23 @@ public class GroundedAnswerPrompt {
     }
 
     public String buildForAgentic(String question, String effectiveQuery, List<ConversationTurn> history) {
+        return buildForAgentic(question, effectiveQuery, history, List.of());
+    }
+
+    public String buildForAgentic(String question, String effectiveQuery, List<ConversationTurn> history,
+                                 List<RetrievedChunk> seed) {
         String hint = effectiveQuery.equals(question) ? "" :
                 "\nStandalone search query (context hint only, not evidence): " + effectiveQuery;
-        return (renderHistory(history) + hint + "\nQuestion: " + question.strip()
+        StringBuilder passages = new StringBuilder();
+        if (!seed.isEmpty()) {
+            passages.append("\nPre-retrieved evidence from searches for the question and its parts:\n");
+            for (RetrievedChunk hit : seed.subList(0, includedHits(seed))) {
+                passages.append("chunkId: ").append(hit.chunkId()).append("\nDocument: ")
+                        .append(hit.provenance().documentTitle()).append("\n")
+                        .append(hit.text().strip()).append("\n\n");
+            }
+        }
+        return (renderHistory(history) + hint + passages + "\nQuestion: " + question.strip()
                 + "\n\n" + AnswerLanguages.instruction(languageFor(question))).strip();
     }
 

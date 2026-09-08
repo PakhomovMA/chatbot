@@ -62,6 +62,20 @@ class AgenticDraftMapperTest {
     }
 
     @Test
+    void seededEvidenceAndToolResultsShareOneCitationNamespace() {
+        EvidenceCollector seed = collectorWith(chunk("a", "seed"), chunk("b", "second"));
+        EvidenceCollector collector = new EvidenceCollector();
+        collector.addShownChunks(seed.chunks());
+        collector.onResultsEvent(event("follow-up", List.of(hit(chunk("a", "seed"), 0.8),
+                hit(chunk("c", "new tool result"), 0.7))));
+        GroundedAnswerDraft numbered = AgenticDraftMapper.toNumbered(new AgenticDraft(
+                "Seed {{chunk:a}} and follow-up {{chunk:c}}.", List.of("a", "c"), true, null), collector);
+        assertThat(collector.chunks()).extracting(c -> c.chunkId()).containsExactly("a", "b", "c");
+        assertThat(numbered.answer()).isEqualTo("Seed [1] and follow-up [3].");
+        assertThat(numbered.citedEvidence()).containsExactly(1, 3);
+    }
+
+    @Test
     void chunkReferencesBecomeNumberedMarkersAndUnknownOnesAreDropped() {
         EvidenceCollector collector = collectorWith(chunk("doc:1:0", "restart"), chunk("doc:1:1", "rollback"));
         AgenticDraft draft = new AgenticDraft(

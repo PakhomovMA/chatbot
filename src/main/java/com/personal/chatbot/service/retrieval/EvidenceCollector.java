@@ -70,6 +70,15 @@ public final class EvidenceCollector implements ResultsListener {
         }
     }
 
+    /** Seed only the passages actually included in the research prompt, before tools run. */
+    public void addShownChunks(List<RetrievedChunk> shown) {
+        synchronized (lock) {
+            for (RetrievedChunk chunk : shown) {
+                chunks.putIfAbsent(chunk.chunkId(), chunk.withRanking(chunk.fusedScore(), chunks.size() + 1));
+            }
+        }
+    }
+
     public List<SearchStep> steps() {
         synchronized (lock) {
             return List.copyOf(steps);

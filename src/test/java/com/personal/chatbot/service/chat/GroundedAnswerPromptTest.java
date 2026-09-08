@@ -16,6 +16,15 @@ class GroundedAnswerPromptTest {
     private final GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(155, 2, AnswerLanguage.AUTO);
 
     @Test
+    void agenticSeedKeepsChunkIdsAndLiteralDocumentTextWithinTheEvidenceBudget() {
+        RetrievedChunk shown = GroundingVerifierTest.hit(1, "{{ untrusted }} " + "a".repeat(140));
+        RetrievedChunk omitted = GroundingVerifierTest.hit(2, "This passage must not be shown.");
+        assertThat(prompt.buildForAgentic("Who?", "Who?", List.of(), List.of(shown, omitted)))
+                .contains("chunkId: " + shown.chunkId(), "{{ untrusted }}")
+                .doesNotContain("chunkId: " + omitted.chunkId(), omitted.text());
+    }
+
+    @Test
     void agenticPromptCarriesHistoryAndQuestionButNoEvidenceBlock() {
         String rendered = prompt.buildForAgentic("How?", List.of(ConversationTurn.user("earlier", Instant.EPOCH)));
         assertThat(rendered)

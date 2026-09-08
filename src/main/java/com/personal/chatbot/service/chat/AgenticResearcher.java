@@ -12,6 +12,7 @@ import com.personal.chatbot.models.agent.AnswerStreamSink;
 import com.personal.chatbot.models.agent.Evidence;
 import com.personal.chatbot.models.agent.GroundedAnswerDraft;
 import com.personal.chatbot.models.agent.UserQuestion;
+import com.personal.chatbot.models.chat.AnswerLanguage;
 import com.personal.chatbot.models.retrieval.RetrievalMode;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievalTimings;
@@ -20,6 +21,7 @@ import com.personal.chatbot.service.index.LockedSearchOperations;
 import com.personal.chatbot.service.retrieval.EvidenceCollector;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.utils.CosineScores;
+import com.personal.chatbot.utils.CitationMarkers;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.jspecify.annotations.Nullable;
@@ -57,11 +59,12 @@ public class AgenticResearcher {
     private final ChatbotProperties.Chat settings;
     private final ChatbotProperties.Retrieval retrievalSettings;
     private final MeterRegistry meterRegistry;
+    private final QuestionDecomposer decomposer;
 
     public AgenticResearcher(LockedSearchOperations searchOperations, GroundedAnswerPrompt prompt,
                              GroundingInstructions instructions, RetrievalTraceStore traces,
                              ChatbotProperties.Chat settings, ChatbotProperties.Retrieval retrievalSettings,
-                             MeterRegistry meterRegistry) {
+                             MeterRegistry meterRegistry, QuestionDecomposer decomposer) {
         this.searchOperations = searchOperations;
         this.prompt = prompt;
         this.instructions = instructions;
@@ -69,13 +72,20 @@ public class AgenticResearcher {
         this.settings = settings;
         this.retrievalSettings = retrievalSettings;
         this.meterRegistry = meterRegistry;
+        this.decomposer = decomposer;
     }
 
     public AnswerAttempt research(UserQuestion question, OperationContext context) {
-        question.notifyStage(AnswerStages.RESEARCHING);
         long started = System.nanoTime();
+        question.abortIfCancelled();
+        RetrievalResult seed = decomposer.shouldDecompose(question)
+                ? decomposer.decompose(question, context).retrieval() : null;
+        question.notifyStage(AnswerStages.RESEARCHING);
         AnswerStreamSink sink = question.stream();
         EvidenceCollector collector = collectorFor(sink);
+        List<RetrievedChunk> shownSeed = seed == null ? List.of()
+                : seed.hits().subList(0, prompt.includedHits(seed.hits()));
+        collector.addShownChunks(shownSeed);
         ToolishRag rag = new ToolishRag(REFERENCE_NAME, TOOL_DESCRIPTION, searchOperations)
                 .withListener(collector)
                 // Vector floor in Lucene's (1 + cos) / 2 scale; BM25 keeps Embabel's 0.0, where rank is the
@@ -86,6 +96,7 @@ public class AgenticResearcher {
                 .withGoal(GOAL);
         AgenticDraft draft;
         question.abortIfCancelled();
+        long researchStarted = System.nanoTime();
         try {
             // withReference(rag) would register the tools twice (deprecated toolObject() plus tools()) under
             // two different prefixes; register the flat tool list and the prompt contribution explicitly.
@@ -94,34 +105,71 @@ public class AgenticResearcher {
                     .withTools(CancellableTool.wrapAll(rag.tools(), question.cancellation(), question.messageId()))
                     .withPromptContributors(List.of(instructions.agenticResearch(), rag))
                     .creating(AgenticDraft.class)
-                    .fromPrompt(prompt.buildForAgentic(question.question(), question.effectiveQuery(), question.history()));
+                    .fromPrompt(prompt.buildForAgentic(question.question(), question.effectiveQuery(), question.history(), shownSeed));
         } finally {
             Timer.builder("chatbot.llm").tag("operation", "research-agentic").register(meterRegistry)
-                    .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
+                    .record(System.nanoTime() - researchStarted, TimeUnit.NANOSECONDS);
         }
         question.abortIfCancelled();
 
         List<RetrievedChunk> seen = collector.chunks();
-        RetrievalResult trace = traceOf(question, collector, seen, (System.nanoTime() - started) / 1_000_000);
+        RetrievalResult trace = traceOf(question, collector, seen, seed, (System.nanoTime() - started) / 1_000_000);
         traces.record(trace);
         GroundedAnswerDraft numbered = AgenticDraftMapper.toNumbered(draft, collector);
+        int passagesShown = seen.size();
+        if (!seen.isEmpty() && numbered.citedEvidenceOrEmpty().isEmpty()) {
+            // Do not publish an uncited tool-loop answer. Re-read the actual evidence in a bounded,
+            // numbered prompt; the speculative draft is deliberately not part of that prompt.
+            question.notifyStage(AnswerStages.GENERATING);
+            question.abortIfCancelled();
+            long repairStarted = System.nanoTime();
+            try {
+                numbered = context.ai()
+                        .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()))
+                        .withPromptContributor(instructions.groundedAnswer())
+                        .creating(GroundedAnswerDraft.class)
+                        .fromPrompt(prompt.build(question.question(), question.history(), seen));
+            } finally {
+                Timer.builder("chatbot.llm").tag("operation", "repair-agentic-answer").register(meterRegistry)
+                        .record(System.nanoTime() - repairStarted, TimeUnit.NANOSECONDS);
+            }
+            question.abortIfCancelled();
+            passagesShown = prompt.includedHits(seen);
+        }
+        if (numbered.evidenceSufficient() && !hasValidCitation(numbered, passagesShown)) {
+            String missing = prompt.languageFor(question.question()) == AnswerLanguage.RU
+                    ? "Не удалось подтвердить ответ ссылками на найденные фрагменты."
+                    : "The answer could not be supported with citations to the retrieved passages.";
+            numbered = GroundedAnswerDraft.insufficient(missing, missing);
+        }
         if (sink != null) {
             sink.delta(numbered.answer()); // the whole answer at once, with [n] markers like the deterministic stream
         }
-        log.info("Agentic research for [{}]: {} searches, {} distinct chunks, sufficient={}", question.messageId(),
-                collector.steps().size(), seen.size(), draft.evidenceSufficient());
-        // Everything the model saw is evidence, so all of it counts as shown passages.
-        return new AnswerAttempt(new Evidence(question, trace), numbered, seen.size());
+        log.info("Agentic research for [{}]: {} tool searches, {} seed passages, {} distinct chunks, sufficient={}",
+                question.messageId(), collector.steps().size(), shownSeed.size(), seen.size(), numbered.evidenceSufficient());
+        return new AnswerAttempt(new Evidence(question, trace), numbered, passagesShown);
     }
 
-    private RetrievalResult traceOf(UserQuestion question, EvidenceCollector collector, List<RetrievedChunk> seen, long totalMs) {
+    private static boolean hasValidCitation(GroundedAnswerDraft draft, int passagesShown) {
+        var cited = CitationMarkers.collect(draft.answer() == null ? "" : draft.answer());
+        cited.addAll(draft.citedEvidenceOrEmpty());
+        return cited.stream().anyMatch(n -> n >= 1 && n <= passagesShown);
+    }
+
+    private RetrievalResult traceOf(UserQuestion question, EvidenceCollector collector, List<RetrievedChunk> seen,
+                                   @Nullable RetrievalResult seed, long totalMs) {
         String query = collector.steps().stream().map(EvidenceCollector.SearchStep::query)
-                .reduce((a, b) -> a + " | " + b).orElse(question.question());
+                .reduce((a, b) -> a + " | " + b).orElse("");
+        query = seed == null ? (query.isEmpty() ? question.question() : query)
+                : seed.query() + (query.isEmpty() ? "" : " | " + query);
         // Scores come from mixed tools, so sufficiency is decided by the model, not by a cosine floor.
         double maxCosine = seen.isEmpty() ? -1 : 1.0;
+        int seedSearches = seed == null ? 0 : seed.decomposition() == null ? 1
+                : seed.decomposition().subQuestions().size() + 1;
         return new RetrievalResult(UUID.randomUUID().toString(), query, RetrievalMode.HYBRID, seen.size(),
-                collector.steps().size(), seen, !seen.isEmpty(), maxCosine,
-                new RetrievalTimings(0, 0, 0, totalMs), Instant.now());
+                seedSearches + collector.steps().size(), seen, !seen.isEmpty(), maxCosine,
+                new RetrievalTimings(0, 0, 0, totalMs), Instant.now(), null,
+                seed == null ? null : seed.decomposition());
     }
 
     /**

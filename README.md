@@ -145,6 +145,9 @@ passages; the merged search is its own retrieval trace, carrying the parts it us
 to make leaves the plain single search, and search widening then works as before. It ships off because on this
 corpus a single query already returns every part inside the evidence budget — switch it on for a corpus where
 the parts of one question crowd each other out (`docs/eval-log.md`).
+The same switch also applies to AGENTIC: the merged passages that fit the evidence budget seed the research
+prompt, and the model can use tools to fill remaining gaps. Diagnostics retain the decomposition and count
+both the initial retrieval passes and subsequent tool searches.
 
 **Comparing the sources** (`chatbot.chat.compare-sources.enabled`, **off by default**, Phase 9d): when the question asks how things
 relate (“difference”, “versus”, “отличается”) and the passages that fit the prompt budget come from at least
@@ -168,6 +171,10 @@ stream tokens: the stream narrates each tool call as a `status` detail and then 
 14B model time out and retry the loop from scratch) and by `chatbot.chat.agentic-max-searches`. A client that
 disconnects (Stop, closed tab) is noticed at the next heartbeat and the run is abandoned at the next model or
 tool boundary; the model call already in flight runs to completion. Comparison and caveats: `docs/eval-log.md`.
+An answer with retrieved evidence but no citations is regenerated once from a bounded, numbered evidence
+prompt before anything is streamed. If it still claims sufficiency without valid citations, the service reports insufficient
+evidence. Citation verification checks passage references, not semantic entailment: a brand name or API URL
+alone does not establish a developer. See `docs/agentic-decomposition-fix.md` for the multipart regression.
 
 ## Retrieval and diagnostics
 
