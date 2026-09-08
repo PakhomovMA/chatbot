@@ -42,7 +42,7 @@ public final class SseConnection {
         record Comment(String text) implements Item {
         }
 
-        /** No more events; complete the response once everything before it has gone out. */
+        /** Wakes a sender that is waiting, so it notices that the stream was completed. */
         record End() implements Item {
         }
     }
@@ -56,6 +56,7 @@ public final class SseConnection {
     private final Timer sends;
 
     private final AtomicBoolean finished = new AtomicBoolean();
+    private final AtomicBoolean completing = new AtomicBoolean();
     private final AtomicBoolean heartbeatPending = new AtomicBoolean();
     private volatile @Nullable Future<?> sender;
 
@@ -113,9 +114,17 @@ public final class SseConnection {
         }
     }
 
-    /** Ends the stream once everything already queued has been delivered. */
+    /**
+     * Ends the stream once everything already queued has been delivered. Idempotent, and never at the
+     * expense of the events waiting: completion is a flag of its own, not an entry that can fill the
+     * buffer, so a client that is exactly one event behind still gets its final one
+     * (docs/concurrency-plan.md C10). The item is only a nudge for a sender that is idle.
+     */
     public void complete() {
-        offer(new Item.End());
+        if (finished.get() || !completing.compareAndSet(false, true)) {
+            return;
+        }
+        queue.offer(new Item.End());
     }
 
     /**
@@ -159,7 +168,13 @@ public final class SseConnection {
     private void deliverUntilDone() {
         try {
             while (true) {
-                Item item = queue.take();
+                Item item = queue.poll();
+                if (item == null) {
+                    if (completing.get()) {
+                        return; // everything queued has gone out and no more is coming
+                    }
+                    item = queue.take();
+                }
                 if (item instanceof Item.End) {
                     return;
                 }

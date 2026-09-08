@@ -15,6 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,10 +34,13 @@ class SseConnectionTest {
 
         private final List<String> written = new CopyOnWriteArrayList<>();
         private final Semaphore reading = new Semaphore(Integer.MAX_VALUE);
+        /** Writes started, including the one a client that stopped reading is holding up. */
+        private final AtomicInteger started = new AtomicInteger();
         private volatile boolean completed;
 
         @Override
         public void send(SseEventBuilder builder) throws IOException {
+            started.incrementAndGet();
             try {
                 if (!reading.tryAcquire(20, TimeUnit.SECONDS)) {
                     throw new IOException("test client never read");
@@ -125,6 +129,33 @@ class SseConnectionTest {
         // Nothing more is queued for a connection that is gone.
         connection.send("final", null, "late");
         assertThat(abandoned).hasSize(1);
+    }
+
+    /**
+     * C10: ending the stream is not an event that has to fit in the buffer. A client that is exactly
+     * one event behind used to lose the answer it was waiting for, because completing overflowed the
+     * queue and dropped everything in it.
+     */
+    @Test
+    void completingAFullBufferStillDeliversWhatIsInIt() {
+        SlowClient client = new SlowClient();
+        client.stopReading();
+        SseConnection connection = connect(client, 2);
+        // One event is with the sender, two fill the buffer: nothing more fits.
+        connection.send("status", null, "one");
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(client.started).hasValue(1));
+        connection.send("delta", null, "two");
+        connection.send("final", null, "three");
+
+        connection.complete();
+        connection.complete(); // idempotent
+
+        assertThat(abandoned).isEmpty();
+        assertThat(meters.get("test.overflows").counter().count()).isZero();
+        client.readAgain();
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(client.completed).isTrue());
+        assertThat(client.written).hasSize(3);
+        assertThat(client.written.getLast()).contains("three");
     }
 
     @Test

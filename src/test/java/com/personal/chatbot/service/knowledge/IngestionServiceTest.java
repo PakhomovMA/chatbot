@@ -1,6 +1,7 @@
 package com.personal.chatbot.service.knowledge;
 
 import com.personal.chatbot.config.ChatbotProperties;
+import com.personal.chatbot.exceptions.ServiceStoppingException;
 import com.personal.chatbot.models.knowledge.Document;
 import com.personal.chatbot.models.knowledge.DocumentEvent;
 import com.personal.chatbot.models.knowledge.DocumentStatus;
@@ -31,6 +32,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
 /** Phase 3 gate for the pipeline: statuses, failures, deletion, reconciliation and rebuild. */
@@ -43,6 +45,10 @@ class IngestionServiceTest {
     private final PausingDocumentParser parser = new PausingDocumentParser();
     /** Set to make the queued rebuild command fail, as a broken or unreadable index directory would. */
     private final AtomicBoolean rebuildFails = new AtomicBoolean();
+    /** Set to let the worker run the whole rebuild while the request that asked for it marks documents. */
+    private final AtomicBoolean settleWhileMarkingRebuild = new AtomicBoolean();
+    /** What a rebuild did, in the order it happened: one entry per marked document, one per rebuild. */
+    private final List<String> rebuildSteps = new CopyOnWriteArrayList<>();
     private DocumentRegistry registry;
     private BlobStore blobStore;
     private LuceneIndexStore indexStore;
@@ -72,12 +78,14 @@ class IngestionServiceTest {
             if (event instanceof DocumentEvent documentEvent && ingestion != null) {
                 ingestion.on(documentEvent);
             }
+            onRebuildMark(event);
         };
         DocumentStatusUpdater status = new DocumentStatusUpdater(registry, publisher);
         IngestionFailureLog failures = new IngestionFailureLog();
         DocumentIngestionPipeline pipeline = new DocumentIngestionPipeline(registry, blobStore, parser,
                 indexStore, status, failures, Clock.systemUTC(), new SimpleMeterRegistry());
         queue = new IngestionQueue(pipeline::process, () -> {
+            rebuildSteps.add("rebuild");
             if (rebuildFails.get()) {
                 throw new IllegalStateException("simulated rebuild failure");
             }
@@ -106,6 +114,23 @@ class IngestionServiceTest {
     /** Stops the worker the way the application does, so a test never leaves one running. */
     private ShutdownSequence.Result stopIngestion() {
         return new ShutdownSequence(List.of(queue), Duration.ofSeconds(5), Duration.ofSeconds(5)).stop();
+    }
+
+    /**
+     * Watches the marks a rebuild request writes, and lets the first of them wait until the worker has
+     * nothing left to do — the interleaving in which a mark written afterwards would outlive the run
+     * it was meant to start.
+     */
+    private void onRebuildMark(Object event) {
+        if (!(event instanceof DocumentEvent.StatusChanged status)
+                || status.view().status() != DocumentStatus.PENDING_REINDEX
+                || !"index rebuild".equals(status.view().statusMessage())) {
+            return;
+        }
+        rebuildSteps.add("mark");
+        if (settleWhileMarkingRebuild.compareAndSet(true, false)) {
+            awaitIdleQueue();
+        }
     }
 
     private UploadResponse upload(String name, byte[] bytes) {
@@ -201,6 +226,42 @@ class IngestionServiceTest {
         awaitStatus(b, DocumentStatus.READY);
         assertThat(indexStore.documentUris()).containsExactlyInAnyOrder(DocumentParser.uriOf(a), DocumentParser.uriOf(b));
         assertThat(ingestion.queueStatus().pending()).isZero();
+    }
+
+    /**
+     * C10: the statuses a rebuild request writes belong before the request, never after it. With the
+     * marks written afterwards, a rebuild that got through first had its result overwritten by a
+     * {@code PENDING_REINDEX} that no queued run would ever take back.
+     */
+    @Test
+    void aRebuildThatRunsFirstDoesNotLeaveDocumentsMarkedForEver() {
+        String a = upload("a.md", TestDocuments.markdown()).documentId();
+        String b = upload("b.md", "# Other\n\nSome other text about deployments.".getBytes()).documentId();
+        awaitStatus(a, DocumentStatus.READY);
+        awaitStatus(b, DocumentStatus.READY);
+        settleWhileMarkingRebuild.set(true);
+
+        assertThat(ingestion.reindexAll()).isEqualTo(2);
+
+        assertThat(rebuildSteps).as("every document is marked before the rebuild is requested")
+                .containsExactly("mark", "mark", "rebuild");
+        awaitIdleQueue();
+        assertThat(registry.findById(a).orElseThrow().status()).isEqualTo(DocumentStatus.READY);
+        assertThat(registry.findById(b).orElseThrow().status()).isEqualTo(DocumentStatus.READY);
+        assertThat(indexStore.documentUris()).containsExactlyInAnyOrder(DocumentParser.uriOf(a), DocumentParser.uriOf(b));
+    }
+
+    /** A request the stopping queue will not take is refused instead of being reported as queued. */
+    @Test
+    void reindexIsRefusedOnceTheQueueStopsTakingWork() {
+        String id = upload("a.md", TestDocuments.markdown()).documentId();
+        awaitStatus(id, DocumentStatus.READY);
+        stopIngestion();
+
+        assertThatThrownBy(() -> ingestion.reindex(id)).isInstanceOf(ServiceStoppingException.class);
+        assertThatThrownBy(() -> ingestion.reindexAll()).isInstanceOf(ServiceStoppingException.class);
+        // Marked, not indexed: exactly what startup reconciliation queues again.
+        assertThat(registry.findById(id).orElseThrow().status()).isEqualTo(DocumentStatus.PENDING_REINDEX);
     }
 
     @Test

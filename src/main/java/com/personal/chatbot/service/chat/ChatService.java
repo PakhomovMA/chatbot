@@ -105,9 +105,12 @@ public class ChatService {
         // Nobody is waiting: stop before queueing behind whatever else this conversation is doing.
         cancellation.abortIfCancelled(messageId);
         // The lease serialises the requests of this conversation: the next one reads a history that
-        // already contains this exchange instead of a half-written one.
-        try (ConversationStore.Lease conversation = conversations.begin(conversationId)) {
-            return answer(request, sink, cancellation, conversation, messageId, started);
+        // already contains this exchange instead of a half-written one. Waiting for it ends as soon
+        // as this request is cancelled, however long the one ahead still takes.
+        ConversationStore.Lease lease = conversations.begin(conversationId, cancellation::isCancelled)
+                .orElseThrow(() -> new ChatCancelledException(messageId, cancellation.reason()));
+        try (lease) {
+            return answer(request, sink, cancellation, lease, messageId, started);
         }
     }
 

@@ -13,7 +13,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.BooleanSupplier;
 
 /**
  * Short conversation memory (docs/system-plan.md D12): in-memory only, bounded per conversation by
@@ -22,11 +24,15 @@ import java.util.concurrent.locks.ReentrantLock;
  * <p>One monitor guards lookup, append, TTL, eviction and delete together, so nothing can be evicted
  * between a decision and the write that depends on it. A request works through a {@link Lease}: the
  * lease serialises the requests of one conversation (other conversations are unaffected), keeps the
- * conversation it is using from being evicted, and notices a deletion that happened while the
- * request was running, so a late answer cannot bring a deleted conversation back. The monitor is
- * held inside this class's own methods only — never across the work a lease protects.
+ * conversation it is using from being evicted, and notices a deletion that happened at any point
+ * after the request registered, so a late answer cannot bring a deleted conversation back. Waiting
+ * for the turn is given up when the caller is gone. The monitor is held inside this class's own
+ * methods only — never across the work a lease protects.
  */
 public class ConversationStore {
+
+    /** How long a waiting request stays in {@code tryLock} before it looks at its caller again. */
+    private static final Duration WAIT_SLICE = Duration.ofMillis(100);
 
     private final int maxTurns;
     private final int maxConversations;
@@ -129,31 +135,67 @@ public class ConversationStore {
                 return;
             }
             closed = true;
-            synchronized (monitor) {
-                if (--turnstile.holders == 0) {
-                    inFlight.remove(conversationId, turnstile);
-                    applyLimits(clock.instant());
-                }
-            }
+            leave(conversationId, turnstile);
             turnstile.lock.unlock();
         }
+    }
+
+    /** Claims a conversation for a caller that cannot be abandoned; waits for as long as it takes. */
+    public Lease begin(String conversationId) {
+        return begin(conversationId, () -> false)
+                .orElseThrow(() -> new IllegalStateException("Interrupted while waiting for conversation " + conversationId));
     }
 
     /**
      * Claims a conversation for one request, waiting for any request already working on it. Blocks
      * outside the store monitor, so other conversations keep moving.
+     *
+     * <p>The epoch is taken when the request registers, not when it gets its turn: a deletion from
+     * that moment on concerns this request too, and {@link Lease#record} drops its answer. Deleting a
+     * conversation reports the requests in flight as affected, so one of them queueing behind another
+     * must not be the one that writes the history back (docs/concurrency-plan.md C10).
+     *
+     * @param abandoned polled while waiting; the wait is given up once it turns true, as it is on an
+     *                  interrupt, and the empty result means the caller never got the conversation
      */
-    public Lease begin(String conversationId) {
+    public Optional<Lease> begin(String conversationId, BooleanSupplier abandoned) {
         Turnstile turnstile;
+        long epoch;
         synchronized (monitor) {
             evictExpired(clock.instant());
             turnstile = inFlight.computeIfAbsent(conversationId, _ -> new Turnstile());
             turnstile.holders++;
+            epoch = turnstile.epoch;
         }
-        turnstile.lock.lock();
+        if (!acquire(turnstile, abandoned)) {
+            leave(conversationId, turnstile);
+            return Optional.empty();
+        }
+        return Optional.of(new Lease(conversationId, turnstile, epoch));
+    }
+
+    /** Waits for the turnstile in slices, so a caller that is gone stops waiting for one that is not. */
+    private boolean acquire(Turnstile turnstile, BooleanSupplier abandoned) {
+        try {
+            while (!turnstile.lock.tryLock(WAIT_SLICE.toMillis(), TimeUnit.MILLISECONDS)) {
+                if (abandoned.getAsBoolean()) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+    }
+
+    /** Gives up a registration that never became a lease. */
+    private void leave(String conversationId, Turnstile turnstile) {
         synchronized (monitor) {
-            // Read after locking: a deletion while we waited concerns the previous request, not this one.
-            return new Lease(conversationId, turnstile, turnstile.epoch);
+            if (--turnstile.holders == 0) {
+                inFlight.remove(conversationId, turnstile);
+                applyLimits(clock.instant());
+            }
         }
     }
 

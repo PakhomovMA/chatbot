@@ -8,9 +8,12 @@ import com.personal.chatbot.service.knowledge.DocumentRegistry.Change;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -87,6 +90,49 @@ class DocumentRegistryTest {
         assertThat(missing).isEqualTo(new Change.Missing(stored.id()));
         assertThat(registry.count()).isZero();
         assertThat(new DocumentRegistry(dir).findAll()).isEmpty();
+    }
+
+    /**
+     * C10: readers work without the lock, so nothing may be visible to them that the file does not
+     * hold yet. A blob cleanup that believed an unwritten version would delete the original of the
+     * version that is still current.
+     */
+    @Test
+    void publishesAChangeOnlyAfterTheFileHoldsIt(@TempDir Path dir) {
+        Document first = doc("one", Instant.parse("2026-09-07T10:00:00Z"));
+        Document replaced = first.replacedContent("one.md", "text/markdown", 43, "hash-two",
+                Instant.parse("2026-09-07T11:00:00Z"));
+        List<Document> seenWhileWriting = new ArrayList<>();
+        DocumentRegistry registry = new DocumentRegistry(dir) {
+            @Override
+            void persist(List<Document> state) {
+                findById(first.id()).ifPresent(seenWhileWriting::add); // what an unlocked reader sees
+                super.persist(state);
+            }
+        };
+
+        registry.save(first);
+        registry.save(replaced);
+
+        assertThat(seenWhileWriting).as("the second write starts from the state the first one confirmed")
+                .containsExactly(first);
+        assertThat(registry.findById(first.id())).contains(replaced);
+    }
+
+    /** A write that fails takes nothing back, because nothing had been handed out. */
+    @Test
+    void aFailedWriteLeavesTheStoredStateUntouched(@TempDir Path dir) throws Exception {
+        DocumentRegistry registry = new DocumentRegistry(dir);
+        Document stored = registry.save(doc("one", Instant.parse("2026-09-07T10:00:00Z")));
+        Files.createDirectory(dir.resolve(DocumentRegistry.FILE_NAME + ".tmp")); // the temp file cannot be written
+
+        Document replaced = stored.replacedContent("one.md", "text/markdown", 43, "hash-two", Instant.now());
+        assertThatThrownBy(() -> registry.save(replaced)).isInstanceOf(UncheckedIOException.class);
+        assertThatThrownBy(() -> registry.delete(stored.id())).isInstanceOf(UncheckedIOException.class);
+
+        assertThat(registry.findById(stored.id())).contains(stored);
+        assertThat(registry.findAll()).containsExactly(stored);
+        assertThat(Files.readString(dir.resolve(DocumentRegistry.FILE_NAME))).contains("hash-one").doesNotContain("hash-two");
     }
 
     @Test

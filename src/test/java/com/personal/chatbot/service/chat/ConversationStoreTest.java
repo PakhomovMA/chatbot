@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -146,6 +147,95 @@ class ConversationStoreTest {
         assertThat(store.find("c1")).isPresent();
         assertThat(store.find("c1").orElseThrow().messages()).extracting(ConversationTurn::content)
                 .containsExactly("after", "answer again");
+    }
+
+    /**
+     * C10: a request that registered before the deletion is one of the requests the deletion reports
+     * as affected, even if it was still queueing behind another one when it happened.
+     */
+    @Test
+    void aRequestThatWasWaitingWhenTheConversationWasDeletedDoesNotBringItBack() throws Exception {
+        ConversationStore store = new ConversationStore(10, 10, Duration.ofHours(1), clock);
+        exchange(store, "c1", "first", "answer");
+        CountDownLatch waiting = new CountDownLatch(1);
+        AtomicBoolean recorded = new AtomicBoolean(true);
+
+        try (ConversationStore.Lease running = store.begin("c1")) {
+            Thread queued = Thread.ofPlatform().start(() -> {
+                ConversationStore.Lease lease = store.begin("c1", () -> {
+                    waiting.countDown(); // polled only once the turnstile is registered and held by the other request
+                    return false;
+                }).orElseThrow();
+                try (lease) {
+                    recorded.set(lease.record(ConversationTurn.user("late", Instant.now()),
+                            ConversationTurn.assistant("late answer", List.of(), Instant.now())));
+                }
+            });
+            assertThat(waiting.await(20, TimeUnit.SECONDS)).isTrue();
+
+            assertThat(store.delete("c1")).as("the request in flight is reported as invalidated").isTrue();
+            running.close();
+            queued.join(Duration.ofSeconds(20));
+            assertThat(queued.isAlive()).isFalse();
+        }
+
+        assertThat(recorded).isFalse();
+        assertThat(store.find("c1")).isEmpty();
+        assertThat(store.size()).isZero();
+    }
+
+    /** A caller that is gone stops waiting for the request ahead of it, and leaves nothing behind. */
+    @Test
+    void aWaitingRequestGivesUpOnceItsCallerIsGone() throws Exception {
+        ConversationStore store = new ConversationStore(10, 1, Duration.ofMinutes(30), clock);
+        exchange(store, "c1", "q", "a");
+        AtomicBoolean gone = new AtomicBoolean();
+        CountDownLatch polled = new CountDownLatch(1);
+        AtomicReference<Object> claimed = new AtomicReference<>();
+
+        try (ConversationStore.Lease running = store.begin("c1")) {
+            Thread queued = Thread.ofPlatform().start(() -> claimed.set(store.begin("c1", () -> {
+                polled.countDown();
+                return gone.get();
+            })));
+            assertThat(polled.await(20, TimeUnit.SECONDS)).isTrue();
+            gone.set(true);
+
+            queued.join(Duration.ofSeconds(20));
+            assertThat(queued.isAlive()).as("waiting must end with the caller, not with the request ahead").isFalse();
+            assertThat(claimed.get()).isEqualTo(java.util.Optional.empty());
+        }
+
+        // Nothing was left registered: the conversation is evictable again.
+        now.set(now.get().plus(Duration.ofHours(2)));
+        exchange(store, "other", "q", "a");
+        assertThat(store.find("c1")).isEmpty();
+    }
+
+    /** Shutdown interrupts the threads it could not stop; a wait for a turnstile has to answer that. */
+    @Test
+    void anInterruptEndsTheWaitAndKeepsTheFlag() throws Exception {
+        ConversationStore store = new ConversationStore(10, 10, Duration.ofHours(1), clock);
+        AtomicReference<Object> claimed = new AtomicReference<>();
+        AtomicBoolean interruptedAfterwards = new AtomicBoolean();
+        CountDownLatch polled = new CountDownLatch(1);
+
+        try (ConversationStore.Lease running = store.begin("c1")) {
+            Thread queued = Thread.ofPlatform().start(() -> {
+                claimed.set(store.begin("c1", () -> {
+                    polled.countDown();
+                    return false;
+                }));
+                interruptedAfterwards.set(Thread.currentThread().isInterrupted());
+            });
+            assertThat(polled.await(20, TimeUnit.SECONDS)).isTrue();
+            queued.interrupt();
+
+            queued.join(Duration.ofSeconds(20));
+            assertThat(queued.isAlive()).isFalse();
+            assertThat(claimed.get()).isEqualTo(java.util.Optional.empty());
+            assertThat(interruptedAfterwards).isTrue();
+        }
     }
 
     private static void awaitLatch(CountDownLatch latch) {

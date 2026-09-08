@@ -15,8 +15,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -31,6 +33,10 @@ import java.util.stream.Collectors;
  * Every mutation is persisted before it returns, with an atomic replace (write temp file, keep the
  * previous file as {@code .bak}, move temp into place). On load a corrupt main file falls back to
  * the backup; if both are unreadable startup fails rather than silently starting empty.
+ *
+ * <p>The file is written first and the map published afterwards, so a reader never sees a change
+ * that the disk does not hold: a write that fails takes nothing back, because nothing was handed out
+ * (docs/concurrency-plan.md C10).
  *
  * <p>Every change goes through one lock, and so do the compound operations built on top of it:
  * {@link #update} for conditional single-entry changes and {@link #exclusively} for a caller that has
@@ -96,17 +102,12 @@ public class DocumentRegistry {
         load();
     }
 
-    /** Stores {@code document} unconditionally; the in-memory map only changes if the file was written. */
+    /** Stores {@code document} unconditionally; readers see it only once the file holds it. */
     public Document save(Document document) {
         lock.lock();
         try {
-            Document previous = documents.put(document.id(), document);
-            try {
-                persist();
-            } catch (RuntimeException e) {
-                restore(document.id(), previous);
-                throw e;
-            }
+            persist(stateWith(document));
+            documents.put(document.id(), document);
             return document;
         } finally {
             lock.unlock();
@@ -155,16 +156,11 @@ public class DocumentRegistry {
     public boolean delete(String id) {
         lock.lock();
         try {
-            Document previous = documents.remove(id);
-            if (previous == null) {
+            if (!documents.containsKey(id)) {
                 return false;
             }
-            try {
-                persist();
-            } catch (RuntimeException e) {
-                restore(id, previous);
-                throw e;
-            }
+            persist(stateWithout(id));
+            documents.remove(id);
             return true;
         } finally {
             lock.unlock();
@@ -181,9 +177,7 @@ public class DocumentRegistry {
 
     /** All documents, newest upload first. */
     public List<Document> findAll() {
-        return documents.values().stream()
-                .sorted(Comparator.comparing(Document::uploadedAt).reversed().thenComparing(Document::id))
-                .toList();
+        return newestFirst(documents.values());
     }
 
     public long count() {
@@ -217,7 +211,7 @@ public class DocumentRegistry {
             try {
                 loadFrom(backup);
                 log.warn("Loaded registry from backup {} ({} documents)", backup, documents.size());
-                persist();
+                persist(findAll());
             } catch (RuntimeException e) {
                 throw new RegistryCorruptedException("Registry backup " + backup + " is corrupt too", e);
             }
@@ -240,21 +234,39 @@ public class DocumentRegistry {
         }
     }
 
-    /** Must be called under the lock. */
-    private void restore(String id, @Nullable Document previous) {
-        if (previous == null) {
-            documents.remove(id);
-        } else {
-            documents.put(id, previous);
-        }
+    /** The stored documents with {@code document} added or replacing its predecessor. Under the lock. */
+    private List<Document> stateWith(Document document) {
+        Map<String, Document> next = new HashMap<>(documents);
+        next.put(document.id(), document);
+        return newestFirst(next.values());
     }
 
-    /** Must be called under the lock. */
-    private void persist() {
+    /** The stored documents without {@code id}. Under the lock. */
+    private List<Document> stateWithout(String id) {
+        Map<String, Document> next = new HashMap<>(documents);
+        next.remove(id);
+        return newestFirst(next.values());
+    }
+
+    private static List<Document> newestFirst(Collection<Document> documents) {
+        return documents.stream()
+                .sorted(Comparator.comparing(Document::uploadedAt).reversed().thenComparing(Document::id))
+                .toList();
+    }
+
+    /**
+     * Writes {@code state} to disk. Must be called under the lock, and before the in-memory map is
+     * changed to match: readers work without the lock, so anything they can see has to be on disk
+     * already — a blob cleanup that acted on a version a failed write then took back would delete
+     * the original of the version that is still current (docs/concurrency-plan.md C10).
+     *
+     * <p>Package-private, not private, so a test can watch what readers see mid-write.
+     */
+    void persist(List<Document> state) {
         Path temp = file.resolveSibling(file.getFileName() + TEMP_SUFFIX);
         Path backup = file.resolveSibling(file.getFileName() + BACKUP_SUFFIX);
         try {
-            String json = mapper.writeValueAsString(new RegistryFile(SCHEMA_VERSION, findAll()));
+            String json = mapper.writeValueAsString(new RegistryFile(SCHEMA_VERSION, state));
             Files.writeString(temp, json);
             if (Files.exists(file)) {
                 Files.move(file, backup, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);

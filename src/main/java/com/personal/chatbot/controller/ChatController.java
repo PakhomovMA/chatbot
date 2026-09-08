@@ -10,6 +10,7 @@ import com.personal.chatbot.service.lifecycle.ActiveWork;
 import com.personal.chatbot.service.sse.SseConnection;
 import com.personal.chatbot.service.sse.SseConnections;
 import jakarta.validation.Valid;
+import org.jspecify.annotations.Nullable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -28,6 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -87,23 +89,32 @@ public class ChatController implements ActiveWork {
     public SseEmitter chatStream(@Valid @RequestBody ChatRequest request) {
         ChatCancellation cancellation = start();
         SseConnection connection = connections.open("chat", STREAM_TIMEOUT, cancellation::cancel);
-        long interval = HEARTBEAT_INTERVAL.toMillis();
-        ScheduledFuture<?> heartbeat = heartbeats.scheduleAtFixedRate(connection::heartbeat, interval, interval,
-                TimeUnit.MILLISECONDS);
-        Future<?> work = streamExecutor.submit(() -> {
-            try {
-                chatService.stream(request, event -> connection.send(event.type(), null, event), cancellation);
-            } finally {
-                release(cancellation, heartbeat, connection);
-            }
-        });
-        // A request cancelled before its turn on the executor never runs, so nothing else would clean up.
-        cancellation.onCancel(() -> {
-            if (work.cancel(false)) {
-                release(cancellation, heartbeat, connection);
-            }
-        });
-        return connection.emitter();
+        ScheduledFuture<?> heartbeat = null;
+        try {
+            long interval = HEARTBEAT_INTERVAL.toMillis();
+            ScheduledFuture<?> scheduled = heartbeats.scheduleAtFixedRate(connection::heartbeat, interval, interval,
+                    TimeUnit.MILLISECONDS);
+            heartbeat = scheduled;
+            Future<?> work = streamExecutor.submit(() -> {
+                try {
+                    chatService.stream(request, event -> connection.send(event.type(), null, event), cancellation);
+                } finally {
+                    release(cancellation, scheduled, connection);
+                }
+            });
+            // A request cancelled before its turn on the executor never runs, so nothing else would clean up.
+            cancellation.onCancel(() -> {
+                if (work.cancel(false)) {
+                    release(cancellation, scheduled, connection);
+                }
+            });
+            return connection.emitter();
+        } catch (RuntimeException e) {
+            // Shutdown between the check above and here: whatever was created is given back, so the
+            // request is not left counted as running (docs/concurrency-plan.md C10).
+            release(cancellation, heartbeat, connection);
+            throw e instanceof RejectedExecutionException ? new ServiceStoppingException("chat") : e;
+        }
     }
 
     @GetMapping("/conversations/{id}")
@@ -163,9 +174,14 @@ public class ChatController implements ActiveWork {
         return cancellation;
     }
 
-    /** Idempotent: whichever of the two paths gets here first releases everything the request held. */
-    private void release(ChatCancellation cancellation, ScheduledFuture<?> heartbeat, SseConnection connection) {
-        heartbeat.cancel(false);
+    /**
+     * Idempotent: whichever path gets here first releases everything the request held. The heartbeat
+     * is null when the request failed before one was scheduled.
+     */
+    private void release(ChatCancellation cancellation, @Nullable ScheduledFuture<?> heartbeat, SseConnection connection) {
+        if (heartbeat != null) {
+            heartbeat.cancel(false);
+        }
         running.remove(cancellation);
         connection.complete();
     }
