@@ -35,7 +35,7 @@ class ApiExceptionHandler extends ResponseEntityExceptionHandler {
         HttpStatus status = switch (e.reason()) {
             case EMPTY, BAD_FILENAME -> HttpStatus.BAD_REQUEST;
             case UNSUPPORTED_TYPE -> HttpStatus.UNSUPPORTED_MEDIA_TYPE;
-            case TOO_LARGE -> HttpStatus.PAYLOAD_TOO_LARGE;
+            case TOO_LARGE -> HttpStatus.CONTENT_TOO_LARGE;
         };
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(status, e.getMessage());
         problem.setTitle("Upload rejected");

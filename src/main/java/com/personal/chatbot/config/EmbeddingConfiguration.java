@@ -6,7 +6,6 @@ import com.personal.chatbot.service.embedding.PromptedEmbeddingService;
 import com.personal.chatbot.service.embedding.TextEmbedder;
 
 import com.embabel.common.ai.model.EmbeddingService;
-import com.personal.chatbot.config.ChatbotProperties;
 import com.personal.chatbot.service.embedding.ollama.OllamaTextEmbedder;
 import com.personal.chatbot.service.embedding.onnx.OnnxModelFiles;
 import com.personal.chatbot.service.embedding.onnx.OnnxTextEmbedder;

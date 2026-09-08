@@ -37,7 +37,7 @@ public class GroundingVerifier {
         SortedSet<Integer> cited = CitationMarkers.collect(answer);
         cited.addAll(draft.citedEvidenceOrEmpty());
         List<Integer> phantoms = cited.stream().filter(n -> n < 1 || n > valid).toList();
-        cited.removeAll(phantoms);
+        phantoms.forEach(cited::remove);
         String cleaned = CitationMarkers.remove(answer, phantoms);
 
         List<Citation> citations = new ArrayList<>();

@@ -1,5 +1,6 @@
 package com.personal.chatbot.config;
 
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -27,7 +28,7 @@ class DataDirectoryInitializer implements ApplicationRunner {
     }
 
     @Override
-    public void run(ApplicationArguments args) {
+    public void run(@NonNull ApplicationArguments args) {
         Path dataDir = properties.dataDir().toAbsolutePath().normalize();
         try {
             Files.createDirectories(dataDir);

@@ -1,6 +1,7 @@
 package com.personal.chatbot.config;
 
 import com.personal.chatbot.service.knowledge.IngestionService;
+import org.jspecify.annotations.NonNull;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.core.annotation.Order;
@@ -18,7 +19,7 @@ class IngestionStartup implements ApplicationRunner {
     }
 
     @Override
-    public void run(ApplicationArguments args) {
+    public void run(@NonNull ApplicationArguments args) {
         ingestionService.reconcile();
     }
 }

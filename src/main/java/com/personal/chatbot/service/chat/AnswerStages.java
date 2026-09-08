@@ -4,7 +4,6 @@ package com.personal.chatbot.service.chat;
 public final class AnswerStages {
 
     public static final String REWRITING = "rewriting";
-
     public static final String DECOMPOSING = "decomposing";
     public static final String RETRIEVING = "retrieving";
     public static final String EXPANDING = "expanding";

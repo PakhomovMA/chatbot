@@ -4,6 +4,7 @@ import com.embabel.common.ai.model.EmbeddingService;
 import com.embabel.common.ai.model.ModelType;
 import com.embabel.common.ai.model.PricingModel;
 import com.personal.chatbot.utils.EmbeddingAudit;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
@@ -22,12 +23,12 @@ public final class EmbabelEmbeddingServiceAdapter implements EmbeddingService {
     }
 
     @Override
-    public float[] embed(String text) {
+    public float[] embed(@NonNull String text) {
         return delegate.embed(text);
     }
 
     @Override
-    public List<float[]> embed(List<String> texts) {
+    public @NonNull List<float[]> embed(@NonNull List<String> texts) {
         try {
             List<float[]> vectors = delegate.embed(texts);
             EmbeddingAudit.vectorsProduced(vectors.size());
@@ -44,17 +45,17 @@ public final class EmbabelEmbeddingServiceAdapter implements EmbeddingService {
     }
 
     @Override
-    public String getName() {
+    public @NonNull String getName() {
         return delegate.modelName();
     }
 
     @Override
-    public String getProvider() {
+    public @NonNull String getProvider() {
         return delegate.provider();
     }
 
     @Override
-    public ModelType getType() {
+    public @NonNull ModelType getType() {
         return ModelType.EMBEDDING;
     }
 
