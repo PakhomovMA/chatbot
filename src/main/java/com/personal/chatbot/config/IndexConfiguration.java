@@ -5,6 +5,7 @@ import com.personal.chatbot.models.index.IndexManifest;
 import com.personal.chatbot.service.embedding.KnowledgeEmbeddingService;
 import com.personal.chatbot.service.index.LockedSearchOperations;
 import com.personal.chatbot.service.index.LuceneIndexStore;
+import com.personal.chatbot.service.index.SectionCatalog;
 import com.personal.chatbot.service.parsing.DocumentParser;
 import com.personal.chatbot.service.parsing.ProvenanceChunkTransformer;
 import org.springframework.context.annotation.Bean;
@@ -49,5 +50,14 @@ class IndexConfiguration {
     @Bean
     LockedSearchOperations knowledgeSearchOperations(LuceneIndexStore indexStore) {
         return indexStore.searchOperations();
+    }
+
+    /**
+     * The table of contents behind the agentic section tools: derived from the provenance metadata of
+     * the indexed chunks, so it always describes what can actually be searched (INV-02).
+     */
+    @Bean
+    SectionCatalog sectionCatalog(LuceneIndexStore indexStore) {
+        return new SectionCatalog(indexStore);
     }
 }

@@ -19,6 +19,11 @@ public final class ChatSettings {
             new ChatbotProperties.Decompose(false, 3, 4);
     public static final ChatbotProperties.CompareSources NO_COMPARISON =
             new ChatbotProperties.CompareSources(false, 2, 4);
+    /** Section tools are on in production and cost no model call, so tests get them too. */
+    public static final ChatbotProperties.SectionTools SECTION_TOOLS =
+            new ChatbotProperties.SectionTools(true, 6000);
+    public static final ChatbotProperties.SectionTools NO_SECTION_TOOLS =
+            new ChatbotProperties.SectionTools(false, 6000);
 
     private ChatSettings() {
     }
@@ -30,7 +35,14 @@ public final class ChatSettings {
     public static ChatbotProperties.Chat of(ChatbotProperties.ExpandSearch expandSearch,
                                             ChatbotProperties.Decompose decompose,
                                             ChatbotProperties.CompareSources compareSources) {
+        return of(expandSearch, decompose, compareSources, SECTION_TOOLS);
+    }
+
+    public static ChatbotProperties.Chat of(ChatbotProperties.ExpandSearch expandSearch,
+                                            ChatbotProperties.Decompose decompose,
+                                            ChatbotProperties.CompareSources compareSources,
+                                            ChatbotProperties.SectionTools sectionTools) {
         return new ChatbotProperties.Chat(AnswerMode.DETERMINISTIC, AnswerLanguage.AUTO, 4, 0.2, 0.1, 6000, 600, 10,
-                1000, Duration.ofHours(24), expandSearch, decompose, compareSources);
+                1000, Duration.ofHours(24), expandSearch, decompose, compareSources, sectionTools);
     }
 }

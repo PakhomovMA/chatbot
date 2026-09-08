@@ -149,6 +149,7 @@ public record ChatbotProperties(
      * @param historyTurns       turns of conversation history kept and shown to the model
      * @param maxConversations   conversations kept in memory before the least recently used is dropped
      * @param conversationTtl    idle time after which a conversation is forgotten
+     * @param sectionTools       table-of-contents tools offered to the model in agentic mode (Phase 9c follow-up)
      */
     public record Chat(
             @DefaultValue("DETERMINISTIC") AnswerMode mode,
@@ -163,7 +164,8 @@ public record ChatbotProperties(
             @DefaultValue("24h") Duration conversationTtl,
             @Valid @DefaultValue ExpandSearch expandSearch,
             @Valid @DefaultValue Decompose decompose,
-            @Valid @DefaultValue CompareSources compareSources
+            @Valid @DefaultValue CompareSources compareSources,
+            @Valid @DefaultValue SectionTools sectionTools
     ) {
     }
 
@@ -227,6 +229,26 @@ public record ChatbotProperties(
             @DefaultValue("false") boolean enabled,
             @Min(2) @DefaultValue("2") int minDocuments,
             @Min(1) @DefaultValue("4") int maxAspects
+    ) {
+    }
+
+    /**
+     * The section tools of the agentic branch (docs/system-plan.md Phase 9c follow-up). With these the
+     * model can ask what the knowledge base holds and read a section whole, instead of only seeing the
+     * chunks a search happened to rank: Embabel builds {@code listSections} and {@code readSection} for
+     * any store view that implements its {@code SectionReader}.
+     *
+     * <p>On by default, because they cost nothing unless the model calls them — unlike the branches
+     * above, they add no model call of their own. Switch off to hand the model exactly the four search
+     * tools of Phase 9c, which is also how to measure whether a small local model chooses better with
+     * six tools or with four.
+     *
+     * @param readCharBudget characters of a section the model may read at once; Embabel would otherwise
+     *                       allow 25000, four times the evidence budget and enough to stall a local model
+     */
+    public record SectionTools(
+            @DefaultValue("true") boolean enabled,
+            @Min(500) @DefaultValue("6000") int readCharBudget
     ) {
     }
 

@@ -208,6 +208,27 @@ public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, Auto
     }
 
     /**
+     * Every chunk in the index, under the same guard as {@link #search}: the section tools read the
+     * whole index rather than the results of a query. {@link #allChunks()} skips the state check and
+     * the search monitor, so it stays what its javadoc says it is — a test and diagnostics hook.
+     */
+    public List<Chunk> indexedChunks() {
+        lock.readLock().lock();
+        try {
+            LuceneSearchOperations ops = operations;
+            if (ops == null || !state.isWritable()) {
+                throw new IndexUnavailableException(state, "Index is " + state
+                        + (incompatibilityReason != null ? ": " + incompatibilityReason : ""));
+            }
+            synchronized (searchMonitor) {
+                return ops.findAll();
+            }
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    /**
      * Runs a read against the store. Searches are serialised because the Embabel store reopens its
      * reader on every query; writers are excluded by the read lock.
      */

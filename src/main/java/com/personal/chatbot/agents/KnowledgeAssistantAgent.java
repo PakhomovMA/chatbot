@@ -205,7 +205,7 @@ public class KnowledgeAssistantAgent {
     public GroundedAnswer verifyGrounding(AnswerAttempt attempt) {
         Evidence evidence = attempt.evidence();
         evidence.question().notifyStage(AnswerStages.VERIFYING);
-        GroundedAnswer answer = verifier.verify(evidence, attempt.draft(), attempt.passagesShown());
+        GroundedAnswer answer = verifier.verify(evidence, attempt.draft(), attempt.passagesShown(), attempt.corpusOverview());
         log.debug("Answer for [{}]: {} with {} citations", evidence.question().messageId(), answer.grounding(), answer.citations().size());
         return answer;
     }

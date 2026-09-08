@@ -93,6 +93,14 @@ chatbot:
       enabled: false
       min-documents: 2
       max-aspects: 4
+    section-tools:
+      # Table-of-contents tools for the agentic branch (Phase 9c follow-up): listSections shows the
+      # documents and their sections, readSection reads one section whole and in order, so a table or
+      # a list of steps arrives complete instead of as the chunks a search ranked. Embabel builds them
+      # from its SectionReader interface; they add no model call, only two more tools to choose from.
+      # Off gives the model exactly the four search tools of Phase 9c.
+      enabled: true
+      read-char-budget: 6000             # a section read at once; Embabel's own default is 25000
   sse:
     # Events a server-sent-events connection may fall behind by before it is dropped and the work
     # behind it cancelled; each connection is written by a sender of its own, so a slow reader

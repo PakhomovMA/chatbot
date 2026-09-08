@@ -1,6 +1,7 @@
 package com.personal.chatbot.service.chat;
 
 import com.embabel.agent.api.common.OperationContext;
+import com.embabel.agent.filter.PropertyFilter;
 import com.embabel.agent.rag.tools.SearchDefaults;
 import com.embabel.agent.rag.tools.ToolishRag;
 import com.embabel.common.ai.model.LlmOptions;
@@ -18,6 +19,9 @@ import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievalTimings;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.service.index.LockedSearchOperations;
+import com.personal.chatbot.service.index.ScopedSearchOperations;
+import com.personal.chatbot.service.index.SectionCatalog;
+import com.personal.chatbot.service.parsing.ProvenanceChunkTransformer;
 import com.personal.chatbot.service.retrieval.EvidenceCollector;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.utils.CosineScores;
@@ -30,6 +34,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -60,11 +65,12 @@ public class AgenticResearcher {
     private final ChatbotProperties.Retrieval retrievalSettings;
     private final MeterRegistry meterRegistry;
     private final QuestionDecomposer decomposer;
+    private final SectionCatalog catalog;
 
     public AgenticResearcher(LockedSearchOperations searchOperations, GroundedAnswerPrompt prompt,
                              GroundingInstructions instructions, RetrievalTraceStore traces,
                              ChatbotProperties.Chat settings, ChatbotProperties.Retrieval retrievalSettings,
-                             MeterRegistry meterRegistry, QuestionDecomposer decomposer) {
+                             MeterRegistry meterRegistry, QuestionDecomposer decomposer, SectionCatalog catalog) {
         this.searchOperations = searchOperations;
         this.prompt = prompt;
         this.instructions = instructions;
@@ -73,6 +79,7 @@ public class AgenticResearcher {
         this.retrievalSettings = retrievalSettings;
         this.meterRegistry = meterRegistry;
         this.decomposer = decomposer;
+        this.catalog = catalog;
     }
 
     public AnswerAttempt research(UserQuestion question, OperationContext context) {
@@ -86,14 +93,29 @@ public class AgenticResearcher {
         List<RetrievedChunk> shownSeed = seed == null ? List.of()
                 : seed.hits().subList(0, prompt.includedHits(seed.hits()));
         collector.addShownChunks(shownSeed);
-        ToolishRag rag = new ToolishRag(REFERENCE_NAME, TOOL_DESCRIPTION, searchOperations)
+        Set<String> scope = question.documentIds() == null || question.documentIds().isEmpty()
+                ? null : question.documentIds();
+        // The section tools hang off this per-request view rather than off the store's own, so switching
+        // them off hands ToolishRag the plain view and it builds exactly the four search tools of Phase 9c.
+        ScopedSearchOperations scoped = settings.sectionTools().enabled()
+                ? new ScopedSearchOperations(searchOperations, catalog, scope) : null;
+        ToolishRag rag = new ToolishRag(REFERENCE_NAME, TOOL_DESCRIPTION, scoped != null ? scoped : searchOperations)
                 .withListener(collector)
                 // Vector floor in Lucene's (1 + cos) / 2 scale; BM25 keeps Embabel's 0.0, where rank is the
                 // only meaningful cutoff. Neighbour expansion is the same corpus decision as in the
                 // deterministic branch, so both read chatbot.retrieval.expand-neighbours.
                 .withSearchDefaults(new SearchDefaults(CosineScores.toLuceneScore(settings.agenticMinCosine()),
                         SearchDefaults.DEFAULT_TEXT_SIMILARITY_THRESHOLD, retrievalSettings.expandNeighbours()))
+                // Embabel would let one readSection return 25000 characters, four times the evidence budget.
+                .withMaxReadSectionChars(settings.sectionTools().readCharBudget())
                 .withGoal(GOAL);
+        if (scope != null) {
+            // The document filter of the request, which until now only the deterministic branch honoured.
+            // Embabel applies it underneath the search tools, where the model can neither see nor lift it;
+            // the section tools are filtered by ScopedSearchOperations instead, because Embabel builds
+            // those — and the expansion tools — without a filter.
+            rag = rag.withMetadataFilter(new PropertyFilter.In(ProvenanceChunkTransformer.DOCUMENT_ID, List.copyOf(scope)));
+        }
         AgenticDraft draft;
         question.abortIfCancelled();
         long researchStarted = System.nanoTime();
@@ -136,7 +158,12 @@ public class AgenticResearcher {
             question.abortIfCancelled();
             passagesShown = prompt.includedHits(seen);
         }
-        if (numbered.evidenceSufficient() && !hasValidCitation(numbered, passagesShown)) {
+        // An answer about the knowledge base itself rests on the table of contents, not on passages, so
+        // it has nothing to cite. It is published only when the model did nothing but read that catalogue:
+        // having searched and found nothing is still no licence to answer (INV-03).
+        boolean corpusOverview = seen.isEmpty() && scoped != null && scoped.onlyBrowsedCatalogue()
+                && numbered.evidenceSufficient() && numbered.answer() != null && !numbered.answer().isBlank();
+        if (!corpusOverview && numbered.evidenceSufficient() && !hasValidCitation(numbered, passagesShown)) {
             String missing = prompt.languageFor(question.question()) == AnswerLanguage.RU
                     ? "Не удалось подтвердить ответ ссылками на найденные фрагменты."
                     : "The answer could not be supported with citations to the retrieved passages.";
@@ -145,9 +172,10 @@ public class AgenticResearcher {
         if (sink != null) {
             sink.delta(numbered.answer()); // the whole answer at once, with [n] markers like the deterministic stream
         }
-        log.info("Agentic research for [{}]: {} tool searches, {} seed passages, {} distinct chunks, sufficient={}",
-                question.messageId(), collector.steps().size(), shownSeed.size(), seen.size(), numbered.evidenceSufficient());
-        return new AnswerAttempt(new Evidence(question, trace), numbered, passagesShown);
+        log.info("Agentic research for [{}]: {} tool searches, {} seed passages, {} distinct chunks, tools={}, sufficient={}",
+                question.messageId(), collector.steps().size(), shownSeed.size(), seen.size(),
+                scoped != null ? scoped.toolsUsed() : "search only", numbered.evidenceSufficient());
+        return new AnswerAttempt(new Evidence(question, trace), numbered, passagesShown, corpusOverview);
     }
 
     private static boolean hasValidCitation(GroundedAnswerDraft draft, int passagesShown) {

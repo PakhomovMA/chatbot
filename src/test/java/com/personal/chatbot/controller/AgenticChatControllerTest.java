@@ -121,7 +121,8 @@ class AgenticChatControllerTest extends AbstractChatbotIntegrationTest {
         verify(llmOperations).createObject(any(), captor.capture(), eq(AgenticDraft.class), any(), any());
         assertThat(captor.getValue().getTools()).extracting(t -> t.getDefinition().getName())
                 .containsExactlyInAnyOrder("knowledge_base_vectorSearch", "knowledge_base_textSearch",
-                        "knowledge_base_broadenChunk", "knowledge_base_zoomOut");
+                        "knowledge_base_broadenChunk", "knowledge_base_zoomOut",
+                        "knowledge_base_listSections", "knowledge_base_readSection");
     }
 
     @Test

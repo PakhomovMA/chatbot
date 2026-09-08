@@ -30,6 +30,14 @@ public class GroundingVerifier {
      * @param passagesShown how many evidence hits were actually in the prompt (see {@link GroundedAnswerPrompt#includedHits})
      */
     public GroundedAnswer verify(Evidence evidence, GroundedAnswerDraft draft, int passagesShown) {
+        return verify(evidence, draft, passagesShown, false);
+    }
+
+    /**
+     * @param corpusOverview the answer is about the knowledge base itself and was read from its table of
+     *                       contents, so it has no passages to cite and is not held to that requirement
+     */
+    public GroundedAnswer verify(Evidence evidence, GroundedAnswerDraft draft, int passagesShown, boolean corpusOverview) {
         List<RetrievedChunk> hits = evidence.hits();
         int valid = Math.min(passagesShown, hits.size());
         String answer = draft.answer() != null ? draft.answer().strip() : "";
@@ -49,7 +57,11 @@ public class GroundingVerifier {
         }
 
         Grounding grounding;
-        if (hits.isEmpty() || !draft.evidenceSufficient()) {
+        if (corpusOverview) {
+            // Describing the corpus is not quoting it: there are no citations to weigh, and the answer
+            // does not claim the standing of one drawn from passages.
+            grounding = Grounding.PARTIAL;
+        } else if (hits.isEmpty() || !draft.evidenceSufficient()) {
             grounding = Grounding.INSUFFICIENT_EVIDENCE;
         } else if (!citations.isEmpty() && evidence.sufficientByScore()) {
             grounding = Grounding.GROUNDED;

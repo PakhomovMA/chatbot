@@ -11,6 +11,7 @@ import com.personal.chatbot.service.chat.GroundingVerifier;
 import com.personal.chatbot.service.chat.QuestionDecomposer;
 import com.personal.chatbot.service.chat.SourceComparator;
 import com.personal.chatbot.service.index.LockedSearchOperations;
+import com.personal.chatbot.service.index.SectionCatalog;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.service.retrieval.Retriever;
 import com.personal.chatbot.service.retrieval.SearchExpander;
@@ -82,7 +83,9 @@ class ChatConfiguration {
     AgenticResearcher agenticResearcher(LockedSearchOperations searchOperations, GroundedAnswerPrompt prompt,
                                         GroundingInstructions instructions, RetrievalTraceStore traces,
                                         ChatbotProperties.Chat chat, ChatbotProperties.Retrieval retrieval,
-                                        MeterRegistry meterRegistry, QuestionDecomposer decomposer) {
-        return new AgenticResearcher(searchOperations, prompt, instructions, traces, chat, retrieval, meterRegistry, decomposer);
+                                        MeterRegistry meterRegistry, QuestionDecomposer decomposer,
+                                        SectionCatalog catalog) {
+        return new AgenticResearcher(searchOperations, prompt, instructions, traces, chat, retrieval, meterRegistry,
+                decomposer, catalog);
     }
 }
