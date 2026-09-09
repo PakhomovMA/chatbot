@@ -17,10 +17,29 @@ import java.util.regex.Pattern;
  * {@code [n]} pointing at the position of that chunk in the collected evidence. Ids the model never
  * saw are dropped here, and {@link GroundingVerifier} removes any marker that is left dangling. A draft
  * without any reference is attributed deterministically by {@link EvidenceAttributor}.
+ *
+ * <p>Models rarely reproduce the marker exactly: they echo the {@code chunkId:} label the passages are
+ * prefixed with, or drop the label and brace the bare id. Every such spelling is recognised, so that a
+ * reference the model meant as a citation never reaches the reader as literal braces.
  */
 public final class AgenticDraftMapper {
 
-    private static final Pattern CHUNK_REF = Pattern.compile("\\{\\{\\s*chunk\\s*:\\s*([^}\\s]+)\\s*}}");
+    /** A chunk id as the passages spell it: {@code <documentId>:<part>:<index>}. */
+    private static final String CHUNK_ID = "[A-Za-z0-9][A-Za-z0-9_.-]{2,}(?::\\d{1,6}){1,3}";
+
+    /**
+     * A braced reference in either spelling the models produce: labelled ({@code chunk}, {@code chunkId},
+     * {@code chunk_ids}, {@code chunk id}) with any id, or unlabelled with an id shaped like a chunk id.
+     * The unlabelled half is deliberately narrow so that a template snippet quoted from a document
+     * ({@code {{ user.name }}}) is left alone. One reference may name several ids.
+     */
+    private static final Pattern CHUNK_REF = Pattern.compile(
+            "(?i)\\{\\{\\s*chunk[ _-]?(?:id)?s?\\s*[:=]\\s*([^}]+?)\\s*}}"
+                    + "|\\{\\{\\s*(" + CHUNK_ID + "(?:\\s*[,;]\\s*" + CHUNK_ID + ")*)\\s*}}");
+
+    /** Separators between ids inside one reference, and the punctuation a JSON-ish list drags along. */
+    private static final Pattern ID_SEPARATOR = Pattern.compile("[\\s,;]+");
+    private static final Pattern ID_NOISE = Pattern.compile("^[\\[\"'(]+|[\\]\"')]+$");
 
     private AgenticDraftMapper() {
     }
@@ -31,12 +50,17 @@ public final class AgenticDraftMapper {
         Matcher matcher = CHUNK_REF.matcher(answer);
         StringBuilder rewritten = new StringBuilder();
         while (matcher.find()) {
-            int index = evidence.indexOf(matcher.group(1));
-            String replacement = index > 0 ? "[" + index + "]" : "";
-            if (index > 0) {
-                markers.put(matcher.group(1), index);
+            String reference = matcher.group(1) != null ? matcher.group(1) : matcher.group(2);
+            StringBuilder replacement = new StringBuilder();
+            for (String raw : ID_SEPARATOR.split(reference)) {
+                String id = ID_NOISE.matcher(raw).replaceAll("");
+                int index = evidence.indexOf(id);
+                if (index > 0) {
+                    markers.put(id, index);
+                    replacement.append('[').append(index).append(']');
+                }
             }
-            matcher.appendReplacement(rewritten, Matcher.quoteReplacement(replacement));
+            matcher.appendReplacement(rewritten, Matcher.quoteReplacement(replacement.toString()));
         }
         matcher.appendTail(rewritten);
         TreeSet<Integer> cited = new TreeSet<>(markers.values());

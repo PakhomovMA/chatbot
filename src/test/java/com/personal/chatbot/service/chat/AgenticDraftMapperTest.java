@@ -88,6 +88,31 @@ class AgenticDraftMapperTest {
     }
 
     @Test
+    void theLabelTheModelEchoesFromThePassagesIsAcceptedTooAndNeverReachesTheReader() {
+        EvidenceCollector collector = collectorWith(chunk("f92321f9-d29f-4cb3-9c90-976decbd632a:1:0", "post-training"),
+                chunk("a3f3e189-69ba-4ae9-a260-306a710fc699:1:27", "2.8 trillion parameters"));
+        AgenticDraft draft = new AgenticDraft(
+                "GLM improves through post-training {{chunkId: f92321f9-d29f-4cb3-9c90-976decbd632a:1:0}}. "
+                        + "Kimi has 2.8 trillion parameters {{Chunk ID: a3f3e189-69ba-4ae9-a260-306a710fc699:1:27}}. "
+                        + "Both {{chunk_ids: f92321f9-d29f-4cb3-9c90-976decbd632a:1:0, a3f3e189-69ba-4ae9-a260-306a710fc699:1:27}}. "
+                        + "Bare {{a3f3e189-69ba-4ae9-a260-306a710fc699:1:27}}.",
+                List.of(), true, null);
+        GroundedAnswerDraft numbered = AgenticDraftMapper.toNumbered(draft, collector);
+        assertThat(numbered.answer()).isEqualTo("GLM improves through post-training [1]. "
+                + "Kimi has 2.8 trillion parameters [2]. Both [1][2]. Bare [2].");
+        assertThat(numbered.answer()).doesNotContain("{{");
+        assertThat(numbered.citedEvidence()).containsExactly(1, 2);
+    }
+
+    @Test
+    void aTemplateSnippetQuotedFromADocumentIsLeftAlone() {
+        EvidenceCollector collector = collectorWith(chunk("doc:1:0", "config"));
+        GroundedAnswerDraft numbered = AgenticDraftMapper.toNumbered(new AgenticDraft(
+                "Set the greeting to {{ user.name }} in the template {{chunk:doc:1:0}}.", List.of(), true, null), collector);
+        assertThat(numbered.answer()).isEqualTo("Set the greeting to {{ user.name }} in the template [1].");
+    }
+
+    @Test
     void insufficientDraftIsPreserved() {
         GroundedAnswerDraft numbered = AgenticDraftMapper.toNumbered(
                 new AgenticDraft("Nothing about ports.", null, false, "the port"), collectorWith());
