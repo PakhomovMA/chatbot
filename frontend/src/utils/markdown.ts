@@ -14,9 +14,17 @@ DOMPurify.addHook('afterSanitizeAttributes', node => {
  * Renders answer Markdown to sanitized HTML and turns citation markers `[n]` into clickable
  * superscripts (`<sup class="cite" data-n="n">`). Only markers that the backend verified remain in
  * the text, so every marker can be resolved to a citation.
+ *
+ * A marker may hold several passage numbers (`[1, 2]`) — the models group their citations that way —
+ * and each number becomes a superscript of its own, so every one of them is clickable.
  */
 export function renderAnswer(markdown: string): string {
-  const withMarkers = markdown.replace(/\[(\d{1,3})]/g, (_match, n: string) => `<sup class="cite" data-n="${n}">[${n}]</sup>`)
+  const withMarkers = markdown.replace(/\[(\d{1,3}(?:\s*,\s*\d{1,3})*)]/g, (_match, group: string) =>
+    group
+      .split(',')
+      .map(n => n.trim())
+      .map(n => `<sup class="cite" data-n="${n}">[${n}]</sup>`)
+      .join(''))
   const html = marked.parse(withMarkers, { async: false, gfm: true, breaks: true }) as string
   return DOMPurify.sanitize(html, { ADD_ATTR: ['data-n'] })
 }
