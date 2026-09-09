@@ -4,6 +4,7 @@ import com.embabel.agent.api.common.OperationContext;
 import com.embabel.agent.filter.PropertyFilter;
 import com.embabel.agent.rag.tools.SearchDefaults;
 import com.embabel.agent.rag.tools.ToolishRag;
+import com.embabel.agent.core.support.InvalidLlmReturnFormatException;
 import com.embabel.common.ai.model.LlmOptions;
 import com.personal.chatbot.agents.CancellableTool;
 import com.personal.chatbot.config.ChatbotProperties;
@@ -151,6 +152,8 @@ public class AgenticResearcher {
                         .withPromptContributor(instructions.groundedAnswer())
                         .creating(GroundedAnswerDraft.class)
                         .fromPrompt(prompt.build(question.question(), question.history(), seen));
+            } catch (InvalidLlmReturnFormatException e) {
+                numbered = ProseAnswerRecovery.answerOrRethrow(e);
             } finally {
                 Timer.builder("chatbot.llm").tag("operation", "repair-agentic-answer").register(meterRegistry)
                         .record(System.nanoTime() - repairStarted, TimeUnit.NANOSECONDS);

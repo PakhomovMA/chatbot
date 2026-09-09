@@ -3,6 +3,7 @@ package com.personal.chatbot.service.chat;
 import com.embabel.agent.api.common.OperationContext;
 import com.embabel.agent.api.common.PromptRunner;
 import com.embabel.agent.api.common.streaming.StreamingPromptRunner;
+import com.embabel.agent.core.support.InvalidLlmReturnFormatException;
 import com.embabel.common.ai.model.LlmOptions;
 import com.personal.chatbot.config.ChatbotProperties;
 import com.personal.chatbot.models.agent.AnswerStreamSink;
@@ -23,6 +24,10 @@ import java.util.concurrent.TimeUnit;
  * the prompt with them (Phase 9d). Streams token by token when the caller asked for it and the
  * platform supports it, and otherwise asks for a structured draft; both shapes end up as a
  * {@link GroundedAnswerDraft}, so the verifier cannot tell them apart.
+ *
+ * <p>A model that writes the answer as prose where JSON was asked for has not failed to answer, and
+ * {@link ProseAnswerRecovery} keeps that answer rather than spending further generations on the same
+ * question.
  */
 public class AnswerDrafter {
 
@@ -59,9 +64,14 @@ public class AnswerDrafter {
                 operation = "draft-answer-stream";
                 return streamed(runner.withPromptContributor(instructions.streamingAnswer()), question, userPrompt, sink);
             }
-            GroundedAnswerDraft draft = runner.withPromptContributor(instructions.groundedAnswer())
-                    .creating(GroundedAnswerDraft.class)
-                    .fromPrompt(userPrompt);
+            GroundedAnswerDraft draft;
+            try {
+                draft = runner.withPromptContributor(instructions.groundedAnswer())
+                        .creating(GroundedAnswerDraft.class)
+                        .fromPrompt(userPrompt);
+            } catch (InvalidLlmReturnFormatException e) {
+                draft = ProseAnswerRecovery.answerOrRethrow(e);
+            }
             if (sink != null) {
                 sink.delta(draft.answer() != null ? draft.answer() : "");
             }

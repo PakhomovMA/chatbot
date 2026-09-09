@@ -2,6 +2,7 @@ package com.personal.chatbot.models.agent;
 
 import com.fasterxml.jackson.annotation.JsonClassDescription;
 import com.fasterxml.jackson.annotation.JsonPropertyDescription;
+import tools.jackson.databind.annotation.JsonDeserialize;
 import org.jspecify.annotations.Nullable;
 
 import java.util.List;
@@ -15,6 +16,7 @@ public record GroundedAnswerDraft(
         @JsonPropertyDescription("The answer in Markdown, in the language of the question. Cite evidence inline as [n] where n is the passage number.")
         String answer,
         @JsonPropertyDescription("Numbers of every evidence passage the answer relies on")
+        @JsonDeserialize(using = CitationNumbers.class)
         List<Integer> citedEvidence,
         @JsonPropertyDescription("true only if the evidence passages actually contain the information needed to answer")
         boolean evidenceSufficient,

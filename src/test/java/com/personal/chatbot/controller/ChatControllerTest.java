@@ -1,5 +1,6 @@
 package com.personal.chatbot.controller;
 
+import com.embabel.agent.core.support.InvalidLlmReturnFormatException;
 import com.jayway.jsonpath.JsonPath;
 import com.personal.chatbot.models.agent.GroundedAnswerDraft;
 import com.personal.chatbot.support.AbstractChatbotIntegrationTest;
@@ -128,6 +129,43 @@ class ChatControllerTest extends AbstractChatbotIntegrationTest {
                 .andExpect(jsonPath("$.grounding").value("INSUFFICIENT_EVIDENCE"))
                 .andExpect(jsonPath("$.notes").value("the listening port"))
                 .andExpect(jsonPath("$.citations", Matchers.hasSize(1)));
+    }
+
+    /**
+     * Some models answer the structured call in Markdown, and Embabel hands that back as an empty
+     * reply (docs/eval-log.md): everything before the first brace is taken for a thinking block, so
+     * prose without one is stripped whole. The answer is kept and verified like any other.
+     */
+    @Test
+    void anAnswerWrittenAsProseInsteadOfJsonIsKeptAndVerified() throws Exception {
+        String prose = """
+                To restart the service, run `systemctl restart payments` on the host [1].
+
+                Do not restart every replica at once [1]. Unrelated claim [9].""";
+        whenCreateObject(p -> p.contains("Question: How do I restart the payment service?"), GroundedAnswerDraft.class)
+                .thenThrow(new InvalidLlmReturnFormatException(prose, GroundedAnswerDraft.class,
+                        new RuntimeException("No content to map due to end-of-input")));
+
+        mockMvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
+                        .content(body(null, "How do I restart the payment service?")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.grounding").value("GROUNDED"))
+                .andExpect(jsonPath("$.answer").value(Matchers.containsString("`systemctl restart payments` on the host [1]")))
+                .andExpect(jsonPath("$.answer").value(Matchers.containsString("Unrelated claim.")))
+                .andExpect(jsonPath("$.citations", Matchers.hasSize(1)))
+                .andExpect(jsonPath("$.citations[0].marker").value(1));
+    }
+
+    /** Half-written JSON is not an answer to show anyone: it stays a failure, as before. */
+    @Test
+    void aTruncatedJsonReplyIsNotPresentedAsAnAnswer() throws Exception {
+        whenCreateObject(p -> p.contains("Question: How is the service stopped?"), GroundedAnswerDraft.class)
+                .thenThrow(new InvalidLlmReturnFormatException("{\"answer\": \"Stop it with", GroundedAnswerDraft.class,
+                        new RuntimeException("Unexpected end-of-input")));
+
+        mockMvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
+                        .content(body(null, "How is the service stopped?")))
+                .andExpect(status().is5xxServerError());
     }
 
     @Test
