@@ -58,7 +58,7 @@ chatbot:
     expand-neighbours: 0                 # section chunks shown on each side of every hit (0 = off); also the agentic search tools
     trace-buffer-size: 200
   chat:
-    mode: DETERMINISTIC                  # or AGENTIC: the model searches via Embabel ToolishRag tools (Phase 9c)
+    mode: AGENTIC                  # or DETERMINISTIC: retrieve-then-answer. AGENTIC = model searches via Embabel ToolishRag tools (Phase 9c)
     answer-language: AUTO                # AUTO = language of the question (RU detected by script); RU or EN force it
     agentic-max-searches: 4
     agentic-min-cosine: 0.2
@@ -117,7 +117,7 @@ spring.jackson.default-property-inclusion: non_null
 embabel:
   models:
     # Ollama models are registered under their raw Ollama name (§1.3 p.7).
-    default-llm: qwen3:14b
+    default-llm: gemma4:12b
   agent:
     platform:
       models:
