@@ -69,6 +69,8 @@ def nativeAccessJvmArgs = ['--enable-native-access=ALL-UNNAMED']
 
 // Test tiers (docs/system-plan.md §11). Default `test` runs only tests that need neither
 // model files nor a running Ollama. Include a tier with: ./gradlew test -PincludeTags=model,e2e
+// The e2e tier runs on the LLM from application.yaml; -Pe2e.llm=<ollama model> points it at another
+// one, which is how two local models are compared on the same golden questions.
 tasks.named('test') {
     useJUnitPlatform {
         if (project.hasProperty('includeTags')) {
@@ -78,6 +80,15 @@ tasks.named('test') {
         }
     }
     jvmArgs nativeAccessJvmArgs
+    if (project.hasProperty('e2e.llm')) {
+        systemProperty 'e2e.llm', project.property('e2e.llm')
+        outputs.upToDateWhen { false }
+    }
+    // A model-backed run is minutes long and silent by default, so a hang looks exactly like work.
+    // -Pe2e.verbose streams the application log while the tests run.
+    if (project.hasProperty('e2e.verbose')) {
+        testLogging { showStandardStreams = true }
+    }
 }
 
 tasks.named('bootRun') {

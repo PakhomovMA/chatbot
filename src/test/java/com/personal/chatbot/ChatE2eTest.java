@@ -43,8 +43,11 @@ import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
- * End-to-end grounded answers with the real stack: Ollama qwen3:14b + EmbeddingGemma ONNX + Lucene
+ * End-to-end grounded answers with the real stack: a local Ollama LLM + EmbeddingGemma ONNX + Lucene
  * (docs/system-plan.md §11, §14 Phase 5). Run with {@code ./gradlew test -PincludeTags=e2e}.
+ *
+ * <p>The LLM is the one {@code application.yaml} names; {@code -Pe2e.llm=<ollama model>} points the
+ * whole suite at another one, so two models can be measured on the same questions.
  */
 @Tag("e2e")
 @SpringBootTest
@@ -70,10 +73,16 @@ class ChatE2eTest {
         registry.add("chatbot.data-dir", () -> dataDir.toString());
         registry.add("chatbot.index.in-memory", () -> "true");
         registry.add("chatbot.embedding.onnx.model-dir", () -> modelDir().toString());
+        registry.add("embabel.models.default-llm", ChatE2eTest::llm);
         // Both Phase 9d branches ship off (docs/eval-log.md); the tests below are what exercises them.
         registry.add("chatbot.chat.decompose.enabled", () -> "true");
         registry.add("chatbot.chat.compare-sources.enabled", () -> "true");
         registry.add("server.port", () -> "0");
+    }
+
+    /** The Ollama model under test: {@code application.yaml}'s default unless {@code -Pe2e.llm} names another. */
+    static String llm() {
+        return System.getProperty("e2e.llm", "qwen3:14b");
     }
 
     static Path modelDir() {
@@ -85,7 +94,7 @@ class ChatE2eTest {
     @BeforeAll
     static void requireLocalStack() {
         assumeTrue(Files.isRegularFile(modelDir().resolve("model.onnx")), "EmbeddingGemma ONNX files not present");
-        assumeTrue(ollamaHasModel("qwen3:14b"), "Ollama with qwen3:14b not reachable");
+        assumeTrue(ollamaHasModel(llm()), "Ollama with " + llm() + " not reachable");
     }
 
     static boolean ollamaHasModel(String name) {

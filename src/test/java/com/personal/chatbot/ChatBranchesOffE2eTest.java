@@ -57,6 +57,7 @@ class ChatBranchesOffE2eTest {
         registry.add("chatbot.data-dir", () -> dataDir.toString());
         registry.add("chatbot.index.in-memory", () -> "true");
         registry.add("chatbot.embedding.onnx.model-dir", () -> ChatE2eTest.modelDir().toString());
+        registry.add("embabel.models.default-llm", ChatE2eTest::llm);
         registry.add("chatbot.chat.decompose.enabled", () -> "false");
         registry.add("chatbot.chat.compare-sources.enabled", () -> "false");
         registry.add("server.port", () -> "0");
@@ -65,7 +66,7 @@ class ChatBranchesOffE2eTest {
     @BeforeAll
     static void requireLocalStack() {
         assumeTrue(Files.isRegularFile(ChatE2eTest.modelDir().resolve("model.onnx")), "EmbeddingGemma ONNX files not present");
-        assumeTrue(ChatE2eTest.ollamaHasModel("qwen3:14b"), "Ollama with qwen3:14b not reachable");
+        assumeTrue(ChatE2eTest.ollamaHasModel(ChatE2eTest.llm()), "Ollama with " + ChatE2eTest.llm() + " not reachable");
     }
 
     @Autowired

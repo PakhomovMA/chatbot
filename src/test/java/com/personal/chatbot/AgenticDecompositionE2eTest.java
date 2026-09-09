@@ -45,6 +45,7 @@ class AgenticDecompositionE2eTest {
         registry.add("chatbot.data-dir", () -> dataDir.toString());
         registry.add("chatbot.index.in-memory", () -> "true");
         registry.add("chatbot.embedding.onnx.model-dir", () -> ChatE2eTest.modelDir().toString());
+        registry.add("embabel.models.default-llm", ChatE2eTest::llm);
         registry.add("chatbot.chat.decompose.enabled", () -> "true");
         registry.add("server.port", () -> "0");
     }
@@ -52,7 +53,7 @@ class AgenticDecompositionE2eTest {
     @BeforeAll
     static void requireLocalStack() {
         assumeTrue(Files.isRegularFile(ChatE2eTest.modelDir().resolve("model.onnx")));
-        assumeTrue(ChatE2eTest.ollamaHasModel("qwen3:14b"));
+        assumeTrue(ChatE2eTest.ollamaHasModel(ChatE2eTest.llm()));
     }
 
     @Autowired
