@@ -122,7 +122,55 @@ tasks.register('ragEval', Test) {
 // The production bundle is copied into the jar under static/. Skip with -PskipFrontend.
 def frontendDir = file('frontend')
 def frontendEnabled = !project.hasProperty('skipFrontend')
-def npmExecutable = System.getProperty('os.name').toLowerCase().contains('windows') ? 'npm.cmd' : 'npm'
+def windows = System.getProperty('os.name').toLowerCase().contains('windows')
+
+// npm is looked up as an absolute path rather than left to the PATH of the process that runs it.
+// A Gradle daemon started from a desktop launcher (IDEA on macOS) inherits the minimal environment
+// of the GUI session — PATH=/usr/bin:/bin:/usr/sbin:/sbin — where no Homebrew, nvm or Volta install
+// is visible, and the daemon is then reused for terminal builds too, since the environment is not
+// part of daemon matching. Both would fail with "A problem occurred starting process 'command npm'".
+// Override with -Pnpm=/path/to/npm when the toolchain lives somewhere this does not look.
+def npmCandidates = {
+    List<String> names = windows ? ['npm.cmd', 'npm.exe'] : ['npm']
+    List<File> roots = []
+    System.getenv('PATH')?.split(File.pathSeparator)?.each { roots << new File(it) }
+    // Where the common installers put a toolchain the GUI environment cannot see.
+    ['/opt/homebrew/bin', '/usr/local/bin', '/opt/local/bin'].each { roots << new File(it) }
+    File home = new File(System.getProperty('user.home'))
+    [new File(home, '.volta/bin'), new File(home, '.local/bin')].each { roots << it }
+    // Version managers keep one bin per installed version; the newest that has npm wins.
+    [new File(home, '.nvm/versions/node'), new File(home, 'Library/Application Support/fnm/node-versions')].each { base ->
+        base.listFiles()?.sort { it.name }?.reverse()?.each { version ->
+            roots << new File(version, 'bin')
+            roots << new File(version, 'installation/bin') // fnm's layout
+        }
+    }
+    roots.findResults { root -> names.findResult { name -> new File(root, name).with { it.isFile() ? it : null } } }
+}
+
+def npmExecutable
+if (project.hasProperty('npm')) {
+    npmExecutable = project.property('npm').toString()
+} else {
+    File found = npmCandidates().find()
+    npmExecutable = found ? found.absolutePath : (windows ? 'npm.cmd' : 'npm')
+}
+
+// On Unix npm itself is a Node script (`#!/usr/bin/env node`), so an absolute path to it is not
+// enough: the child process has to be able to find `node` as well. Its own directory goes in front
+// of the inherited PATH, which also keeps npm and node from different installs from being mixed.
+// Windows needs none of this — npm.cmd resolves node next to itself.
+def npmBinDir = new File(npmExecutable).parentFile
+def frontendPath = !windows && npmBinDir?.isDirectory()
+        ? npmBinDir.absolutePath + File.pathSeparator + (System.getenv('PATH') ?: '')
+        : null
+
+def useNodeToolchain = { Exec task ->
+    task.executable = npmExecutable
+    if (frontendPath) {
+        task.environment 'PATH', frontendPath
+    }
+}
 
 tasks.register('frontendInstall', Exec) {
     description = 'Installs frontend dependencies (npm ci)'
@@ -131,7 +179,8 @@ tasks.register('frontendInstall', Exec) {
     workingDir frontendDir
     inputs.files('frontend/package.json', 'frontend/package-lock.json')
     outputs.dir('frontend/node_modules')
-    commandLine npmExecutable, 'ci', '--no-audit', '--no-fund'
+    useNodeToolchain(it)
+    args 'ci', '--no-audit', '--no-fund'
 }
 
 tasks.register('frontendBuild', Exec) {
@@ -143,7 +192,8 @@ tasks.register('frontendBuild', Exec) {
     inputs.dir('frontend/src')
     inputs.files('frontend/index.html', 'frontend/package.json', 'frontend/package-lock.json', 'frontend/tsconfig.json', 'frontend/vite.config.ts')
     outputs.dir('frontend/dist')
-    commandLine npmExecutable, 'run', 'build'
+    useNodeToolchain(it)
+    args 'run', 'build'
 }
 
 tasks.register('frontendTest', Exec) {
@@ -155,7 +205,8 @@ tasks.register('frontendTest', Exec) {
     inputs.dir('frontend/src')
     inputs.dir('frontend/test')
     inputs.files('frontend/package.json', 'frontend/package-lock.json')
-    commandLine npmExecutable, 'test', '--silent'
+    useNodeToolchain(it)
+    args 'test', '--silent'
 }
 
 tasks.named('check') {
