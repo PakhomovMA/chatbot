@@ -2,6 +2,8 @@
 
 Что и где смотреть, когда RAG отвечает не так, как ожидалось, или медленно (docs/system-plan.md D14, Phase 8).
 
+Проверенный стек и ограничения текущих измерений: [O01 baseline](observability/o01/README.md). Контракт миграции: [metric catalog](observability/metric-catalog.json), порядок работ: [observability-plan.md](observability-plan.md). Canonical families из каталога вводятся в O02/O03; этот checkpoint фиксирует текущее поведение.
+
 ## Корреляция логов (MDC)
 
 Формат консольной строки: `время [поток] LEVEL logger - <requestId> <conversationId> <messageId> <documentId> сообщение`.
@@ -32,8 +34,8 @@ Overall-статус агрегируется Spring: OUT_OF_SERVICE/DOWN люб
 
 | Метрика | Тип | Теги | Смысл |
 |---|---|---|---|
-| `chatbot.chat` | timer | `grounding`, `mode` (sync/stream) | полное время ответа |
-| `chatbot.llm` | timer | `operation` (draft-answer / draft-answer-stream / research-agentic / conversation-query-rewrite / expand-search-rewrite / expand-search-hyde / decompose-question / compare-sources) | генерация ответа и стоимость каждой вспомогательной ветки отдельно |
+| `chatbot.chat` | timer | `grounding`, `mode` (sync/stream), `answerMode` (deterministic/agentic) | только успешные runs, до завершения agent invocation |
+| `chatbot.llm` | timer | `operation` (draft-answer / draft-answer-stream / research-agentic / conversation-query-rewrite / expand-search-rewrite / expand-search-hyde / decompose-question / compare-sources / repair-agentic-answer) | генерация ответа и стоимость каждой вспомогательной ветки отдельно |
 | `chatbot.chat.query.rewrite` | counter | `outcome` (rewritten / unchanged / fallback) | результат попытки восстановления вопроса; вопросы без попытки не учитываются |
 | `chatbot.retrieval.expansion` | counter | `strategy`, `outcome` (sufficient / insufficient) | сработавшее расширение поиска (Phase 9a) |
 | `chatbot.chat.decomposition` | counter | `outcome` (split / single / failed) | разбор многосоставного вопроса (Phase 9d); вопросы без попытки не учитываются |
@@ -82,8 +84,13 @@ RAG-операции и HTTP-запросы. По умолчанию они пе
 объявлен как `@ConditionalOnMissingBean`. Ключи `embabel.agent.platform.observability.trace-*` выключают
 отдельные группы спанов; `management.tracing.sampling.probability` управляет выборкой.
 
-Без профиля tracing выключен (`tracing-enabled=false` в `application.yaml`): SDK и агенты не создают спанов,
-накладных расходов нет.
+Без профиля `tracing-enabled=false` выключает Embabel tracing, но само по себе не доказывает отсутствие
+Spring Boot / Spring AI spans или overhead. Для полного отключения нужно согласовать Boot OTel support и
+Embabel; актуальные owners/conditions и shutdown проверены в [O01](observability/o01/README.md).
+
+`prometheus` в списке endpoints ещё не означает доступный scrape: production runtime пока не содержит
+`micrometer-registry-prometheus`. В O01 registry подключён только в отдельном baseline/test classpath;
+включение для приложения — O04.
 
 ## Типичные симптомы
 
@@ -91,6 +98,6 @@ RAG-операции и HTTP-запросы. По умолчанию они пе
 |---|---|
 | Ответы `INSUFFICIENT_EVIDENCE` на вопросы, которые есть в базе | Playground: есть ли hit и его cosine против `sufficient-cosine`; `luceneIndex` health (`EMPTY`? `INCOMPATIBLE`?); `chatbot.documents{status=ready}` |
 | Документ завис в `UPLOADED` | `chatbot.ingestion.queue`, health `luceneIndex` (при `INCOMPATIBLE` воркер паркует документы), `recentFailures` |
-| Медленные ответы | `chatbot.llm` vs `chatbot.retrieval`; в стриме время до первой дельты = prompt processing Ollama; `embabel.llm.tokens.total{direction=input}` показывает размер промпта |
+| Медленные ответы | `chatbot.llm` vs `chatbot.retrieval` с учётом legacy-границ; время до первой дельты также включает retrieval и подготовку; `embabel.llm.tokens.total{direction=input}` показывает размер промпта |
 | Ollama недоступен | health `ollama` (DOWN/OUT_OF_SERVICE с причиной) |
 | Странные цитаты | `GET /api/diagnostics/retrieval/{traceId}` по `retrievalTraceId` ответа: какие чанки видела модель |

@@ -1,0 +1,10 @@
+{
+  "chat": {"retrievalMs": 12, "llmMs": 88, "totalMs": 100},
+  "chatClamped": {"retrievalMs": 120, "llmMs": 0, "totalMs": 100},
+  "retrieval": {"vectorMs": 4, "textMs": 3, "fusionMs": 2, "totalMs": 12},
+  "parallelWork": {"vectorMs": 40, "textMs": 30, "fusionMs": 20, "totalMs": 35},
+  "agentic": {"vectorMs": 0, "textMs": 0, "fusionMs": 0, "totalMs": 95},
+  "expansion": {"strategy": "REWRITE", "queries": ["restart"], "addedHits": 1, "tookMs": 25},
+  "emptyExpansion": {"strategy": "REWRITE", "queries": [], "addedHits": 0, "tookMs": 25},
+  "decomposition": {"subQuestions": ["restart", "rollback"], "addedHits": 1, "tookMs": 35}
+}

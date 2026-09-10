@@ -1,0 +1,15 @@
+{
+  "fallback": {
+    "traceId": "trace", "query": "whole", "mode": "HYBRID", "topK": 4, "candidates": 12,
+    "hits": [], "evidenceSufficient": false, "maxVectorScore": -1.0,
+    "timings": {"vectorMs": 4, "textMs": 3, "fusionMs": 2, "totalMs": 12},
+    "at": "1970-01-01T00:00:00Z"
+  },
+  "emptyExpansion": {
+    "traceId": "trace", "query": "whole", "mode": "HYBRID", "topK": 4, "candidates": 12,
+    "hits": [], "evidenceSufficient": false, "maxVectorScore": -1.0,
+    "timings": {"vectorMs": 4, "textMs": 3, "fusionMs": 2, "totalMs": 12},
+    "at": "1970-01-01T00:00:00Z",
+    "expansion": {"strategy": "REWRITE", "queries": [], "addedHits": 0, "tookMs": 25}
+  }
+}

@@ -1,3 +1,9 @@
 /gradlew text eol=lf
 *.bat text eol=crlf
 *.jar binary
+
+# Preserve checksummed runtime evidence, including Prometheus HELP spacing and SSE delimiters.
+/docs/observability/o01/baseline/** -text
+/docs/observability/o01/baseline/prometheus.txt -whitespace
+/docs/observability/o01/baseline/provider/*.prometheus.txt -whitespace
+/docs/observability/o01/baseline/sse.sse -whitespace

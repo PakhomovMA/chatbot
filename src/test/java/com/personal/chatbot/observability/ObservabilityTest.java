@@ -1,7 +1,21 @@
 package com.personal.chatbot.observability;
 
 import com.jayway.jsonpath.JsonPath;
+import com.personal.chatbot.config.ChatbotProperties;
+import com.personal.chatbot.models.chat.ChatTimings;
+import com.personal.chatbot.models.retrieval.RetrievalMode;
+import com.personal.chatbot.models.retrieval.RetrievalQuery;
+import com.personal.chatbot.models.retrieval.RetrievalResult;
+import com.personal.chatbot.models.retrieval.RetrievalTimings;
+import com.personal.chatbot.models.retrieval.QuestionDecomposition;
+import com.personal.chatbot.models.retrieval.SearchExpansion;
+import com.personal.chatbot.models.retrieval.ExpansionStrategy;
+import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
+import com.personal.chatbot.service.retrieval.SearchExpander;
+import com.personal.chatbot.service.retrieval.SubQuestionSearch;
 import com.personal.chatbot.support.AbstractChatbotIntegrationTest;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ObjectNode;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -15,6 +29,9 @@ import org.springframework.test.web.servlet.MvcResult;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -39,6 +56,48 @@ class ObservabilityTest extends AbstractChatbotIntegrationTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper mapper;
+
+    @Test
+    void legacyTimingWireFormatMatchesO01FixtureUsingTheApplicationMapper() throws Exception {
+        // These are representative values, not a claim that wall-clock tests can assert exact milliseconds.
+        // Service boundary/empty/fallback semantics are pinned in LegacyRetrievalTimingTest as well.
+        Map<String, Object> values = Map.of(
+                "chat", new ChatTimings(12, 88, 100),
+                "chatClamped", new ChatTimings(120, 0, 100),
+                "retrieval", new RetrievalTimings(4, 3, 2, 12),
+                "parallelWork", new RetrievalTimings(40, 30, 20, 35),
+                "agentic", new RetrievalTimings(0, 0, 0, 95),
+                "expansion", new SearchExpansion(ExpansionStrategy.REWRITE, List.of("restart"), 1, 25),
+                "emptyExpansion", SearchExpansion.none(ExpansionStrategy.REWRITE, 25),
+                "decomposition", new QuestionDecomposition(List.of("restart", "rollback"), 1, 35));
+        try (var fixture = getClass().getResourceAsStream("/observability/legacy-timing-values.json")) {
+            assertThat(fixture).isNotNull();
+            var actual = mapper.readTree(mapper.writeValueAsString(values));
+            assertThat(actual).isEqualTo(mapper.readTree(fixture));
+        }
+    }
+
+    @Test
+    void fallbackAndEmptyExpansionKeepTheirLegacyJsonShape() throws Exception {
+        var settings = new ChatbotProperties.Retrieval(4, 3, 60, 0, 0, .5, 0, 1, 20);
+        var traces = new RetrievalTraceStore(20);
+        var first = new RetrievalResult("trace", "whole", RetrievalMode.HYBRID, 4, 12, List.of(), false, -1,
+                new RetrievalTimings(4, 3, 2, 12), Instant.EPOCH);
+        var fallback = new SubQuestionSearch(traces, settings)
+                .search(RetrievalQuery.of("whole"), List.of(), 999, _ -> List.of(first));
+        var expanded = new SearchExpander(_ -> first, traces, settings)
+                .expand(RetrievalQuery.of("whole"), first, ExpansionStrategy.REWRITE, List.of(), 25);
+        var json = mapper.readTree(mapper.writeValueAsString(Map.of("fallback", fallback, "emptyExpansion", expanded)));
+        // Only the generated identifiers/timestamp are normalized; all public fields and durations remain.
+        ((ObjectNode) json.get("emptyExpansion")).put("traceId", "trace").put("at", "1970-01-01T00:00:00Z");
+        try (var fixture = getClass().getResourceAsStream("/observability/legacy-fallback.json")) {
+            assertThat(fixture).isNotNull();
+            assertThat(json).isEqualTo(mapper.readTree(fixture));
+        }
+    }
 
     @Test
     void requestIdIsEchoedOrGenerated() throws Exception {

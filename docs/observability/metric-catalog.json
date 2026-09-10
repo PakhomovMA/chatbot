@@ -1,0 +1,932 @@
+{
+  "version": 1,
+  "status": "accepted-for-O02-O07",
+  "applicationSeriesLimit": 5000,
+  "conservativeApplicationSeries": 3635,
+  "budgetFormula": "Для Timer без buckets: 3 terminal + 3 active series; с buckets: N finite + Inf + count/sum/max + 3 active. Summary: count/sum/max. Gauge/Counter: 1. Декартово произведение enum values, включая несовместимые пары. Framework/JVM/HTTP отдельно.",
+  "outcomes": [
+    "success",
+    "error",
+    "cancelled",
+    "timeout",
+    "rejected",
+    "skipped"
+  ],
+  "histogramsSeconds": {
+    "retrieval": [
+      0.01,
+      0.05,
+      0.1,
+      0.25,
+      0.5,
+      1,
+      2.5,
+      5,
+      10
+    ],
+    "embedding": [
+      0.01,
+      0.05,
+      0.1,
+      0.5,
+      1,
+      5,
+      10,
+      30
+    ],
+    "chat": [
+      1,
+      5,
+      15,
+      30,
+      60,
+      120,
+      300,
+      600
+    ],
+    "sse": [
+      0.001,
+      0.005,
+      0.01,
+      0.05,
+      0.1,
+      0.5,
+      1,
+      5
+    ]
+  },
+  "modelPolicy": "Значения только из configuration allowlist, неизвестные => unknown; новая модель требует пересчёта budget. Имена tools ограничены registered tools, без request-derived names.",
+  "forbiddenLabels": [
+    "requestId",
+    "conversationId",
+    "messageId",
+    "documentId",
+    "chunkId",
+    "traceId",
+    "spanId",
+    "query",
+    "filename",
+    "path",
+    "exception.message"
+  ],
+  "compatibilityPeriod": "Legacy names публикуются отключаемым adapter в O02/O03 и сохраняются минимум до завершения O07 и одного полного цикла миграции всех потребителей. Удаление отдельным checkpoint после проверки потребителей; v1 JSON сохраняется до согласованного O08. Не суммировать legacy/canonical.",
+  "metrics": [
+    {
+      "name": "chatbot.chat.request",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "mode": [
+          "sync",
+          "stream"
+        ],
+        "answer.mode": [
+          "deterministic",
+          "agentic"
+        ],
+        "outcome": [
+          "success",
+          "error",
+          "cancelled",
+          "timeout",
+          "rejected"
+        ],
+        "grounding": [
+          "grounded",
+          "partial",
+          "insufficient_evidence",
+          "none"
+        ]
+      },
+      "boundary": "Вход принятого run до результата после записи history либо terminal error/cancel/timeout/reject. Включает conversation wait, исключает отправку final SSE.",
+      "owner": "application",
+      "histogram": "chat",
+      "compatibility": "canonical",
+      "maxLabelCombinations": 80,
+      "maxSeries": 1200,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.chat.wait",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "outcome": [
+          "success",
+          "error",
+          "cancelled",
+          "timeout"
+        ]
+      },
+      "boundary": "Непосредственно перед conversations.begin до получения lease либо error/cancel/timeout; нулевое ожидание также учитывается.",
+      "owner": "application",
+      "histogram": "chat",
+      "compatibility": "canonical",
+      "maxLabelCombinations": 4,
+      "maxSeries": 60,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.ai.operation",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "operation": [
+          "draft-answer",
+          "draft-answer-stream",
+          "conversation-query-rewrite",
+          "expand-search-rewrite",
+          "expand-search-hyde",
+          "decompose-question",
+          "compare-sources",
+          "research-agentic",
+          "repair-agentic-answer"
+        ],
+        "outcome": [
+          "success",
+          "error",
+          "cancelled",
+          "timeout",
+          "fallback"
+        ]
+      },
+      "boundary": "Границы каждой operation заданы в operationBoundaries; пропущенные ветки не создают AI observation. Восстановленная ошибка => fallback, а вышестоящий chat => success; provider attempt остаётся error.",
+      "owner": "application",
+      "histogram": "chat",
+      "compatibility": "canonical",
+      "maxLabelCombinations": 45,
+      "maxSeries": 675,
+      "notes": "research-agentic canonical шире прежнего chatbot.llm{operation=research-agentic}; legacy adapter сохраняет отдельные start/stop около createObject.",
+      "operationBoundaries": {
+        "draft-answer": "Перед настройкой runner и подготовкой prompt до готового GroundedAnswerDraft, включая binding/prose recovery и synthetic delta. Empty evidence не AI operation.",
+        "draft-answer-stream": "Перед настройкой runner и подготовкой prompt до завершения stream aggregation и GroundedAnswerDraft либо terminal error/cancel; не до возврата Flux.",
+        "conversation-query-rewrite": "После shouldRewrite до решения о final effective query, включая prompt, validation, recovery.",
+        "expand-search-rewrite": "Перед подготовкой rewrite prompt до списка предложенных query strings или fallback; deterministic searches и merge снаружи.",
+        "expand-search-hyde": "Перед подготовкой hypothetical passage prompt до текста passage или fallback; поиск снаружи.",
+        "decompose-question": "Перед подготовкой subquestions prompt до валидации/дедупликации parts либо fallback; поиски и merge снаружи.",
+        "compare-sources": "Перед подготовкой comparison prompt до валидированного SourceComparison либо fallback; draft снаружи.",
+        "research-agentic": "Вход research до AnswerAttempt, включая seed decomposition, ToolishRag setup, tool loop, mapping и возможный repair. Дочерние AI operations не складывать с parent для wall time.",
+        "repair-agentic-answer": "Перед подготовкой repair prompt до исправленного GroundedAnswerDraft и проверки допустимых citations либо terminal outcome; вложено в research-agentic."
+      }
+    },
+    {
+      "name": "chatbot.retrieval.search",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "mode": [
+          "vector",
+          "text",
+          "hybrid"
+        ],
+        "outcome": [
+          "success",
+          "error",
+          "cancelled",
+          "timeout"
+        ]
+      },
+      "boundary": "Вход Retriever.search до подготовленного результата и записи diagnostic snapshot либо terminal outcome; включает index lock, embedding, facets, postprocess.",
+      "owner": "application",
+      "histogram": "retrieval",
+      "compatibility": "canonical",
+      "maxLabelCombinations": 12,
+      "maxSeries": 192,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.retrieval.workflow",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "strategy": [
+          "single",
+          "expansion",
+          "decomposition"
+        ],
+        "outcome": [
+          "success",
+          "error",
+          "cancelled",
+          "timeout"
+        ]
+      },
+      "boundary": "single: один pass; expansion: подготовка extra queries до окончания merge, без first pass; decomposition: подготовка subquestions до merge, включая whole-query pass. Empty и recovered fallback заканчиваются success.",
+      "owner": "application",
+      "histogram": "retrieval",
+      "compatibility": "canonical",
+      "maxLabelCombinations": 12,
+      "maxSeries": 192,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.retrieval.stage",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "stage": [
+          "vector",
+          "text",
+          "postprocess"
+        ],
+        "mode": [
+          "vector",
+          "text",
+          "hybrid"
+        ],
+        "outcome": [
+          "success",
+          "error",
+          "cancelled",
+          "timeout"
+        ]
+      },
+      "boundary": "vector: перед vectorSearch до результатов, включая query embedding/lock; text: перед textSearch до результатов; postprocess: перед fusion до окончания neighbour expansion. Невыполняемая facet не публикуется.",
+      "owner": "application",
+      "histogram": "retrieval",
+      "compatibility": "canonical",
+      "maxLabelCombinations": 36,
+      "maxSeries": 576,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.retrieval.hits",
+      "type": "summary",
+      "unit": "hits",
+      "labels": {},
+      "boundary": "Один sample итогового hits.size успешного deterministic pass, включая 0; не sample каждого merged workflow.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 1,
+      "maxSeries": 3,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.embedding",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "mode": [
+          "query",
+          "document"
+        ],
+        "provider": [
+          "onnx",
+          "ollama"
+        ],
+        "model": [
+          "embeddinggemma-300m",
+          "embeddinggemma:300m",
+          "unknown"
+        ]
+      },
+      "boundary": "Сразу после semaphore acquire до конца finally (end/release), включает begin, backend.embed, validation и normalization; учитывает также begin rejection при closing. Не включает wait; native/backend работа завершается перед stop.",
+      "owner": "application",
+      "histogram": "embedding",
+      "compatibility": "preserved",
+      "maxLabelCombinations": 12,
+      "maxSeries": 180,
+      "notes": "Реальные пары provider/model задаются конфигурацией; budget консервативно учитывает декартово произведение. Labels сохраняются без outcome; ошибки — отдельное событие."
+    },
+    {
+      "name": "chatbot.embedding.failures",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "mode": [
+          "query",
+          "document"
+        ],
+        "provider": [
+          "onnx",
+          "ollama"
+        ]
+      },
+      "boundary": "Один error event для фактически завершившегося ошибкой batch; admission cancellation не failure.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "canonical",
+      "maxLabelCombinations": 4,
+      "maxSeries": 4,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.embedding.wait",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "mode": [
+          "query",
+          "document"
+        ],
+        "outcome": [
+          "success",
+          "cancelled",
+          "timeout",
+          "rejected"
+        ]
+      },
+      "boundary": "Перед acquire batch slot до получения permit либо отмены/timeout/reject; не включает batch processing.",
+      "owner": "application",
+      "histogram": "embedding",
+      "compatibility": "canonical",
+      "maxLabelCombinations": 8,
+      "maxSeries": 120,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.embedding.texts",
+      "type": "counter",
+      "unit": "texts",
+      "labels": {
+        "provider": [
+          "onnx",
+          "ollama"
+        ]
+      },
+      "boundary": "Количество текстов только после успешного завершения полного embedAll запроса; если поздний batch упал, ранее выполненные batches этого запроса сюда не добавляются.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 2,
+      "maxSeries": 2,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.ingestion.processing",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "outcome": [
+          "success",
+          "error",
+          "cancelled",
+          "skipped",
+          "superseded",
+          "waiting_index"
+        ]
+      },
+      "boundary": "Claim worker до завершения process, включая cleanup/prune; success только READY commit, missing/deleted = skipped, stale claim/version = superseded, index unavailable = waiting_index, shutdown interrupt = cancelled.",
+      "owner": "application",
+      "histogram": "chat",
+      "compatibility": "canonical",
+      "maxLabelCombinations": 6,
+      "maxSeries": 90,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.ingestion.queue.wait",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "outcome": [
+          "success",
+          "cancelled",
+          "superseded",
+          "waiting_index"
+        ]
+      },
+      "boundary": "Принятие конкретного задания до claim (success), удаления/stop (cancelled), замены задания (superseded) или парковки несовместимого index (waiting_index); повторная постановка начинает новый interval.",
+      "owner": "application",
+      "histogram": "chat",
+      "compatibility": "canonical",
+      "maxLabelCombinations": 4,
+      "maxSeries": 60,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.ingestion.stage",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "stage": [
+          "parse",
+          "index",
+          "total"
+        ]
+      },
+      "boundary": "parse: find original+parser в try/finally; index: writeDocument в try/finally; total: process entry до после prune; сохраняет смешанную population skipped/error/success без outcome.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 3,
+      "maxSeries": 18,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.ingestion.failures",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "stage": [
+          "parse",
+          "indexing",
+          "embedding",
+          "ingestion"
+        ]
+      },
+      "boundary": "После проверки shutdown interrupt и cleanup, при регистрации настоящей ошибки ingestion; не skipped, superseded или waiting_index.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 4,
+      "maxSeries": 4,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.sse.send",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "stream": [
+          "chat",
+          "knowledge"
+        ]
+      },
+      "boundary": "Начало emitter.send до возврата или exception в sender; не подтверждает доставку клиенту.",
+      "owner": "application",
+      "histogram": "sse",
+      "compatibility": "preserved",
+      "maxLabelCombinations": 2,
+      "maxSeries": 30,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.sse.overflows",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "stream": [
+          "chat",
+          "knowledge"
+        ]
+      },
+      "boundary": "Каждый неуспешный queue.offer при переполнении; проверка finished до offer не атомарна с producers, поэтому при race возможны несколько increments на одно соединение. Сохранить семантику event count; это не count уникальных disconnects.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 2,
+      "maxSeries": 2,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.sse.connections",
+      "type": "gauge",
+      "unit": "count",
+      "labels": {
+        "stream": [
+          "chat",
+          "knowledge"
+        ]
+      },
+      "boundary": "Текущее количество открытых соединений, уменьшается при единственном terminal close.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 2,
+      "maxSeries": 2,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.sse.first.delta",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "answer.mode": [
+          "deterministic",
+          "agentic"
+        ]
+      },
+      "boundary": "Вход принятого stream HTTP запроса до первой непустой answer delta, переданной в SSE queue; status/heartbeat/final не delta; без delta timer отсутствует.",
+      "owner": "application",
+      "histogram": "chat",
+      "compatibility": "canonical",
+      "maxLabelCombinations": 2,
+      "maxSeries": 30,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.sse.completed",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "answer.mode": [
+          "deterministic",
+          "agentic"
+        ],
+        "outcome": [
+          "success",
+          "error",
+          "cancelled",
+          "timeout",
+          "rejected",
+          "no_delta"
+        ]
+      },
+      "boundary": "Один terminal stream event: успешный stream без непустой delta = no_delta, с delta = success; иначе terminal cause независимо от delta.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "canonical",
+      "maxLabelCombinations": 12,
+      "maxSeries": 12,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.chat.active",
+      "type": "gauge",
+      "unit": "count",
+      "labels": {},
+      "boundary": "Принятые runs минус terminal runs; от admission до завершения, независимо от открытого SSE connection.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "canonical",
+      "maxLabelCombinations": 1,
+      "maxSeries": 1,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.chat.rejected",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "reason": [
+          "stopping",
+          "capacity"
+        ]
+      },
+      "boundary": "Отказ до принятия run; не входит в denominator chatbot.chat.request. Внутренний executor rejection после admission входит в request с outcome=rejected.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "canonical",
+      "maxLabelCombinations": 2,
+      "maxSeries": 2,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.chat.query.rewrite",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "outcome": [
+          "rewritten",
+          "unchanged",
+          "fallback"
+        ]
+      },
+      "boundary": "В finally одной предпринятой попытки rewrite; rewritten/unchanged после usable result, fallback при invalid/error и также при cancellation (legacy limitation). Без истории/попытки нет event.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 3,
+      "maxSeries": 3,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.chat.decomposition",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "outcome": [
+          "split",
+          "single",
+          "failed"
+        ]
+      },
+      "boundary": "Один законченный decomposition workflow: valid split, single/unusable parts либо recovered model/search failure; cancellation не событие.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 3,
+      "maxSeries": 3,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.chat.comparison",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "outcome": [
+          "conflict",
+          "agreement",
+          "none",
+          "failed"
+        ]
+      },
+      "boundary": "Одна попытка сравнения до результата либо recovered failure.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 4,
+      "maxSeries": 4,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.retrieval.expansion",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "strategy": [
+          "neighbours",
+          "rewrite",
+          "hyde"
+        ],
+        "outcome": [
+          "sufficient",
+          "insufficient"
+        ]
+      },
+      "boundary": "Один выполненный expansion workflow, включая no-op; sufficiency итоговой evidence.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 6,
+      "maxSeries": 6,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.chat.agentic.search",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "outcome": [
+          "ran",
+          "repeated",
+          "refused"
+        ]
+      },
+      "boundary": "Решение SearchBudget перед вызовом search tool; ran/repeated значит допущено, не гарантирует успешного поиска.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 3,
+      "maxSeries": 3,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.chat.agentic.draft",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "outcome": [
+          "unparsable"
+        ]
+      },
+      "boundary": "Пойман InvalidLlmReturnFormatException для AgenticDraft перед repair.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 1,
+      "maxSeries": 1,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.chat.agentic.fallback",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "outcome": [
+          "nothing",
+          "passages"
+        ]
+      },
+      "boundary": "Deterministic search после неиспользования tools завершился, результат пуст/не пуст.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 2,
+      "maxSeries": 2,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.index.chunks",
+      "type": "gauge",
+      "unit": "count",
+      "labels": {},
+      "boundary": "Число chunks в index.info.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 1,
+      "maxSeries": 1,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.index.documents",
+      "type": "gauge",
+      "unit": "count",
+      "labels": {},
+      "boundary": "Число документов в index.info.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 1,
+      "maxSeries": 1,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.index.writable",
+      "type": "gauge",
+      "unit": "1",
+      "labels": {},
+      "boundary": "1 для writable состояния индекса, иначе 0.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 1,
+      "maxSeries": 1,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.ingestion.queue",
+      "type": "gauge",
+      "unit": "count",
+      "labels": {},
+      "boundary": "Количество pending jobs.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 1,
+      "maxSeries": 1,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.ingestion.active",
+      "type": "gauge",
+      "unit": "count",
+      "labels": {},
+      "boundary": "1 если worker имеет active document, иначе 0.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 1,
+      "maxSeries": 1,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.conversations",
+      "type": "gauge",
+      "unit": "count",
+      "labels": {},
+      "boundary": "Количество хранимых conversations.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 1,
+      "maxSeries": 1,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.retrieval.traces",
+      "type": "gauge",
+      "unit": "count",
+      "labels": {},
+      "boundary": "Количество snapshots в bounded retrieval ring buffer.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 1,
+      "maxSeries": 1,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.documents",
+      "type": "gauge",
+      "unit": "count",
+      "labels": {
+        "status": [
+          "uploaded",
+          "parsing",
+          "chunking",
+          "indexing",
+          "ready",
+          "failed",
+          "pending_reindex"
+        ]
+      },
+      "boundary": "Текущее число registry documents в каждом статусе.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "preserved",
+      "maxLabelCombinations": 7,
+      "maxSeries": 7,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.chat",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "grounding": [
+          "grounded",
+          "partial",
+          "insufficient_evidence"
+        ],
+        "mode": [
+          "sync",
+          "stream"
+        ],
+        "answerMode": [
+          "deterministic",
+          "agentic"
+        ]
+      },
+      "boundary": "Только успешный run; от run entry до конца agent invocation, включает conversation wait, исключает последующие diagnostics/history/SSE sends. Запись после cancellation check/history.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "legacy",
+      "maxLabelCombinations": 12,
+      "maxSeries": 72,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.llm",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "operation": [
+          "draft-answer",
+          "draft-answer-stream",
+          "conversation-query-rewrite",
+          "expand-search-rewrite",
+          "expand-search-hyde",
+          "decompose-question",
+          "compare-sources",
+          "research-agentic",
+          "repair-agentic-answer"
+        ]
+      },
+      "boundary": "Прежние try/finally прикладных AI operations; research-agentic только createObject tool loop, repair отдельно. Не provider latency.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "legacy",
+      "maxLabelCombinations": 9,
+      "maxSeries": 54,
+      "notes": ""
+    },
+    {
+      "name": "chatbot.retrieval",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": {
+        "mode": [
+          "vector",
+          "text",
+          "hybrid"
+        ]
+      },
+      "boundary": "Только успешный search entry до после trace store record; отличие от JSON total: поздний clock read.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "legacy",
+      "maxLabelCombinations": 3,
+      "maxSeries": 18,
+      "notes": ""
+    }
+  ],
+  "framework": [
+    {
+      "name": "gen_ai.client.operation",
+      "owner": "Spring AI + DefaultMeterObservationHandler",
+      "type": "timer",
+      "unit": "seconds",
+      "labels": [
+        "error",
+        "gen_ai.operation.name",
+        "gen_ai.provider.name",
+        "gen_ai.request.model",
+        "gen_ai.response.model",
+        "gen_ai.system"
+      ],
+      "boundary": "Один вызов OllamaChatModel call или одна stream subscription до завершения; sync включает HTTP retries; каждый model turn tool loop отдельный. Не HTTP attempt count. gen_ai.system приходит из Spring AI; gen_ai.provider.name добавляет Embabel filter на stop и отсутствует в голом Spring AI stub."
+    },
+    {
+      "name": "gen_ai.client.token.usage",
+      "owner": "Spring AI ChatModelMeterObservationHandler",
+      "type": "counter",
+      "unit": "tokens",
+      "labels": [
+        "gen_ai.operation.name",
+        "gen_ai.provider.name",
+        "gen_ai.request.model",
+        "gen_ai.response.model",
+        "gen_ai.system",
+        "gen_ai.token.type"
+      ],
+      "boundary": "На stop model observation только доступный response usage; каноническое суммирование input+output, исключить total и embabel.llm.tokens.total."
+    },
+    {
+      "name": "gen_ai.client.operation.active",
+      "owner": "Micrometer",
+      "type": "long-task-timer",
+      "unit": "seconds",
+      "labels": [
+        "gen_ai.operation.name",
+        "gen_ai.request.model",
+        "gen_ai.response.model",
+        "gen_ai.system"
+      ],
+      "boundary": "Start до stop активной model observation; labels на start, поэтому response model = none; не latency histogram."
+    }
+  ]
+}
