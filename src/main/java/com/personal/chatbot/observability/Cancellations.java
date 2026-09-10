@@ -10,10 +10,9 @@ import java.util.Locale;
  * after PT10M", "client closed the stream" — and must not reach a metric label, where every variant
  * would be a series of its own.
  *
- * <p>The categories are read from the reason text because the reason is a plain string at its source
- * today; giving {@code ChatCancellation} a typed reason belongs to the terminal-lifecycle work of
- * O06. What this class guarantees meanwhile is the bound: an unrecognised reason is {@code unknown},
- * never the text itself.
+ * <p>Production chat paths pass ChatCancellation's bounded cause name. Legacy facade callers can
+ * still pass the old human reason; the compatibility classification remains here, never in a meter.
+
  */
 public final class Cancellations {
 
@@ -50,6 +49,7 @@ public final class Cancellations {
      * as a timeout, everything else as a cancellation. Both stay out of the error ratio.
      */
     public static Outcome outcomeOf(@Nullable String reason) {
+        if ("REJECTED".equals(reason)) return Outcome.REJECTED;
         return TIMEOUT.equals(categoryOf(reason)) ? Outcome.TIMEOUT : Outcome.CANCELLED;
     }
 }

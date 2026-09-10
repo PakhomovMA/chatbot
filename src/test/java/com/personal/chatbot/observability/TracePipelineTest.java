@@ -40,7 +40,7 @@ class TracePipelineTest {
     /** A destination that keeps what it was given, so a test can look at it. */
     static final class Recorder implements SpanExporter {
 
-        private final List<SpanData> spans = new CopyOnWriteArrayList<>();
+        final List<SpanData> spans = new CopyOnWriteArrayList<>();
         private final AtomicInteger flushes = new AtomicInteger();
 
         @Override
@@ -77,7 +77,9 @@ class TracePipelineTest {
             .withUserConfiguration(TraceExportConfiguration.class, RecordingDestination.class)
             .withBean(ChatbotProperties.Observability.class,
                     () -> new ChatbotProperties.Observability(true, true, TraceExport.NONE, Duration.ofSeconds(5)))
-            .withPropertyValues("chatbot.observability.trace-export=none");
+            .withPropertyValues("chatbot.observability.trace-export=none",
+                    "management.opentelemetry.resource-attributes.service.version=o06-test",
+                    "management.opentelemetry.resource-attributes.deployment.environment.name=verification");
 
     /** Records one span through the real provider and hands what was exported to {@code assertion}. */
     private void trace(String probability, Consumer<List<SpanData>> assertion) {
@@ -85,7 +87,7 @@ class TracePipelineTest {
                 .run((AssertableApplicationContext started) -> {
                     assertThat(started).hasNotFailed();
                     SdkTracerProvider provider = started.getBean(SdkTracerProvider.class);
-                    Recorder recorder = started.getBean(Recorder.class);
+                    Recorder recorder = (Recorder) SanitizingSpanExporter.unwrap(started.getBean(SpanExporter.class));
                     try (MDC.MDCCloseable conversation = MDC.putCloseable(RequestContext.CONVERSATION_ID, "conv-1");
                          MDC.MDCCloseable request = MDC.putCloseable(RequestContext.REQUEST_ID, "req-1")) {
                         Span span = provider.get("test").spanBuilder("chatbot.retrieval.search").startSpan();
@@ -101,6 +103,10 @@ class TracePipelineTest {
         trace("1.0", spans -> {
             assertThat(spans).singleElement().satisfies(span -> {
                 assertThat(span.getName()).isEqualTo("chatbot.retrieval.search");
+                assertThat(span.getResource().getAttributes().asMap())
+                        .containsEntry(io.opentelemetry.api.common.AttributeKey.stringKey("service.version"), "o06-test")
+                        .containsEntry(io.opentelemetry.api.common.AttributeKey.stringKey("deployment.environment.name"),
+                                "verification");
                 assertThat(span.getAttributes().asMap())
                         .containsEntry(io.opentelemetry.api.common.AttributeKey.stringKey("session.id"), "conv-1")
                         .containsEntry(io.opentelemetry.api.common.AttributeKey.stringKey("chatbot.request.id"), "req-1");
@@ -122,7 +128,7 @@ class TracePipelineTest {
         context.withPropertyValues("management.tracing.sampling.probability=1.0").run(started -> {
             assertThat(started).hasNotFailed();
             SdkTracerProvider provider = started.getBean(SdkTracerProvider.class);
-            Recorder recorder = started.getBean(Recorder.class);
+            Recorder recorder = (Recorder) SanitizingSpanExporter.unwrap(started.getBean(SpanExporter.class));
             io.opentelemetry.api.trace.Tracer tracer = provider.get("test");
             Span parent;
             try (MDC.MDCCloseable conversation = MDC.putCloseable(RequestContext.CONVERSATION_ID, "conv-2")) {

@@ -40,6 +40,10 @@ processors:
           # Everything else is a plain span, said rather than left to a default.
           - set(attributes["langfuse.observation.type"], "span") where attributes["langfuse.observation.type"] == nil
 
+          # Optional bounded, sanitized text bridge; absent in metadata-only mode.
+          - set(attributes["langfuse.observation.input"], attributes["input.value"]) where attributes["input.value"] != nil
+          - set(attributes["langfuse.observation.output"], attributes["output.value"]) where attributes["output.value"] != nil
+
           # Tokens are counted once. Embabel's LLM wrapper repeats the usage of the Spring AI call it
           # wraps, and a structural span that also reports usage doubles the tokens of the trace
           # (docs/observability-plan.md §5.1). The generation keeps them; the embedding keeps its own.
@@ -61,6 +65,7 @@ processors:
           - set(attributes["langfuse.trace.metadata.requestId"], attributes["chatbot.request.id"]) where attributes["chatbot.request.id"] != nil
           - set(attributes["langfuse.trace.metadata.messageId"], attributes["chatbot.message.id"]) where attributes["chatbot.message.id"] != nil
           - set(attributes["langfuse.trace.metadata.documentId"], attributes["chatbot.document.id"]) where attributes["chatbot.document.id"] != nil
+          - set(attributes["langfuse.trace.metadata.retrievalTraceId"], attributes["chatbot.retrieval.id"]) where attributes["chatbot.retrieval.id"] != nil
 
   batch:
     timeout: 2s

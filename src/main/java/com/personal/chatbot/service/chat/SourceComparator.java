@@ -95,7 +95,7 @@ public class SourceComparator {
                 operation.succeeded();
                 return evidence.withComparison(comparison);
             } catch (Exception e) {
-                operation.recovered(e, question.cancellation().reason());
+                operation.recovered(e, question.cancellation().telemetryReason());
                 if (ChatCancelledException.isCancellation(e)) {
                     throw new ChatCancelledException(question.messageId(), "cancelled while comparing the sources");
                 }

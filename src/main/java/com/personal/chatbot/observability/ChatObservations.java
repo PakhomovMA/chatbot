@@ -24,6 +24,34 @@ import java.util.function.Supplier;
  */
 public final class ChatObservations {
 
+    /** One stream's first delta and terminal event, independent of the thread doing the writing. */
+    public final class Stream {
+        private final long started = observations.clock().nanoTime();
+        private final String answerMode;
+        private boolean delta;
+        private boolean terminal;
+
+        private Stream(AnswerMode mode) { this.answerMode = mode.name().toLowerCase(Locale.ROOT); }
+
+        public synchronized void delta() {
+            if (!delta) {
+                delta = true;
+                observations.timer("chatbot.sse.first.delta", "Time to first delta queued for sending", "answer.mode", answerMode)
+                        .record(observations.clock().since(started));
+            }
+        }
+
+        public synchronized void finished(Outcome outcome) {
+            if (terminal) return;
+            terminal = true;
+            String label = outcome == Outcome.SUCCESS && !delta ? "no_delta" : outcome.label();
+            observations.counter("chatbot.sse.completed", "Terminal stream events", "answer.mode", answerMode,
+                    "outcome", label).increment();
+        }
+    }
+
+    public Stream startStream(AnswerMode mode) { return new Stream(mode); }
+
     /** What became of one attempt to resolve a question against its history (Phase 9b). */
     public enum RewriteOutcome {
         REWRITTEN, UNCHANGED, FALLBACK
@@ -108,8 +136,12 @@ public final class ChatObservations {
      * caller was told the request failed.
      */
     public void rejectedAfterAdmission(boolean streaming, AnswerMode answerMode) {
+        endedBeforeStart(streaming, answerMode, Outcome.REJECTED);
+    }
+
+    public void endedBeforeStart(boolean streaming, AnswerMode answerMode, Outcome outcome) {
         try (ChatRun run = startRun(streaming, answerMode)) {
-            run.finished(Outcome.REJECTED);
+            run.finished(outcome);
         }
     }
 

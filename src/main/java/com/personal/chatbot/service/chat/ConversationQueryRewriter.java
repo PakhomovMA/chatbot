@@ -128,7 +128,7 @@ public class ConversationQueryRewriter {
                 operation.succeeded();
                 return question.withEffectiveQuery(query);
             } catch (Exception e) {
-                operation.recovered(e, question.cancellation().reason());
+                operation.recovered(e, question.cancellation().telemetryReason());
                 if (ChatCancelledException.isCancellation(e)) {
                     throw new ChatCancelledException(question.messageId(), "cancelled during query rewriting");
                 }

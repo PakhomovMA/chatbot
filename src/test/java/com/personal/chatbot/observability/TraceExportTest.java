@@ -68,7 +68,8 @@ class TraceExportTest {
     void theLoggingModeWritesSpansToTheLogAndNowhereElse() {
         with(TraceExport.LOGGING).run(started -> {
             assertThat(started).hasNotFailed();
-            assertThat(started.getBeansOfType(SpanExporter.class).values())
+            assertThat(started.getBeansOfType(SpanExporter.class).values().stream()
+                    .map(SanitizingSpanExporter::unwrap).toList())
                     .singleElement().isInstanceOf(LoggingSpanExporter.class);
             assertThat(started.getBeansOfType(OtlpHttpSpanExporter.class)).isEmpty();
             assertThat(started.getBeansOfType(SdkTracerProvider.class)).hasSize(1);
@@ -80,7 +81,8 @@ class TraceExportTest {
     void theCollectorModeSendsOtlpOverExactlyOneProviderAndOneBatchProcessor() {
         with(TraceExport.OTLP, ENDPOINT + "=http://localhost:4318/v1/traces").run(started -> {
             assertThat(started).hasNotFailed();
-            assertThat(started.getBeansOfType(SpanExporter.class).values())
+            assertThat(started.getBeansOfType(SpanExporter.class).values().stream()
+                    .map(SanitizingSpanExporter::unwrap).toList())
                     .singleElement().isInstanceOf(OtlpHttpSpanExporter.class);
             assertThat(started.getBeansOfType(LoggingSpanExporter.class)).isEmpty();
             assertThat(started.getBeansOfType(SdkTracerProvider.class)).hasSize(1);

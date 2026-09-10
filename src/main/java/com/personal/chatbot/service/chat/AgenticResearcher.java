@@ -108,7 +108,7 @@ public class AgenticResearcher {
                 research.succeeded();
                 return attempt;
             } catch (Exception e) {
-                research.failed(e, question.cancellation().reason());
+                research.failed(e, question.cancellation().telemetryReason());
                 throw e;
             }
         }
@@ -224,9 +224,9 @@ public class AgenticResearcher {
                     repair.succeeded();
                 } catch (InvalidLlmReturnFormatException e) {
                     numbered = ProseAnswerRecovery.answerOrRethrow(e);
-                    repair.recovered(e, question.cancellation().reason());
+                    repair.recovered(e, question.cancellation().telemetryReason());
                 } catch (Exception e) {
-                    repair.failed(e, question.cancellation().reason());
+                    repair.failed(e, question.cancellation().telemetryReason());
                     throw e;
                 }
             }

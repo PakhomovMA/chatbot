@@ -1,0 +1,97 @@
+Abandoning {} v{} before {}: another request took the document over
+Agentic draft for [{}] did not bind ({}); answering from the collected evidence instead
+Agentic research for [{}] used no knowledge-base tool; deterministic retrieval found {} passages
+Agentic search '{}' returned {} results ({} distinct chunks so far)
+Agentic search for [{}] refused after {} searches: {}
+Agentic search for [{}] repeats an earlier query ({} of {} spent): {}
+All active work stopped in {} ms
+Answer for [{}]: {} with {} citations
+Cancellation listener failed: {}
+Cannot delete staged upload {}: {}
+Cannot delete superseded blob {}: {}
+Cannot list versions of document {}: {}
+Cannot write hash cache {}: {}
+Chat [{}] {} in {} ms ({} citations, retrieval {} ms{})
+Chatbot data directory: {}
+Client of the {} stream went away: {}
+Compared {} sources for [{}]: {}
+Comparing the sources of [{}] failed; answering from the passages alone: {}
+Conversation query preparation for [{}]: {}
+Conversation query rewriting failed for [{}]; using original question: {}
+Conversation {} was deleted while [{}] ran; the exchange was not stored
+Could not purge partially indexed document {}: {}
+Could not {} {}: {}
+Decomposed [{}] into {}
+Decomposed search [{}] into {} parts: {} hits (+{} new), sufficient {} -> {} in {} ms
+Deleted document {} '{}'
+Document {} indexed: {} chunks
+Document {} is READY but missing from the index; scheduling re-index
+Document {} vanished before ingestion
+Document {} v{} was taken over while indexing; dropping what this run wrote
+Document {} was deleted during ingestion; purging its chunks
+Document {} was replaced during ingestion (v{} -> v{}); the newer version will be indexed
+Dropping {} SSE connection: {}
+Embedding service warmed up in {} ms: {}
+Emitter of the {} stream was already closed: {}
+Error closing Lucene store: {}
+Error closing embedding backend {}: {}
+Expanded search [{}] {} with {} queries: {} hits (+{} new), sufficient {} -> {} in {} ms
+Expansion {} produced no query for '{}'
+Hypothetical passage for [{}]: {}
+Ignoring unreadable hash cache {}: {}
+In-memory Lucene index opened ({})
+Index contains {} which is not in the registry; removing
+Index rebuild failed; no documents were queued
+Index rebuild requested: {} documents accepted for re-indexing
+Index rebuilt under {}
+Index rebuilt; {} documents queued
+Ingesting document {} '{}' v{}
+Ingestion of {} ended unexpectedly
+Ingestion of {} failed at stage {}: {}
+Ingestion of {} stopped at stage {} after another request took the document over: {}
+Ingestion of {} was interrupted at stage {}; leaving it in {} for startup reconciliation
+Ingestion of {} was interrupted in stage {}
+Ingestion queue is stopping; index rebuild rejected
+Ingestion queue is stopping; request for {} rejected
+Legacy metric of {} was not recorded: {}
+Loaded registry from backup {} ({} documents)
+Loaded {} documents from {}
+Lucene index at {} cannot be opened ({}); moving it to {} and starting empty
+Lucene index at {} is INCOMPATIBLE: {}. Rebuild it via POST /api/knowledge-base/reindex
+Lucene index opened at {}: {} chunks, {} documents, state {}
+Manifest {} is unreadable: {}
+No '{}' output; using last output '{}' and expecting a [batch, dim] tensor
+No external weights file {} next to {}; assuming a self-contained ONNX model
+No registry at {}; starting empty
+ONNX model {} loaded; inputs={}, outputs={}
+ONNX session created in {} ms with {} intra-op threads
+Ollama embedding model {} at {}: {} dimensions, digest {}
+Parsed {} ({}): {} chars in {} sections
+Query expansion ({}) failed for [{}]: {}
+Question decomposition failed for [{}]; searching the question as a whole: {}
+Reconciliation done: {} documents, {} indexed roots, {} queued
+Registered document {} '{}' ({} bytes, {})
+Registry {} is unreadable ({}); trying backup {}
+Replaced content of document {}: version {} -> {}
+Retrieval [{}] mode={} '{}' -> {} passages (maxCosine={}, sufficient={}) in {} ms
+Retrieved {} hits for [{}] (sufficient={})
+Rewrote [{}] into {}
+Searching the parts of [{}] failed; searching the question as a whole: {}
+Session close failed
+Skipping {}: index is {}
+Still running after {}: {}; interrupting
+Streaming chat abandoned ({}): {}
+Streaming chat failed
+Telemetry flush failed and is skipped: {}
+Telemetry flushed within {}
+Telemetry was not flushed within {}; the spans still in the queue are dropped
+The model answered in prose where JSON was asked for; keeping its {}-character answer
+Tokenizer close failed
+Trace export: {}{}
+Unexpected failure while ingesting {}
+Unhandled error
+Upload of {} duplicates document {} (hash {})
+Waiting for {} failed: {}
+Weights digest of {} resolved in {} ms: {}
+{} SSE connection fell behind by more than {} events; dropping it
+{} was closed without an outcome and is recorded as an error

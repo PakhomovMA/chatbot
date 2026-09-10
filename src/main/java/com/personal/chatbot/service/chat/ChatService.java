@@ -66,7 +66,7 @@ public class ChatService {
     }
 
     public ChatResponse chat(ChatRequest request, ChatCancellation cancellation) {
-        return run(request, null, cancellation);
+        return run(request, null, cancellation, _ -> { });
     }
 
     /**
@@ -85,7 +85,7 @@ public class ChatService {
     public void stream(ChatRequest request, Consumer<ChatStreamEvent> listener, ChatCancellation cancellation) {
         AnswerStreamSink sink = new ListenerAnswerStreamSink(listener, cancellation);
         try {
-            listener.accept(new ChatStreamEvent.Final(run(request, sink, cancellation)));
+            run(request, sink, cancellation, response -> listener.accept(new ChatStreamEvent.Final(response)));
         } catch (Exception e) { // Embabel (Kotlin) can surface checked exceptions such as ExecutionException
             if (ChatCancelledException.isCancellation(e) || cancellation.isCancelled()) {
                 log.info("Streaming chat abandoned ({}): {}", cancellation.reason(), Throwables.rootMessage(e));
@@ -96,7 +96,8 @@ public class ChatService {
         }
     }
 
-    private ChatResponse run(ChatRequest request, @Nullable AnswerStreamSink sink, ChatCancellation cancellation) {
+    private ChatResponse run(ChatRequest request, @Nullable AnswerStreamSink sink, ChatCancellation cancellation,
+                             Consumer<ChatResponse> completed) {
         String conversationId = request.conversationId() != null && !request.conversationId().isBlank()
                 ? request.conversationId() : UUID.randomUUID().toString();
         String messageId = UUID.randomUUID().toString();
@@ -117,13 +118,15 @@ public class ChatService {
                 // as this request is cancelled, however long the one ahead still takes.
                 ConversationStore.Lease lease = observed
                         .awaitConversation(() -> conversations.begin(conversationId, cancellation::isCancelled),
-                                cancellation::reason)
+                                cancellation::telemetryReason)
                         .orElseThrow(() -> new ChatCancelledException(messageId, cancellation.reason()));
                 try (lease) {
-                    return answer(request, mode, sink, cancellation, lease, messageId, observed);
+                    ChatResponse response = answer(request, mode, sink, cancellation, lease, messageId, observed);
+                    completed.accept(response);
+                    return response;
                 }
             } catch (Exception e) { // Embabel (Kotlin) can surface checked exceptions from here as well
-                observed.failed(e, cancellation.reason());
+                observed.failed(e, cancellation.telemetryReason());
                 throw e;
             }
         }
@@ -143,6 +146,7 @@ public class ChatService {
 
         // Where the v1 diagnostics stop counting, before everything below them.
         observed.agentFinished();
+        observed.retrievalTrace(answer.retrievalTraceId());
         ChatTimings timings = observed.timings(answer.retrievalMs());
         // This run's own trace first: the shared ring is short, and a busy period must not decide
         // whether an answer can report what it retrieved (docs/observability-plan.md §4.2).

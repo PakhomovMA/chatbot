@@ -47,6 +47,11 @@ public final class ChatRun implements AutoCloseable {
         return diagnostics;
     }
 
+    /** Link the distributed trace back to the bounded local retrieval diagnostics API. */
+    public void retrievalTrace(@Nullable String id) {
+        if (id != null) io.opentelemetry.api.trace.Span.current().setAttribute("chatbot.retrieval.id", id);
+    }
+
     /**
      * Measures the wait for the conversation lease as a boundary of its own, so that queueing behind
      * the previous question of the same conversation is not read later as time spent in the model.

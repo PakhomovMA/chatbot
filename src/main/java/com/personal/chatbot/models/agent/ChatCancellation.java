@@ -32,12 +32,19 @@ public final class ChatCancellation {
         return new ChatCancellation();
     }
 
-    private final AtomicReference<String> reason = new AtomicReference<>();
+    public enum Cause { TIMEOUT, SHUTDOWN, OVERFLOW, CLIENT_DISCONNECT, REJECTED, UNKNOWN }
+
+    private record Cancelled(Cause cause, String detail) { }
+    private final AtomicReference<Cancelled> reason = new AtomicReference<>();
     private final List<Runnable> listeners = new ArrayList<>();
 
     /** Ends the request. The first reason wins; repeated calls do nothing. */
     public void cancel(String why) {
-        if (!reason.compareAndSet(null, why)) {
+        cancel(Cause.UNKNOWN, why);
+    }
+
+    public void cancel(Cause cause, String why) {
+        if (!reason.compareAndSet(null, new Cancelled(cause, why))) {
             return;
         }
         List<Runnable> waiting;
@@ -54,7 +61,14 @@ public final class ChatCancellation {
 
     /** Why the request ended, or null while it is still wanted. */
     public @Nullable String reason() {
-        return reason.get();
+        Cancelled state = reason.get();
+        return state == null ? null : state.detail();
+    }
+
+    /** Bounded cancellation state for measurements; never parse a human explanation into labels. */
+    public @Nullable String telemetryReason() {
+        Cancelled state = reason.get();
+        return state == null ? null : state.cause().name();
     }
 
     /** Runs {@code action} once the request is cancelled — immediately if it already was. */

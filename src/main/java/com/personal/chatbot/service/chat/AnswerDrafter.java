@@ -12,6 +12,7 @@ import com.personal.chatbot.models.agent.GroundedAnswerDraft;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.models.chat.AnswerLanguage;
 import com.personal.chatbot.observability.AiOperation;
+import com.personal.chatbot.observability.ExecutionContext;
 import com.personal.chatbot.observability.ChatObservations;
 import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.utils.AnswerLanguages;
@@ -78,7 +79,7 @@ public class AnswerDrafter {
                     // Prose where JSON was asked for is still an answer; recovering it is not a failure
                     // of the request, but it is not the operation working as intended either.
                     draft = ProseAnswerRecovery.answerOrRethrow(e);
-                    operation.recovered(e, question.cancellation().reason());
+                    operation.recovered(e, question.cancellation().telemetryReason());
                 }
                 if (sink != null) {
                     sink.delta(draft.answer() != null ? draft.answer() : "");
@@ -86,7 +87,7 @@ public class AnswerDrafter {
                 operation.succeeded(); // ignored when the draft above had to be recovered
                 return draft;
             } catch (Exception e) {
-                operation.failed(e, question.cancellation().reason());
+                operation.failed(e, question.cancellation().telemetryReason());
                 throw e;
             }
         }
@@ -120,15 +121,17 @@ public class AnswerDrafter {
                                          AnswerStreamSink sink) {
         StringBuilder text = new StringBuilder();
         StreamingPromptRunner.Streaming streaming = (StreamingPromptRunner.Streaming) runner.streaming();
+        ExecutionContext context = ExecutionContext.capture();
         Sinks.One<Object> stop = Sinks.one();
-        question.cancellation().onCancel(() -> stop.tryEmitValue(STOP));
+        question.cancellation().onCancel(context.wrap(() -> stop.tryEmitValue(STOP)));
         streaming.withPrompt(userPrompt)
                 .generateStream()
                 .takeUntilOther(stop.asMono())
-                .doOnNext(fragment -> {
+                .doOnNext(fragment -> context.wrap(() -> {
                     text.append(fragment);
                     sink.delta(fragment);
-                })
+                }).run())
+                .contextWrite(context::reactor)
                 .blockLast();
         question.abortIfCancelled();
         return StreamedDraftParser.parse(text.toString());

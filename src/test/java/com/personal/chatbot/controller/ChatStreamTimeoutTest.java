@@ -51,6 +51,9 @@ class ChatStreamTimeoutTest extends AbstractChatbotIntegrationTest {
     @Autowired
     private MockMvc mockMvc;
 
+    @Autowired
+    private io.micrometer.core.instrument.MeterRegistry meters;
+
     /** Something has to be retrievable, or the answer is written without ever calling the model. */
     @BeforeEach
     void indexRunbook() throws Exception {
@@ -85,5 +88,12 @@ class ChatStreamTimeoutTest extends AbstractChatbotIntegrationTest {
                 ChatStreamControllerTest.parse(started.getResponse().getContentAsString());
         assertThat(events).extracting(ChatStreamControllerTest.SseEvent::name).doesNotContain("final").contains("error");
         assertThat((String) JsonPath.read(events.getLast().data(), "$.message")).isEqualTo(ChatController.TIMED_OUT);
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {
+            assertThat(meters.get("chatbot.chat.active").gauge().value()).isZero();
+            assertThat(meters.get("chatbot.chat.request.active").longTaskTimers())
+                    .isNotEmpty().allSatisfy(timer -> assertThat(timer.activeTasks()).isZero());
+            assertThat(meters.get("chatbot.ai.operation.active").longTaskTimers())
+                    .isNotEmpty().allSatisfy(timer -> assertThat(timer.activeTasks()).isZero());
+        });
     }
 }

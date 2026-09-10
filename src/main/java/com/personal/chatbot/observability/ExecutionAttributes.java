@@ -21,21 +21,10 @@ import java.util.Map;
  * filters and groups by — Langfuse reads {@code session.id} as the session of a trace, and a filter
  * that keeps only the spans of one conversation has to be able to see it on each of them.
  *
- * <p>A span takes them from two places, in this order:
- *
- * <ol>
- *   <li>the MDC, which is where this application already keeps them (docs/system-plan.md D14), so a
- *       span is labelled wherever the log lines of the same work are;</li>
- *   <li>failing that, the span it is a child of. The agent, its actions, the tool loop and the model
- *       call run on the platform's own threads, which the MDC of the request does not reach; they are
- *       still children of the measurement that started them, and what that measurement knows is
- *       inherited rather than looked up again.</li>
- * </ol>
- *
- * <p>Inheritance is what makes the second case work at all today. Carrying the MDC across those
- * threads is a separate change (O06); until then a framework span is labelled by its parent, and a
- * span with no local parent — an ingestion worker that starts a trace of its own — is not labelled
- * until that context is passed to it explicitly.
+ * <p>Application MDC arrives through execution snapshots. Parent attributes provide a fallback for
+ * framework callbacks that carry a span but no application accessor. The still-open HTTP parent is
+ * enriched when chat first learns its conversation/message, and detached ingestion roots link to
+ * the enqueue cause held in their envelope.
  *
  * <p>The set is closed and each of them is an identifier. No prompt, answer, passage, query, tool
  * argument, file name or exception message is added here; content leaves the process only under the
@@ -59,6 +48,8 @@ final class ExecutionAttributes implements SpanProcessor {
 
     @Override
     public void onStart(Context parentContext, ReadWriteSpan span) {
+        var cause = parentContext.get(IngestionEnvelope.CAUSE);
+        if (!span.getParentSpanContext().isValid() && cause != null && cause.isValid()) span.addLink(cause);
         ReadableSpan parent = Span.fromContext(parentContext) instanceof ReadableSpan readable ? readable : null;
         for (Map.Entry<String, AttributeKey<String>> key : KEYS) {
             String value = MDC.get(key.getKey());
@@ -67,6 +58,12 @@ final class ExecutionAttributes implements SpanProcessor {
             }
             if (value != null && !value.isBlank()) {
                 span.setAttribute(key.getValue(), value.length() > MAX_LENGTH ? value.substring(0, MAX_LENGTH) : value);
+                // The HTTP observation starts before the controller knows the conversation/message.
+                // Enrich its still-open local parent when the chat boundary first learns them.
+                if (parent instanceof ReadWriteSpan writable && !parent.hasEnded()
+                        && parent.getAttribute(key.getValue()) == null) {
+                    writable.setAttribute(key.getValue(), value.length() > MAX_LENGTH ? value.substring(0, MAX_LENGTH) : value);
+                }
             }
         }
     }

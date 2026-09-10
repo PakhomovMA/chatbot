@@ -24,6 +24,49 @@ import static org.awaitility.Awaitility.await;
 /** C06: what a connection guarantees to the ingestion worker, the agent thread and the scheduler. */
 class SseConnectionTest {
 
+    @Test
+    void aSenderCancelledBeforeStartingStillReleasesItsConnectionExactlyOnce() throws Exception {
+        var gate = new java.util.concurrent.CountDownLatch(1);
+        var releases = new AtomicInteger();
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            executor.submit(() -> { try { gate.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); } });
+            try {
+                var connection = new SseConnection("test", new SlowClient(), 4, abandoned::add,
+                        releases::incrementAndGet, observations).start(executor);
+                connection.abandon("client left");
+                connection.abandon("again");
+                assertThat(releases).hasValue(1);
+                assertThat(abandoned).containsExactly("client left");
+            } finally { gate.countDown(); }
+        }
+    }
+
+    @Test
+    void senderUsesEachEventsSpanAndMessageThenCleansTheWorker() throws Exception {
+        var seen = new CopyOnWriteArrayList<String>();
+        try (var provider = io.opentelemetry.sdk.trace.SdkTracerProvider.builder().build();
+             var executor = Executors.newSingleThreadExecutor()) {
+            var span = provider.get("test").spanBuilder("chatbot.chat.request").startSpan();
+            var client = new SseEmitter() {
+                @Override public void send(SseEventBuilder builder) {
+                    seen.add(org.slf4j.MDC.get("messageId") + ":" + io.opentelemetry.api.trace.Span.current().getSpanContext().getSpanId());
+                }
+            };
+            var connection = new SseConnection("test", client, 4, abandoned::add, () -> { }, observations).start(executor);
+            try (var _ = span.makeCurrent();
+                 var _ = com.personal.chatbot.observability.RequestContext.with("messageId", "event-message")) {
+                connection.send("delta", null, "text");
+            }
+            connection.complete();
+            executor.submit(() -> {
+                assertThat(org.slf4j.MDC.get("messageId")).isNull();
+                assertThat(io.opentelemetry.api.trace.Span.current().getSpanContext().isValid()).isFalse();
+            }).get(5, TimeUnit.SECONDS);
+            assertThat(seen).containsExactly("event-message:" + span.getSpanContext().getSpanId());
+            span.end();
+        }
+    }
+
     private final TestObservations observed = TestObservations.create();
     private final SseObservations observations = observed.sseObservations();
     private final SimpleMeterRegistry meters = observed.meters();

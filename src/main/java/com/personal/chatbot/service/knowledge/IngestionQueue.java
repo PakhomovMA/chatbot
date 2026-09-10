@@ -1,6 +1,7 @@
 package com.personal.chatbot.service.knowledge;
 
 import com.personal.chatbot.observability.IngestionObservations;
+import com.personal.chatbot.observability.IngestionEnvelope;
 import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.observability.Outcome;
 import com.personal.chatbot.service.lifecycle.ActiveWork;
@@ -65,7 +66,7 @@ public class IngestionQueue implements ActiveWork {
      * never equal to one another: {@code request} is unique, so the identity this record already had
      * is unchanged.
      */
-    private record Job(String documentId, long request, long generation, Measured queued) {
+    private record Job(String documentId, long request, long generation, Measured queued, IngestionEnvelope envelope) {
     }
 
     private record Token(IngestionQueue queue, Job job) implements IngestionClaim {
@@ -99,6 +100,7 @@ public class IngestionQueue implements ActiveWork {
     private boolean activeIsCurrent;
     /** A request that arrived for the document in flight; queued as soon as that run ends. */
     private @Nullable Job rerun;
+    private IngestionEnvelope rebuildEnvelope = IngestionEnvelope.capture();
     private boolean rebuildRequested;
     private boolean rebuildRunning;
     private boolean stopping;
@@ -140,7 +142,7 @@ public class IngestionQueue implements ActiveWork {
                 return Optional.empty();
             }
             prepared = Objects.requireNonNull(prepare.get());
-            Job job = new Job(documentId, ++requests, generation, observations.startQueueWait());
+            Job job = new Job(documentId, ++requests, generation, observations.startQueueWait(), IngestionEnvelope.capture());
             if (active != null && active.documentId().equals(documentId)) {
                 replaced = rerun;
                 rerun = job;
@@ -201,6 +203,7 @@ public class IngestionQueue implements ActiveWork {
             pending.clear();
             rerun = null;
             activeIsCurrent = false;
+            rebuildEnvelope = IngestionEnvelope.capture();
             rebuildRequested = true;
             monitor.notifyAll();
         }
@@ -266,6 +269,7 @@ public class IngestionQueue implements ActiveWork {
     private void work() {
         while (true) {
             Job claimed;
+            IngestionEnvelope rebuilding = null;
             synchronized (monitor) {
                 while (!stopping && !rebuildRequested && pending.isEmpty()) {
                     try {
@@ -286,6 +290,7 @@ public class IngestionQueue implements ActiveWork {
                 if (rebuildRequested) {
                     rebuildRequested = false;
                     rebuildRunning = true;
+                    rebuilding = rebuildEnvelope;
                     claimed = null;
                 } else {
                     claimed = take();
@@ -294,7 +299,7 @@ public class IngestionQueue implements ActiveWork {
                 }
             }
             if (claimed == null) {
-                runRebuild();
+                runRebuild(Objects.requireNonNull(rebuilding));
             } else {
                 runJob(claimed);
             }
@@ -313,7 +318,10 @@ public class IngestionQueue implements ActiveWork {
         // The wait is over the moment the worker takes the job on; what follows is the run itself.
         settle(job, Outcome.SUCCESS);
         try {
-            processor.accept(new Token(this, job));
+            job.envelope().in(() -> {
+                processor.accept(new Token(this, job));
+                return null;
+            });
         } catch (RuntimeException e) {
             log.error("Ingestion of {} ended unexpectedly", job.documentId(), e);
         } finally {
@@ -329,10 +337,13 @@ public class IngestionQueue implements ActiveWork {
         }
     }
 
-    private void runRebuild() {
+    private void runRebuild(IngestionEnvelope envelope) {
         try {
-            List<String> documents = rebuild.perform();
-            documents.forEach(this::enqueue);
+            List<String> documents = envelope.in(() -> {
+                List<String> rebuilt = rebuild.perform();
+                rebuilt.forEach(this::enqueue);
+                return rebuilt;
+            });
             log.info("Index rebuilt; {} documents queued", documents.size());
         } catch (RuntimeException e) {
             // The index is left in whatever state the rebuild reached; documents stay un-indexed and

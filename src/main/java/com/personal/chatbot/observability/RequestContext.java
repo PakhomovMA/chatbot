@@ -19,8 +19,12 @@ public final class RequestContext {
 
     /** Puts a key for the duration of a try-with-resources block. */
     public static Scope with(String key, String value) {
+        String previous = MDC.get(key);
         MDC.put(key, value);
-        return () -> MDC.remove(key);
+        return () -> {
+            if (previous == null) MDC.remove(key);
+            else MDC.put(key, previous);
+        };
     }
 
     @FunctionalInterface

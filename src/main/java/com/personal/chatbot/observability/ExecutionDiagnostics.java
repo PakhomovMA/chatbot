@@ -35,6 +35,15 @@ public final class ExecutionDiagnostics {
 
     private static final ThreadLocal<ExecutionDiagnostics> CURRENT = new ThreadLocal<>();
 
+    static ExecutionDiagnostics current() {
+        return CURRENT.get();
+    }
+
+    static void restore(@Nullable ExecutionDiagnostics value) {
+        if (value == null) CURRENT.remove();
+        else CURRENT.set(value);
+    }
+
     /** Closes an execution's diagnostics and puts back the ones that were installed before it. */
     public interface Scope extends AutoCloseable {
 
@@ -94,7 +103,9 @@ public final class ExecutionDiagnostics {
             return new Carrier() {
                 @Override
                 public <T> T in(Supplier<T> work) {
-                    return work.get();
+                    try (Scope _ = NONE.install()) {
+                        return work.get();
+                    }
                 }
             };
         }

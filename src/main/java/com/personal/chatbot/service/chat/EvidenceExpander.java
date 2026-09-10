@@ -89,7 +89,7 @@ public class EvidenceExpander {
                 workflow.succeeded();
                 return new Evidence(question, widened);
             } catch (RuntimeException e) {
-                workflow.failed(e, question.cancellation().reason());
+                workflow.failed(e, question.cancellation().telemetryReason());
                 throw e;
             }
         }
@@ -156,7 +156,7 @@ public class EvidenceExpander {
                 measured.succeeded();
                 return result;
             } catch (Exception e) {
-                measured.recovered(e, question.cancellation().reason());
+                measured.recovered(e, question.cancellation().telemetryReason());
                 throw e;
             }
         }

@@ -11,7 +11,7 @@ import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.observability.AiOperation;
 import com.personal.chatbot.observability.ChatObservations;
-import com.personal.chatbot.observability.ExecutionDiagnostics;
+import com.personal.chatbot.observability.ExecutionContext;
 import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.observability.RetrievalObservations;
 import com.personal.chatbot.observability.RetrievalStrategy;
@@ -110,7 +110,7 @@ public class QuestionDecomposer {
                 workflow.succeeded();
                 return evidence;
             } catch (RuntimeException e) {
-                workflow.failed(e, question.cancellation().reason());
+                workflow.failed(e, question.cancellation().telemetryReason());
                 throw e;
             }
         }
@@ -173,7 +173,7 @@ public class QuestionDecomposer {
                 operation.succeeded();
                 return useful;
             } catch (Exception e) {
-                operation.recovered(e, question.cancellation().reason());
+                operation.recovered(e, question.cancellation().telemetryReason());
                 if (ChatCancelledException.isCancellation(e)) {
                     throw new ChatCancelledException(question.messageId(), "cancelled while splitting the question");
                 }
@@ -200,9 +200,9 @@ public class QuestionDecomposer {
             question.abortIfCancelled();
             return List.of(retriever.search(queries.getFirst()));
         }
-        ExecutionDiagnostics.Carrier diagnostics = ExecutionDiagnostics.capture();
+        ExecutionContext execution = ExecutionContext.capture();
         return context.parallelMap(queries, Math.min(queries.size(), settings.decompose().maxConcurrentSearches()),
-                query -> diagnostics.in(() -> {
+                query -> execution.in(() -> {
                     question.abortIfCancelled();
                     RetrievalResult result = retriever.search(query);
                     question.abortIfCancelled();

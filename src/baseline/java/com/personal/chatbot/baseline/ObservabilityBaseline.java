@@ -51,7 +51,7 @@ public final class ObservabilityBaseline {
                 "--embabel.agent.platform.observability.capture-message-content=false",
                 "--embabel.agent.platform.observability.trace-http-details=false"));
         ConfigurableApplicationContext context = SpringApplication.run(ChatbotApplication.class, arguments.toArray(String[]::new));
-        RecordingExporter exporter = context.getBean(RecordingExporter.class);
+        RecordingExporter exporter = context.getBean(ProbeConfiguration.class).recorder;
         ObservationRegistry observations = context.getBean(ObservationRegistry.class);
         Tracer tracer = context.getBean(Tracer.class);
         Path output = Path.of(context.getEnvironment().getProperty("o01.output", "/tmp/chatbot-o01-baseline"));
@@ -152,8 +152,9 @@ public final class ObservabilityBaseline {
     @Configuration(proxyBeanMethods = false)
     @Profile("o01-baseline")
     static class ProbeConfiguration {
+        final RecordingExporter recorder = new RecordingExporter();
         @Bean
-        RecordingExporter baselineSpanExporter() { return new RecordingExporter(); }
+        SpanExporter baselineSpanExporter() { return recorder; }
     }
 
     static final class RecordingExporter implements SpanExporter {

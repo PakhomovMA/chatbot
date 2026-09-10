@@ -173,9 +173,14 @@ chatbot.observability:
   # Where spans go, stated rather than inferred (docs/observability-plan.md §9, O05). Nowhere here;
   # `observability` writes them to the log, `observability-otlp` sends them to the collector.
   trace-export: none
+  content-policy: metadata-only
+  redact-values: []
 
 logging:
   pattern:
-    console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr([%t]){magenta} %clr(%-5level) %clr(%logger{0}){cyan} %clr(-){faint} %clr(%X{requestId} %X{conversationId} %X{messageId} %X{documentId}){faint} %msg%n"
+    console: "%clr(%d{HH:mm:ss.SSS}){faint} %clr([%t]){magenta} %clr(%-5level) %clr(%logger{0}){cyan} %clr(-){faint} %clr(%correlation){faint} %safeMessage%n%nopex"
   level:
     com.embabel: INFO
+
+# Restore registered context accessors per Reactor signal, including provider subscriptions.
+spring.reactor.context-propagation: auto

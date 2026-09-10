@@ -10,6 +10,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
 import org.springframework.core.env.Environment;
 
 /**
@@ -26,7 +27,23 @@ import org.springframework.core.env.Environment;
  * that the three agree.
  */
 @Configuration(proxyBeanMethods = false)
+@Import(ContentPolicyConfiguration.class)
 class TraceExportConfiguration {
+
+    /** Embabel's conditional default resource otherwise wins before Boot applies resource attributes. */
+    @Bean
+    io.opentelemetry.sdk.resources.Resource executionResource(Environment environment) {
+        var attributes = io.opentelemetry.api.common.Attributes.builder()
+                .put("service.name", environment.getProperty("spring.application.name", "chatbot"))
+                .put("deployment.environment.name", environment.getProperty("CHATBOT_ENVIRONMENT", "local"))
+                .put("service.version", environment.getProperty("CHATBOT_RELEASE", "dev"));
+        org.springframework.boot.context.properties.bind.Binder.get(environment)
+                .bind("management.opentelemetry.resource-attributes",
+                        org.springframework.boot.context.properties.bind.Bindable.mapOf(String.class, String.class))
+                .orElse(java.util.Map.of()).forEach(attributes::put);
+        return io.opentelemetry.sdk.resources.Resource.getDefault()
+                .merge(io.opentelemetry.sdk.resources.Resource.create(attributes.build()));
+    }
 
     /**
      * Spans in the log. Declared for the mode that asks for it, so that reading a run locally is a

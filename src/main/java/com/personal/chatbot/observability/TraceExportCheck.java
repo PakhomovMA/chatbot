@@ -126,7 +126,8 @@ final class TraceExportCheck implements SmartInitializingSingleton {
     }
 
     private void present(Class<? extends SpanExporter> exporter, List<String> problems) {
-        int found = count(exporter);
+        long found = beans.getBeansOfType(SpanExporter.class).values().stream()
+                .map(SanitizingSpanExporter::unwrap).filter(exporter::isInstance).count();
         if (found != 1) {
             problems.add(setting() + " expects one " + exporter.getSimpleName() + ", found " + found
                     + (found == 0 ? "; the mode is not falling back to another destination" : ""));
@@ -134,9 +135,11 @@ final class TraceExportCheck implements SmartInitializingSingleton {
     }
 
     private void absent(Class<? extends SpanExporter> exporter, List<String> problems) {
-        Map<String, ? extends SpanExporter> found = beans.getBeansOfType(exporter);
+        var found = beans.getBeansOfType(SpanExporter.class).entrySet().stream()
+                .filter(entry -> exporter.isInstance(SanitizingSpanExporter.unwrap(entry.getValue()))).toList();
         if (!found.isEmpty()) {
-            problems.add(setting() + ", but the context also exports spans through " + found.keySet());
+            problems.add(setting() + ", but the context also exports spans through "
+                    + found.stream().map(Map.Entry::getKey).toList());
         }
     }
 

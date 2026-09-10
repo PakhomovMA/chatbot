@@ -9,6 +9,10 @@ import com.personal.chatbot.models.chat.ChatResponse;
 import com.personal.chatbot.models.chat.ChatStreamEvent;
 import com.personal.chatbot.models.chat.ConversationView;
 import com.personal.chatbot.observability.ChatObservations;
+import com.personal.chatbot.observability.ExecutionContext;
+import com.personal.chatbot.observability.Outcome;
+import com.personal.chatbot.observability.Cancellations;
+import java.util.concurrent.atomic.AtomicBoolean;
 import com.personal.chatbot.service.chat.ChatService;
 import com.personal.chatbot.service.lifecycle.ActiveWork;
 import com.personal.chatbot.service.sse.SseConnection;
@@ -65,16 +69,24 @@ public class ChatController implements ActiveWork {
     /** How long a streaming request may run in total; stages do not extend it. */
     private final Duration streamTimeout;
     private final AnswerMode defaultMode;
-    private final ExecutorService streamExecutor = Executors.newThreadPerTaskExecutor(
-            Thread.ofVirtual().name("chat-stream-", 0).factory());
-    private final ScheduledExecutorService heartbeats = Executors.newSingleThreadScheduledExecutor(
-            Thread.ofVirtual().name("chat-heartbeat", 0).factory());
+    private final ExecutorService streamExecutor;
+    private final ScheduledExecutorService heartbeats;
     /** Requests still running. Its monitor makes admission atomic with the shutdown snapshot. */
     private final Set<ChatCancellation> running = ConcurrentHashMap.newKeySet();
     private boolean stopping;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public ChatController(ChatService chatService, SseConnections connections, ChatbotProperties.Chat settings,
                           ChatObservations observations) {
+        this(chatService, connections, settings, observations,
+                Executors.newThreadPerTaskExecutor(Thread.ofVirtual().name("chat-stream-", 0).factory()),
+                Executors.newSingleThreadScheduledExecutor(Thread.ofVirtual().name("chat-heartbeat", 0).factory()));
+    }
+
+    ChatController(ChatService chatService, SseConnections connections, ChatbotProperties.Chat settings,
+                   ChatObservations observations, ExecutorService streamExecutor, ScheduledExecutorService heartbeats) {
+        this.streamExecutor = streamExecutor;
+        this.heartbeats = heartbeats;
         this.chatService = chatService;
         this.connections = connections;
         this.observations = observations;
@@ -113,34 +125,59 @@ public class ChatController implements ActiveWork {
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chatStream(@Valid @RequestBody ChatRequest request) {
         ChatCancellation cancellation = start();
+        ChatObservations.Stream stream = observations.startStream(answerMode(request));
+        cancellation.onCancel(() -> stream.finished(Cancellations.outcomeOf(cancellation.telemetryReason())));
         SseConnection connection = null;
         List<ScheduledFuture<?>> timers = List.of();
         try {
-            SseConnection opened = connections.open("chat", streamTimeout.plus(STREAM_TIMEOUT_GRACE), cancellation::cancel);
+            SseConnection opened = connections.open("chat", streamTimeout.plus(STREAM_TIMEOUT_GRACE), reason -> cancellation.cancel(switch (reason) {
+                        case "stream timed out" -> ChatCancellation.Cause.TIMEOUT;
+                        case "send buffer full" -> ChatCancellation.Cause.OVERFLOW;
+                        case "server is shutting down" -> ChatCancellation.Cause.REJECTED;
+                        case "application shutdown" -> ChatCancellation.Cause.SHUTDOWN;
+                        default -> ChatCancellation.Cause.CLIENT_DISCONNECT;
+                    }, reason));
             connection = opened;
+            if (!opened.isOpen()) throw new RejectedExecutionException("SSE sender was refused");
+            ExecutionContext context = ExecutionContext.capture();
+            AtomicBoolean claimed = new AtomicBoolean();
             long interval = HEARTBEAT_INTERVAL.toMillis();
             List<ScheduledFuture<?>> scheduled = List.of(
-                    heartbeats.scheduleAtFixedRate(opened::heartbeat, interval, interval, TimeUnit.MILLISECONDS),
-                    heartbeats.schedule(() -> timeOut(opened, cancellation), streamTimeout.toMillis(),
+                    heartbeats.scheduleAtFixedRate(context.wrap(opened::heartbeat), interval, interval, TimeUnit.MILLISECONDS),
+                    heartbeats.schedule(context.wrap(() -> timeOut(opened, cancellation)), streamTimeout.toMillis(),
                             TimeUnit.MILLISECONDS));
             timers = scheduled;
-            Future<?> work = streamExecutor.submit(() -> {
+            Future<?> work = streamExecutor.submit(context.wrap(() -> {
+                if (!claimed.compareAndSet(false, true)) return;
                 try {
-                    chatService.stream(request, event -> opened.send(event.type(), null, event), cancellation);
+                    chatService.stream(request, event -> {
+                        boolean queued = opened.send(event.type(), null, event);
+                        if (queued && event instanceof ChatStreamEvent.Delta delta && !delta.text().isEmpty()) {
+                            stream.delta();
+                        }
+                        if (queued && event instanceof ChatStreamEvent.Final) stream.finished(Outcome.SUCCESS);
+                        if (queued && event instanceof ChatStreamEvent.Error) stream.finished(Outcome.ERROR);
+                    }, cancellation);
                 } finally {
                     release(cancellation, scheduled, opened);
                 }
-            });
+            }));
             // A request cancelled before its turn on the executor never runs, so nothing else would clean up.
             cancellation.onCancel(() -> {
-                if (work.cancel(false)) {
-                    release(cancellation, scheduled, opened);
+                if (claimed.compareAndSet(false, true)) {
+                    work.cancel(false);
+                    context.wrap(() -> {
+                        observations.endedBeforeStart(true, answerMode(request),
+                                Cancellations.outcomeOf(cancellation.telemetryReason()));
+                        release(cancellation, scheduled, opened);
+                    }).run();
                 }
             });
             return opened.emitter();
         } catch (RuntimeException e) {
             // Shutdown between the check above and here: whatever was created is given back, so the
             // request is not left counted as running (docs/concurrency-plan.md C10).
+            stream.finished(e instanceof RejectedExecutionException ? Outcome.REJECTED : Outcome.ERROR);
             release(cancellation, timers, connection);
             if (e instanceof RejectedExecutionException) {
                 // Accepted and then refused a thread of its own: the run never started, but its caller
@@ -163,7 +200,7 @@ public class ChatController implements ActiveWork {
         }
         ChatStreamEvent.Error event = new ChatStreamEvent.Error(TIMED_OUT);
         connection.send(event.type(), null, event);
-        cancellation.cancel("stream timed out after " + streamTimeout);
+        cancellation.cancel(ChatCancellation.Cause.TIMEOUT, "stream timed out after " + streamTimeout);
     }
 
     /** What the run would have answered with; the same default the chat service applies. */
@@ -197,7 +234,7 @@ public class ChatController implements ActiveWork {
             accepted = List.copyOf(running);
         }
         // Cancellation invokes callbacks; never run them under the admission monitor.
-        accepted.forEach(cancellation -> cancellation.cancel("application shutdown"));
+        accepted.forEach(cancellation -> cancellation.cancel(ChatCancellation.Cause.SHUTDOWN, "application shutdown"));
         heartbeats.shutdown();
         streamExecutor.shutdown();
     }

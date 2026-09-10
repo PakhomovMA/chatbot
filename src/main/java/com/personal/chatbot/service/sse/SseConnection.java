@@ -1,6 +1,7 @@
 package com.personal.chatbot.service.sse;
 
 import com.personal.chatbot.observability.SseObservations;
+import com.personal.chatbot.observability.ExecutionContext;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,7 +35,7 @@ public final class SseConnection {
 
     /** What a connection can be asked to deliver, in order. */
     private sealed interface Item {
-        record Event(String name, @Nullable String id, Object data) implements Item {
+        record Event(String name, @Nullable String id, Object data, ExecutionContext context) implements Item {
         }
 
         record Comment(String text) implements Item {
@@ -52,6 +53,10 @@ public final class SseConnection {
     private final Runnable onFinished;
     private final SseObservations observations;
 
+    private final ExecutionContext context = ExecutionContext.capture();
+    private final AtomicBoolean senderClaimed = new AtomicBoolean();
+    private final AtomicBoolean released = new AtomicBoolean();
+    private final Object admission = new Object();
     private final AtomicBoolean finished = new AtomicBoolean();
     private final AtomicBoolean completing = new AtomicBoolean();
     private final AtomicBoolean heartbeatPending = new AtomicBoolean();
@@ -65,19 +70,22 @@ public final class SseConnection {
         this.onAbandoned = onAbandoned;
         this.onFinished = onFinished;
         this.observations = observations;
-        emitter.onCompletion(() -> abandon("client closed the stream"));
-        emitter.onTimeout(() -> abandon("stream timed out"));
-        emitter.onError(e -> abandon("stream failed: " + e));
+        emitter.onCompletion(context.wrap(() -> abandon("client closed the stream")));
+        emitter.onTimeout(context.wrap(() -> abandon("stream timed out")));
+        emitter.onError(e -> context.wrap(() -> abandon("stream failed")).run());
     }
 
     /** Hands the connection to its sender; called once, before anyone else can see it. */
     SseConnection start(ExecutorService senders) {
         try {
-            sender = senders.submit(this::deliverUntilDone);
+            sender = senders.submit(context.wrap(() -> {
+                if (senderClaimed.compareAndSet(false, true)) deliverUntilDone();
+            }));
+            if (finished.get()) cancelSender();
         } catch (RejectedExecutionException e) {
             end("server is shutting down");
             completeQuietly();
-            onFinished.run();
+            release();
         }
         return this;
     }
@@ -92,8 +100,8 @@ public final class SseConnection {
     }
 
     /** Queues an event. Returns without waiting, whatever the client is doing. */
-    public void send(String name, @Nullable String id, Object data) {
-        offer(new Item.Event(name, id, data));
+    public boolean send(String name, @Nullable String id, Object data) {
+        return offer(new Item.Event(name, id, data, ExecutionContext.capture()));
     }
 
     public void comment(String text) {
@@ -117,10 +125,10 @@ public final class SseConnection {
      * (docs/concurrency-plan.md C10). The item is only a nudge for a sender that is idle.
      */
     public void complete() {
-        if (finished.get() || !completing.compareAndSet(false, true)) {
-            return;
+        synchronized (admission) {
+            if (finished.get() || !completing.compareAndSet(false, true)) return;
+            queue.offer(new Item.End());
         }
-        queue.offer(new Item.End());
     }
 
     /**
@@ -130,7 +138,7 @@ public final class SseConnection {
      */
     public void abandon(String reason) {
         if (end(reason) && sender != null) {
-            sender.cancel(true);
+            cancelSender();
         }
     }
 
@@ -140,6 +148,20 @@ public final class SseConnection {
      *
      * @return true if this call is the one that ended it
      */
+    private void cancelSender() {
+        if (senderClaimed.compareAndSet(false, true)) {
+            sender.cancel(false);
+            completeQuietly();
+            release();
+        } else {
+            sender.cancel(true);
+        }
+    }
+
+    private void release() {
+        if (released.compareAndSet(false, true)) onFinished.run();
+    }
+
     private boolean end(String reason) {
         if (!finished.compareAndSet(false, true)) {
             return false;
@@ -150,15 +172,15 @@ public final class SseConnection {
         return true;
     }
 
-    private void offer(Item item) {
-        if (finished.get()) {
-            return;
+    private boolean offer(Item item) {
+        synchronized (admission) {
+            if (finished.get() || completing.get()) return false;
+            if (queue.offer(item)) return true;
         }
-        if (!queue.offer(item)) {
-            observations.overflowed(stream);
-            log.warn("{} SSE connection fell behind by more than {} events; dropping it", stream, queue.size());
-            abandon("send buffer full");
-        }
+        observations.overflowed(stream);
+        log.warn("{} SSE connection fell behind by more than {} events; dropping it", stream, queue.size());
+        abandon("send buffer full");
+        return false;
     }
 
     private void deliverUntilDone() {
@@ -183,7 +205,7 @@ public final class SseConnection {
         } finally {
             finished.set(true);
             completeQuietly();
-            onFinished.run();
+            release();
         }
     }
 
@@ -194,7 +216,15 @@ public final class SseConnection {
         try (SseObservations.Send _ = observations.startSend(stream)) {
             try {
                 switch (item) {
-                    case Item.Event event -> emitter.send(builderFor(event));
+                    case Item.Event event -> {
+                        try {
+                            event.context().in(() -> {
+                                try { emitter.send(builderFor(event)); }
+                                catch (IOException e) { throw new java.io.UncheckedIOException(e); }
+                                return null;
+                            });
+                        } catch (java.io.UncheckedIOException e) { throw e.getCause(); }
+                    }
                     case Item.Comment comment -> {
                         emitter.send(SseEmitter.event().comment(comment.text()));
                         heartbeatPending.set(false);

@@ -22,12 +22,15 @@ import java.util.regex.Pattern;
 public class RequestIdFilter extends OncePerRequestFilter {
 
     private static final Pattern SAFE = Pattern.compile("[A-Za-z0-9._:-]{1,64}");
+    private static final String ATTRIBUTE = RequestIdFilter.class.getName() + ".requestId";
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
         String incoming = request.getHeader(RequestContext.REQUEST_ID_HEADER);
-        String requestId = incoming != null && SAFE.matcher(incoming).matches() ? incoming : UUID.randomUUID().toString();
+        String requestId = request.getAttribute(ATTRIBUTE) instanceof String saved ? saved
+                : incoming != null && SAFE.matcher(incoming).matches() ? incoming : UUID.randomUUID().toString();
+        request.setAttribute(ATTRIBUTE, requestId);
         response.setHeader(RequestContext.REQUEST_ID_HEADER, requestId);
         try (RequestContext.Scope _ = RequestContext.with(RequestContext.REQUEST_ID, requestId)) {
             chain.doFilter(request, response);

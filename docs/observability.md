@@ -3,7 +3,7 @@
 Что и где смотреть, когда RAG отвечает не так, как ожидалось, или медленно (docs/system-plan.md D14, Phase 8).
 
 Проверенный стек и ограничения текущих измерений: [O01 baseline](observability/o01/README.md). Контракт миграции: [metric catalog](observability/metric-catalog.json), порядок работ: [observability-plan.md](observability-plan.md).
-Canonical families введены в [O02](observability/o02/README.md) и достроены в [O03](observability/o03/README.md); Prometheus/Grafana — [O04](observability/o04/README.md), trace pipeline и Langfuse — [O05](observability/o05/README.md). Полный runbook обновляется в O07.
+Canonical families введены в [O02](observability/o02/README.md) и достроены в [O03](observability/o03/README.md); Prometheus/Grafana — [O04](observability/o04/README.md), trace pipeline и Langfuse — [O05](observability/o05/README.md), async correlation и content policy — [O06](observability/o06/README.md). Полный runbook обновляется в O07.
 
 ## Корреляция логов (MDC)
 
@@ -143,9 +143,9 @@ Provider — `gen_ai_client_operation_seconds_*`, usage — `gen_ai_client_token
 Считаются только **input + output**, без `total` и без `embabel_llm_tokens_total`. Один Spring AI
 sync observation может содержать HTTP retries; доступного отдельного attempt/retry counter нет.
 AI operation — логический workflow, поэтому его нельзя складывать с provider duration.
-Цена локальной Ollama не выдумывается. First-delta measurement и завершение SSE lifecycle — **O06**;
-на dashboard пока пояснение, без запроса к отсутствующей метрике. Trace links, Collector/exporter
-alerts появятся вместе с соответствующей инфраструктурой O05/O06.
+Цена локальной Ollama не выдумывается. С **O06** `chatbot.sse.first.delta{answer.mode}` измеряет первую
+непустую delta, принятую в очередь; `chatbot.sse.completed{answer.mode,outcome}` считает один terminal
+event. Dashboard links и Collector/exporter alerts доводятся в O07.
 
 Очередь использует `chatbot_ingestion_queue_wait_active_seconds_max` для старейшего **документного**
 ожидания, включая rerun; rebuild command в этот возраст не входит. Progress — все terminal processing
@@ -202,7 +202,7 @@ SPRING_PROFILES_ACTIVE=observability-otlp,metrics ./gradlew bootRun
 
 Спаны те же, что и раньше: `agent`, `planning …`, действия, `llm <model>` / `llm.invocation`,
 `tool-loop`, `embeddings <model>`, RAG-операции, HTTP и canonical `chatbot.*` измерения.
-Содержимое сообщений не захватывается: `capture-message-content=false` и `trace-http-details=false`
+По умолчанию содержимое сообщений не захватывается: `capture-message-content=false` и `trace-http-details=false`
 заданы в **базовой** конфигурации, а не только в профиле.
 
 Владельцы pipeline не менялись (проверено в [O01](observability/o01/README.md) и тестом
@@ -219,7 +219,8 @@ Boot, exporter — `TraceExportConfiguration`. Второго SDK не созд�
   (`chatbot.observability.flush-timeout`, по умолчанию 5s). Недоступный Collector не удлиняет остановку.
 - **Атрибуты исполнения:** каждый спан получает `session.id` (= conversationId), `chatbot.request.id`,
   `chatbot.message.id`, `chatbot.document.id` из MDC — только идентификаторы, ничего из содержимого.
-  Там, куда контекст ещё не доходит (SSE worker), их нет — это известный разрыв, он закрывается в O06.
+  С O06 контекст переносится в SSE worker/sender, Reactor и parallel retrieval; ingestion получает
+  отдельный root со span link к enqueue, без удержания HTTP observation.
 
 С O04 `micrometer-registry-prometheus` входит в production runtime без version override.
 Для отдельного management listener и dashboards используйте профиль `metrics`, описанный выше.
@@ -285,3 +286,22 @@ OTLP receiver **4318** и health Collector-а **13133** — все на loopback
 | Медленные ответы | `chatbot.llm` vs `chatbot.retrieval` с учётом legacy-границ; время до первой дельты также включает retrieval и подготовку; `embabel.llm.tokens.total{direction=input}` показывает размер промпта |
 | Ollama недоступен | health `ollama` (DOWN/OUT_OF_SERVICE с причиной) |
 | Странные цитаты | `GET /api/diagnostics/retrieval/{traceId}` по `retrievalTraceId` ответа: какие чанки видела модель |
+
+## O06: correlation и содержимое
+
+[O06](observability/o06/README.md) переносит application MDC/diagnostics вместе с trace context через
+chat workers, Embabel parallel executor, Reactor и SSE sender. Ingestion processing начинает новый root
+со span link к upload; pending/rerun используют context последнего enqueue, restart начинает новый trace.
+Console содержит отдельные `requestId`, `conversationId`, `messageId`, `documentId`, реальные `traceId`/`spanId`.
+
+`chatbot.observability.content-policy=metadata-only` — default для всех exporter-ов. Opt-in
+`redacted-content` включает bounded sanitized text bridge, а `chatbot.observability.redact-values`
+задаёт дополнительные точные значения для маскирования. Неизвестные attributes, HTTP содержимое,
+exception detail и stack traces удаляются в обоих режимах. Console/framework logs также проходят
+фильтрацию; непроверенные сообщения показываются как `Event details suppressed` с logger и level.
+Поддерживаемый structured formatter:
+`logging.structured.format.console=com.personal.chatbot.observability.SafeStructuredLogFormatter`.
+
+Новые SSE families: `chatbot.sse.first.delta{answer.mode}` (только первая непустая queued delta) и
+`chatbot.sse.completed{answer.mode,outcome}` (один terminal event, успешный stream без deltas — `no_delta`).
+Active chat снимается после выхода worker, даже если client уже отключился.
