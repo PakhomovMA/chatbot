@@ -1,7 +1,7 @@
 package com.personal.chatbot.service.sse;
 
 import com.personal.chatbot.config.ChatbotProperties;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.personal.chatbot.support.TestObservations;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -13,7 +13,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** C08: open event streams end with the application instead of holding its shutdown open. */
 class SseConnectionsTest {
 
-    private final SseConnections connections = new SseConnections(new SimpleMeterRegistry(), new ChatbotProperties.Sse(8));
+    private final SseConnections connections = new SseConnections(TestObservations.sse(), new ChatbotProperties.Sse(8));
     private final List<String> abandoned = new CopyOnWriteArrayList<>();
 
     @Test

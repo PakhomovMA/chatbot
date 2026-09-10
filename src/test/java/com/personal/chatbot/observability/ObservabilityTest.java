@@ -14,6 +14,7 @@ import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.service.retrieval.SearchExpander;
 import com.personal.chatbot.service.retrieval.SubQuestionSearch;
 import com.personal.chatbot.support.AbstractChatbotIntegrationTest;
+import com.personal.chatbot.support.TestObservations;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 import org.hamcrest.Matchers;
@@ -86,10 +87,19 @@ class ObservabilityTest extends AbstractChatbotIntegrationTest {
         var traces = new RetrievalTraceStore(20);
         var first = new RetrievalResult("trace", "whole", RetrievalMode.HYBRID, 4, 12, List.of(), false, -1,
                 new RetrievalTimings(4, 3, 2, 12), Instant.EPOCH);
-        var fallback = new SubQuestionSearch(traces, settings)
-                .search(RetrievalQuery.of("whole"), List.of(), 999, _ -> List.of(first));
-        var expanded = new SearchExpander(_ -> first, traces, settings)
-                .expand(RetrievalQuery.of("whole"), first, ExpansionStrategy.REWRITE, List.of(), 25);
+        var observed = TestObservations.create();
+        RetrievalResult fallback;
+        try (RetrievalWorkflow workflow = observed.workflowAfter(RetrievalStrategy.DECOMPOSITION, Duration.ofMillis(999))) {
+            fallback = new SubQuestionSearch(traces, settings)
+                    .search(RetrievalQuery.of("whole"), List.of(), workflow, _ -> List.of(first));
+            workflow.succeeded();
+        }
+        RetrievalResult expanded;
+        try (RetrievalWorkflow workflow = observed.workflowAfter(RetrievalStrategy.EXPANSION, Duration.ofMillis(25))) {
+            expanded = new SearchExpander(_ -> first, traces, settings)
+                    .expand(RetrievalQuery.of("whole"), first, ExpansionStrategy.REWRITE, List.of(), workflow);
+            workflow.succeeded();
+        }
         var json = mapper.readTree(mapper.writeValueAsString(Map.of("fallback", fallback, "emptyExpansion", expanded)));
         // Only the generated identifiers/timestamp are normalized; all public fields and durations remain.
         ((ObjectNode) json.get("emptyExpansion")).put("traceId", "trace").put("at", "1970-01-01T00:00:00Z");

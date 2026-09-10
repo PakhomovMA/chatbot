@@ -45,6 +45,16 @@ public class ObservabilityConfiguration {
     }
 
     @Bean
+    IngestionObservations ingestionObservations(Observations observations) {
+        return new IngestionObservations(observations);
+    }
+
+    @Bean
+    SseObservations sseObservations(Observations observations) {
+        return new SseObservations(observations);
+    }
+
+    @Bean
     MeterFilter chatbotLabelSchema() {
         return MeterSchema.labels();
     }

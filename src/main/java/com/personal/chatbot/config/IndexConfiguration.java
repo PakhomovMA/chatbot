@@ -2,6 +2,7 @@ package com.personal.chatbot.config;
 
 import com.embabel.common.ai.model.EmbeddingService;
 import com.personal.chatbot.models.index.IndexManifest;
+import com.personal.chatbot.observability.RetrievalObservations;
 import com.personal.chatbot.service.embedding.KnowledgeEmbeddingService;
 import com.personal.chatbot.service.index.LockedSearchOperations;
 import com.personal.chatbot.service.index.LuceneIndexStore;
@@ -48,8 +49,8 @@ class IndexConfiguration {
      * index state, so an LLM tool call can never reach Lucene directly (INV-01).
      */
     @Bean
-    LockedSearchOperations knowledgeSearchOperations(LuceneIndexStore indexStore) {
-        return indexStore.searchOperations();
+    LockedSearchOperations knowledgeSearchOperations(LuceneIndexStore indexStore, RetrievalObservations observations) {
+        return indexStore.searchOperations(observations);
     }
 
     /**

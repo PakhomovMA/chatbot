@@ -6,6 +6,7 @@ import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.models.retrieval.SearchExpansion;
+import com.personal.chatbot.observability.RetrievalWorkflow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,14 +55,16 @@ public class SearchExpander {
     /**
      * Searches once per extra query and merges everything with {@code first}.
      *
-     * @param queries      the extra queries; empty means the strategy produced nothing to search with
-     * @param queryBuildMs time already spent producing those queries (a model call, for most strategies)
+     * @param queries  the extra queries; empty means the strategy produced nothing to search with
+     * @param workflow the measurement of the whole branch, opened by the caller before it asked the
+     *                 model for those queries. This class marks where the merge starts and reads the
+     *                 duration the v1 diagnostics report from it; it neither times anything itself nor
+     *                 receives durations to add up (docs/observability-plan.md §4.2)
      * @return a new result, recorded as its own trace, always carrying a {@link SearchExpansion} marker
      * so that the answer path can see the widening has happened and does not repeat it
      */
     public RetrievalResult expand(RetrievalQuery original, RetrievalResult first, ExpansionStrategy strategy,
-                                  List<String> queries, long queryBuildMs) {
-        long started = System.nanoTime();
+                                  List<String> queries, RetrievalWorkflow workflow) {
         List<String> extra = queries.stream().map(String::strip).filter(q -> !q.isBlank()).distinct().toList();
         if (strategy == ExpansionStrategy.NEIGHBOURS && extra.size() > 1) {
             // The query text is not what this strategy varies, so more than one query would repeat a search.
@@ -69,14 +72,16 @@ public class SearchExpander {
         }
         if (extra.isEmpty()) {
             log.debug("Expansion {} produced no query for '{}'", strategy, first.query());
-            return marked(first, SearchExpansion.none(strategy, queryBuildMs));
+            workflow.merging();
+            return marked(first, SearchExpansion.none(strategy, workflow.tookMs()));
         }
         List<RetrievalResult> passes = new ArrayList<>(extra.size() + 1);
         passes.add(first);
         for (String query : extra) {
             passes.add(retriever.search(queryFor(original, query, strategy)));
         }
-        long tookMs = queryBuildMs + (System.nanoTime() - started) / 1_000_000;
+        workflow.merging();
+        long tookMs = workflow.tookMs();
         RetrievalResult merged = merge(passes, strategy, extra, first.topK(), tookMs);
         traces.record(merged);
         log.info("Expanded search [{}] {} with {} queries: {} hits (+{} new), sufficient {} -> {} in {} ms",
@@ -102,7 +107,7 @@ public class SearchExpander {
                 PassFusion.query(first.query(), extraQueries), first.mode(), topK,
                 passes.stream().mapToInt(RetrievalResult::candidates).sum(), hits,
                 RetrievalService.sufficient(hits, maxVector, settings.sufficientCosine()), maxVector,
-                PassFusion.timings(passes, first.timings().totalMs() + tookMs), Instant.now(),
+                PassDiagnostics.timings(passes, first.timings().totalMs() + tookMs), Instant.now(),
                 new SearchExpansion(strategy, extraQueries, merged.addedHits(), tookMs));
     }
 

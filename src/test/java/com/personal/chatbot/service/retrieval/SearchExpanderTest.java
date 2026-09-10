@@ -9,6 +9,9 @@ import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievalTimings;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.models.retrieval.SearchExpansion;
+import com.personal.chatbot.observability.RetrievalStrategy;
+import com.personal.chatbot.observability.RetrievalWorkflow;
+import com.personal.chatbot.support.TestObservations;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -27,6 +30,16 @@ class SearchExpanderTest {
 
     private final RetrievalTraceStore traces = new RetrievalTraceStore(20);
     private final List<RetrievalQuery> asked = new ArrayList<>();
+    private final TestObservations observed = TestObservations.create();
+
+    /**
+     * The branch as it stands when the queries are ready: open for {@code modelMs}, which is what the
+     * v1 {@code tookMs} of an expansion has always started from. The clock only moves when this test
+     * moves it, so nothing else is added to it.
+     */
+    private RetrievalWorkflow afterModelCall(long modelMs) {
+        return observed.workflowAfter(RetrievalStrategy.EXPANSION, java.time.Duration.ofMillis(modelMs));
+    }
 
     /** A retriever that answers each query with a canned ranking of chunk ids. */
     private SearchExpander expanderOver(Map<String, List<String>> rankings) {
@@ -44,8 +57,12 @@ class SearchExpanderTest {
                 "rollout restart deployment", List.of("c3", "c1")));
         RetrievalResult first = result("how do I bounce it", List.of("c9", "c3"));
 
-        RetrievalResult merged = expander.expand(RetrievalQuery.of("how do I bounce it"), first, ExpansionStrategy.REWRITE,
-                List.of("how to restart", "rollout restart deployment"), 120);
+        RetrievalResult merged;
+        try (RetrievalWorkflow workflow = afterModelCall(120)) {
+            merged = expander.expand(RetrievalQuery.of("how do I bounce it"), first, ExpansionStrategy.REWRITE,
+                    List.of("how to restart", "rollout restart deployment"), workflow);
+            workflow.succeeded();
+        }
 
         // c3 is found by all three passes, c9 by two, c1 only by the last one.
         assertThat(merged.hits()).extracting(RetrievedChunk::chunkId).containsExactly("c3", "c9", "c1");
@@ -53,7 +70,7 @@ class SearchExpanderTest {
         assertThat(merged.expansion().strategy()).isEqualTo(ExpansionStrategy.REWRITE);
         assertThat(merged.expansion().addedHits()).isEqualTo(1);
         assertThat(merged.expansion().queries()).containsExactly("how to restart", "rollout restart deployment");
-        assertThat(merged.expansion().tookMs()).isGreaterThanOrEqualTo(120);
+        assertThat(merged.expansion().tookMs()).isEqualTo(120);
         assertThat(merged.query()).isEqualTo("how do I bounce it | how to restart | rollout restart deployment");
         assertThat(merged.expanded()).isTrue();
         assertThat(traces.find(merged.traceId())).contains(merged);
@@ -66,7 +83,11 @@ class SearchExpanderTest {
         RetrievalResult first = new RetrievalResult(UUID.randomUUID().toString(), "narrow", RetrievalMode.HYBRID, 4, 12,
                 List.of(hit("c9", 1, 0.2)), false, 0.2, new RetrievalTimings(1, 1, 0, 3), Instant.now());
 
-        RetrievalResult merged = expander.expand(RetrievalQuery.of("narrow"), first, ExpansionStrategy.REWRITE, List.of("wider"), 0);
+        RetrievalResult merged;
+        try (RetrievalWorkflow workflow = afterModelCall(0)) {
+            merged = expander.expand(RetrievalQuery.of("narrow"), first, ExpansionStrategy.REWRITE, List.of("wider"), workflow);
+            workflow.succeeded();
+        }
 
         assertThat(merged.hits()).hasSize(4);
         // The canned pass scores every chunk at cosine 0.6, above the 0.5 floor the first pass missed.
@@ -81,8 +102,12 @@ class SearchExpanderTest {
         SearchExpander expander = expanderOver(Map.of("how do I bounce it", List.of("c3")));
         RetrievalResult first = result("how do I bounce it", List.of("c3"));
 
-        RetrievalResult merged = expander.expand(RetrievalQuery.of("how do I bounce it"), first,
-                ExpansionStrategy.NEIGHBOURS, List.of("how do I bounce it"), 0);
+        RetrievalResult merged;
+        try (RetrievalWorkflow workflow = afterModelCall(0)) {
+            merged = expander.expand(RetrievalQuery.of("how do I bounce it"), first,
+                    ExpansionStrategy.NEIGHBOURS, List.of("how do I bounce it"), workflow);
+            workflow.succeeded();
+        }
 
         assertThat(asked).singleElement().satisfies(query -> {
             assertThat(query.query()).isEqualTo("how do I bounce it");
@@ -97,8 +122,12 @@ class SearchExpanderTest {
         SearchExpander expander = expanderOver(Map.of());
         RetrievalResult first = result("how do I bounce it", List.of("c9"));
 
-        RetrievalResult merged = expander.expand(RetrievalQuery.of("how do I bounce it"), first, ExpansionStrategy.HYDE,
-                List.of("  ", ""), 40);
+        RetrievalResult merged;
+        try (RetrievalWorkflow workflow = afterModelCall(40)) {
+            merged = expander.expand(RetrievalQuery.of("how do I bounce it"), first, ExpansionStrategy.HYDE,
+                    List.of("  ", ""), workflow);
+            workflow.succeeded();
+        }
 
         assertThat(asked).isEmpty();
         assertThat(merged.hits()).isEqualTo(first.hits());
@@ -118,7 +147,11 @@ class SearchExpanderTest {
         SearchExpander expander = new SearchExpander(retriever, traces, SETTINGS);
         RetrievalResult first = result("q", List.of("c9"));
 
-        RetrievalResult merged = expander.expand(RetrievalQuery.of("q"), first, ExpansionStrategy.NEIGHBOURS, List.of("q"), 0);
+        RetrievalResult merged;
+        try (RetrievalWorkflow workflow = afterModelCall(0)) {
+            merged = expander.expand(RetrievalQuery.of("q"), first, ExpansionStrategy.NEIGHBOURS, List.of("q"), workflow);
+            workflow.succeeded();
+        }
 
         // c9 and c3 tie on rank; the tie goes to the pass that ran first, and c4 follows the hit it expands.
         assertThat(merged.hits()).extracting(RetrievedChunk::chunkId).containsExactly("c9", "c3", "c4");

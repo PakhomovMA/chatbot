@@ -4,8 +4,8 @@ import com.personal.chatbot.exceptions.EmbeddingModelUnavailableException;
 import com.personal.chatbot.utils.EmbeddingModeScope;
 import com.personal.chatbot.utils.VectorMath;
 
+import com.personal.chatbot.support.TestObservations;
 import com.personal.chatbot.service.embedding.ollama.OllamaTextEmbedder;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -26,7 +26,8 @@ class OllamaEmbeddingE2eTest {
             assumeTrue(false, e.getMessage());
             return;
         }
-        try (PromptedEmbeddingService service = new PromptedEmbeddingService(backend, 16, 2, true, new SimpleMeterRegistry())) {
+        try (PromptedEmbeddingService service = new PromptedEmbeddingService(backend, 16, 2, true,
+                TestObservations.embedding(backend.provider(), backend.modelName()))) {
             service.warmUp();
             assertThat(service.dimensions()).isEqualTo(768);
             assertThat(service.fingerprint().value()).startsWith("ollama/embeddinggemma:300m/");

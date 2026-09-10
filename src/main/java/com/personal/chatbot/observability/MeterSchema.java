@@ -26,17 +26,19 @@ public final class MeterSchema {
      * Which timer gets which buckets. The legacy names are deliberately absent: they keep the shape
      * they had, and a percentile over a population of successful runs alone would mislead anyway.
      */
-    private static final Map<String, double[]> HISTOGRAMS = Map.of(
-            "chatbot.chat.request", CHAT_SECONDS,
-            "chatbot.chat.wait", CHAT_SECONDS,
-            "chatbot.ai.operation", CHAT_SECONDS,
-            "chatbot.sse.first.delta", CHAT_SECONDS,
-            "chatbot.ingestion.processing", CHAT_SECONDS,
-            "chatbot.ingestion.queue.wait", CHAT_SECONDS,
-            "chatbot.retrieval.search", RETRIEVAL_SECONDS,
-            "chatbot.embedding", EMBEDDING_SECONDS,
-            "chatbot.embedding.wait", EMBEDDING_SECONDS,
-            "chatbot.sse.send", SSE_SECONDS);
+    private static final Map<String, double[]> HISTOGRAMS = Map.ofEntries(
+            Map.entry("chatbot.chat.request", CHAT_SECONDS),
+            Map.entry("chatbot.chat.wait", CHAT_SECONDS),
+            Map.entry("chatbot.ai.operation", CHAT_SECONDS),
+            Map.entry("chatbot.sse.first.delta", CHAT_SECONDS),
+            Map.entry("chatbot.ingestion.processing", CHAT_SECONDS),
+            Map.entry("chatbot.ingestion.queue.wait", CHAT_SECONDS),
+            Map.entry("chatbot.retrieval.search", RETRIEVAL_SECONDS),
+            Map.entry("chatbot.retrieval.workflow", RETRIEVAL_SECONDS),
+            Map.entry("chatbot.retrieval.stage", RETRIEVAL_SECONDS),
+            Map.entry("chatbot.embedding", EMBEDDING_SECONDS),
+            Map.entry("chatbot.embedding.wait", EMBEDDING_SECONDS),
+            Map.entry("chatbot.sse.send", SSE_SECONDS));
 
     private MeterSchema() {
     }

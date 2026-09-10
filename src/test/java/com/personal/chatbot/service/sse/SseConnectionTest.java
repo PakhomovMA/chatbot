@@ -1,7 +1,7 @@
 package com.personal.chatbot.service.sse;
 
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Timer;
+import com.personal.chatbot.observability.SseObservations;
+import com.personal.chatbot.support.TestObservations;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -24,7 +24,9 @@ import static org.awaitility.Awaitility.await;
 /** C06: what a connection guarantees to the ingestion worker, the agent thread and the scheduler. */
 class SseConnectionTest {
 
-    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
+    private final TestObservations observed = TestObservations.create();
+    private final SseObservations observations = observed.sseObservations();
+    private final SimpleMeterRegistry meters = observed.meters();
     private final ExecutorService senders = Executors.newCachedThreadPool();
     private final List<String> abandoned = new CopyOnWriteArrayList<>();
     private final List<Runnable> finished = new CopyOnWriteArrayList<>();
@@ -68,8 +70,7 @@ class SseConnectionTest {
 
     private SseConnection connect(SlowClient client, int bufferSize) {
         return new SseConnection("test", client, bufferSize, abandoned::add, () -> finished.add(() -> { }),
-                Counter.builder("test.overflows").register(meters), Timer.builder("test.send").register(meters))
-                .start(senders);
+                observations).start(senders);
     }
 
     @AfterEach
@@ -125,7 +126,7 @@ class SseConnectionTest {
 
         assertThat(abandoned).containsExactly("send buffer full");
         assertThat(connection.isOpen()).isFalse();
-        assertThat(meters.get("test.overflows").counter().count()).isEqualTo(1);
+        assertThat(meters.get("chatbot.sse.overflows").tag("stream", "test").counter().count()).isEqualTo(1);
         // Nothing more is queued for a connection that is gone.
         connection.send("final", null, "late");
         assertThat(abandoned).hasSize(1);
@@ -151,7 +152,7 @@ class SseConnectionTest {
         connection.complete(); // idempotent
 
         assertThat(abandoned).isEmpty();
-        assertThat(meters.get("test.overflows").counter().count()).isZero();
+        assertThat(meters.get("chatbot.sse.overflows").tag("stream", "test").counter().count()).isZero();
         client.readAgain();
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(client.completed).isTrue());
         assertThat(client.written).hasSize(3);

@@ -33,9 +33,10 @@ import com.personal.chatbot.service.retrieval.RetrievalService;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.service.retrieval.SearchExpander;
 import com.personal.chatbot.service.retrieval.SubQuestionSearch;
+import com.personal.chatbot.observability.RetrievalStrategy;
+import com.personal.chatbot.observability.RetrievalWorkflow;
 import com.personal.chatbot.support.ChatSettings;
 import com.personal.chatbot.support.TestObservations;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -188,7 +189,7 @@ class RagEvalTest {
         assumeTrue(Files.isRegularFile(modelDir().resolve("model.onnx")), "model files not present in " + modelDir());
         OnnxModelFiles files = OnnxModelFiles.resolve(modelDir(), "model.onnx", "tokenizer.json");
         embeddings = new PromptedEmbeddingService(new OnnxTextEmbedder(files, "embeddinggemma-300m", 2048, 0, 768),
-                16, 2, true, new SimpleMeterRegistry());
+                16, 2, true, TestObservations.embedding("onnx", "embeddinggemma-300m"));
         embeddings.warmUp();
         EmbeddingFingerprint fingerprint = embeddings.fingerprint();
         store = new LuceneIndexStore(dir.resolve("index"), new EmbabelEmbeddingServiceAdapter(embeddings), fingerprint,
@@ -506,7 +507,11 @@ class RagEvalTest {
                     modelMs = writer.lastCallMs();
                     modelLatencies.add(modelMs);
                 }
-                result = expander.expand(query, result, strategy, extra, modelMs);
+                try (RetrievalWorkflow workflow = TestObservations.retrieval()
+                        .startWorkflow(RetrievalStrategy.EXPANSION)) {
+                    result = expander.expand(query, result, strategy, extra, workflow);
+                    workflow.succeeded();
+                }
                 log.info(String.format(Locale.ROOT, "[%s %s%s] %s widened with %d queries: cosine %.3f -> %.3f%s",
                         setName, strategy, forced ? " forced" : "", question.id(), result.expansion().queries().size(),
                         cosineBefore, result.maxVectorScore(), weakBefore && result.evidenceSufficient() ? " (now sufficient)" : ""));
@@ -660,7 +665,7 @@ class RagEvalTest {
                 new GroundingInstructions(4, EXPANSION_QUERIES, 3, 4),
                 ChatSettings.of(ChatSettings.NO_EXPANSION, new ChatbotProperties.Decompose(true, 3, 4),
                         ChatSettings.NO_COMPARISON),
-                TestObservations.chat());
+                TestObservations.chat(), TestObservations.retrieval());
         OperationContext context = Mockito.mock(OperationContext.class, Mockito.RETURNS_DEEP_STUBS);
         var splitCall = context.ai().withLlm(ArgumentMatchers.any(LlmOptions.class))
                 .withPromptContributor(ArgumentMatchers.any()).creating(SubQuestions.class);

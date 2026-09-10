@@ -7,6 +7,9 @@ import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievalTimings;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
+import com.personal.chatbot.observability.RetrievalStrategy;
+import com.personal.chatbot.observability.RetrievalWorkflow;
+import com.personal.chatbot.support.TestObservations;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -28,6 +31,26 @@ class SubQuestionSearchTest {
     private final RetrievalTraceStore traces = new RetrievalTraceStore(20);
     private final SubQuestionSearch search = new SubQuestionSearch(traces, SETTINGS);
     private final List<RetrievalQuery> asked = new ArrayList<>();
+    private final TestObservations observed = TestObservations.create();
+
+    /**
+     * The branch as it stands once the model has split the question: open for {@code modelMs}, which
+     * is where the v1 {@code tookMs} of a decomposition has always started. The clock only moves when
+     * this test moves it, so nothing else is added to it.
+     */
+    private RetrievalWorkflow afterModelCall(long modelMs) {
+        return observed.workflowAfter(RetrievalStrategy.DECOMPOSITION, java.time.Duration.ofMillis(modelMs));
+    }
+
+    /** Runs one decomposed search inside its workflow, the way the chat branch does. */
+    private RetrievalResult searchWith(long modelMs, RetrievalQuery whole, List<String> parts,
+                                       Function<List<RetrievalQuery>, List<RetrievalResult>> passes) {
+        try (RetrievalWorkflow workflow = afterModelCall(modelMs)) {
+            RetrievalResult result = search.search(whole, parts, workflow, passes);
+            workflow.succeeded();
+            return result;
+        }
+    }
 
     /** Runs the passes in order, as the platform's parallelMap does but without the threads. */
     private Function<List<RetrievalQuery>, List<RetrievalResult>> passesOver(Map<String, List<String>> rankings) {
@@ -39,8 +62,8 @@ class SubQuestionSearchTest {
 
     @Test
     void everyPartContributesItsOwnBestPassagesToTheMergedEvidence() {
-        RetrievalResult merged = search.search(RetrievalQuery.of("how do I roll back and abort the canary"),
-                List.of("roll back a release", "abort the canary"), 90,
+        RetrievalResult merged = searchWith(90, RetrievalQuery.of("how do I roll back and abort the canary"),
+                List.of("roll back a release", "abort the canary"),
                 passesOver(Map.of(
                         "how do I roll back and abort the canary", List.of("c1", "c9"),
                         "roll back a release", List.of("c1", "c2"),
@@ -54,7 +77,7 @@ class SubQuestionSearchTest {
         assertThat(merged.hits()).extracting(RetrievedChunk::rank).containsExactly(1, 2, 3, 4);
         assertThat(merged.decomposition().subQuestions()).containsExactly("roll back a release", "abort the canary");
         assertThat(merged.decomposition().addedHits()).isEqualTo(2);
-        assertThat(merged.decomposition().tookMs()).isGreaterThanOrEqualTo(90);
+        assertThat(merged.decomposition().tookMs()).isEqualTo(90);
         assertThat(merged.timings().totalMs()).isEqualTo(merged.decomposition().tookMs());
         assertThat(merged.query()).isEqualTo("how do I roll back and abort the canary | roll back a release | abort the canary");
         assertThat(merged.candidates()).isEqualTo(36);
@@ -65,8 +88,8 @@ class SubQuestionSearchTest {
 
     @Test
     void blankRepeatedAndEchoedPartsAreNotSearchedFor() {
-        RetrievalResult merged = search.search(RetrievalQuery.of("  how do I roll back  "),
-                List.of(" roll back a release ", "", "  ", "roll back a release", "HOW DO I ROLL BACK"), 0,
+        RetrievalResult merged = searchWith(0, RetrievalQuery.of("  how do I roll back  "),
+                List.of(" roll back a release ", "", "  ", "roll back a release", "HOW DO I ROLL BACK"),
                 passesOver(Map.of("  how do I roll back  ", List.of("c1"), "roll back a release", List.of("c2"))));
 
         assertThat(asked).extracting(RetrievalQuery::query)
@@ -77,7 +100,7 @@ class SubQuestionSearchTest {
 
     @Test
     void withoutPartsTheQuestionKeepsItsPlainSinglePassResult() {
-        RetrievalResult only = search.search(RetrievalQuery.of("how do I roll back"), List.of(), 30,
+        RetrievalResult only = searchWith(30, RetrievalQuery.of("how do I roll back"), List.of(),
                 passesOver(Map.of("how do I roll back", List.of("c1"))));
 
         assertThat(asked).extracting(RetrievalQuery::query).containsExactly("how do I roll back");
@@ -88,7 +111,7 @@ class SubQuestionSearchTest {
 
     @Test
     void theMergedResultIsCappedAtTopKAndItsSufficiencyIsDecidedAgain() {
-        RetrievalResult merged = search.search(RetrievalQuery.of("weak whole question"), List.of("strong part"), 0,
+        RetrievalResult merged = searchWith(0, RetrievalQuery.of("weak whole question"), List.of("strong part"),
                 queries -> List.of(
                         new RetrievalResult(UUID.randomUUID().toString(), "weak whole question", RetrievalMode.HYBRID, 4,
                                 12, List.of(hit("c9", 1, 0.2)), false, 0.2, new RetrievalTimings(1, 1, 0, 3), Instant.now()),
@@ -103,7 +126,7 @@ class SubQuestionSearchTest {
     void neighboursOfASurvivingHitAreCarriedIntoTheMergedEvidence() {
         RetrievedChunk hit = hit("c3", 1, 0.6);
         RetrievedChunk neighbour = new RetrievedChunk("c4", "text of c4", provenance("c4"), null, null, 1.0, 1, "c3");
-        RetrievalResult merged = search.search(RetrievalQuery.of("whole"), List.of("part"), 0,
+        RetrievalResult merged = searchWith(0, RetrievalQuery.of("whole"), List.of("part"),
                 queries -> List.of(result("whole", List.of("c9")),
                         new RetrievalResult(UUID.randomUUID().toString(), "part", RetrievalMode.HYBRID, 4, 12,
                                 List.of(hit, neighbour), true, 0.6, new RetrievalTimings(1, 1, 0, 2), Instant.now())));
@@ -114,7 +137,7 @@ class SubQuestionSearchTest {
 
     @Test
     void aCallerThatLosesAPassIsAMistakeRatherThanHalfAnAnswer() {
-        assertThatThrownBy(() -> search.search(RetrievalQuery.of("whole"), List.of("part"), 0,
+        assertThatThrownBy(() -> searchWith(0, RetrievalQuery.of("whole"), List.of("part"),
                 queries -> List.of(result("whole", List.of("c1")))))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("2 retrieval passes");

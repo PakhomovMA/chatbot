@@ -39,7 +39,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>Closing is what publishes the record, so every path through the block ends in exactly one. A
  * block left through an exception nobody reported ends as {@link Outcome#ERROR}: an unaccounted exit
  * is not a success. The scope is opened and closed on the calling thread; work handed to another
- * thread is measured by a boundary of its own.
+ * thread is measured either by a boundary of its own or by one that opens no scope at all
+ * ({@link MeasuredOperation.Boundary#HANDED_OVER}).
  */
 public final class Measured implements AutoCloseable {
 
@@ -49,7 +50,7 @@ public final class Measured implements AutoCloseable {
     private final MeasuredOperation operation;
     private final Context context;
     private final Observation observation;
-    private final Observation.Scope scope;
+    private final Observation.@Nullable Scope scope;
     private final MonotonicClock clock;
     private final LegacyMetrics legacy;
     private final long startedNanos;
@@ -77,7 +78,9 @@ public final class Measured implements AutoCloseable {
         this.startedNanos = clock.nanoTime();
         this.legacyFromNanos = startedNanos;
         this.observation.start();
-        this.scope = observation.openScope();
+        // A boundary whose two ends are on different threads opens no scope: a scope belongs to the
+        // thread that opened it, and closing somebody else's would corrupt theirs (§7.2).
+        this.scope = operation.boundary() == MeasuredOperation.Boundary.HANDED_OVER ? null : observation.openScope();
     }
 
     /** Sets a label of this operation's schema; a key the schema does not declare never reaches a meter. */
@@ -187,9 +190,13 @@ public final class Measured implements AutoCloseable {
         if (legacyUntilNanos == Long.MIN_VALUE) {
             legacyUntilNanos = clock.nanoTime();
         }
-        context.label(MeasuredOperation.Labels.OUTCOME, ended.label());
+        if (operation.labelsOutcome()) {
+            context.label(MeasuredOperation.Labels.OUTCOME, ended.label());
+        }
         try {
-            scope.close();
+            if (scope != null) {
+                scope.close();
+            }
         } finally {
             observation.stop();
         }
@@ -239,8 +246,10 @@ public final class Measured implements AutoCloseable {
             for (String key : context.operation.labelKeys()) {
                 values.add(KeyValue.of(key, context.labels.getOrDefault(key, MeasuredOperation.Labels.NONE)));
             }
-            values.add(KeyValue.of(MeasuredOperation.Labels.OUTCOME,
-                    context.labels.getOrDefault(MeasuredOperation.Labels.OUTCOME, MeasuredOperation.Labels.NONE)));
+            if (context.operation.labelsOutcome()) {
+                values.add(KeyValue.of(MeasuredOperation.Labels.OUTCOME,
+                        context.labels.getOrDefault(MeasuredOperation.Labels.OUTCOME, MeasuredOperation.Labels.NONE)));
+            }
             return KeyValues.of(values);
         }
     }

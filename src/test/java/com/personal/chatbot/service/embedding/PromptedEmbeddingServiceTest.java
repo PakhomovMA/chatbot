@@ -5,7 +5,9 @@ import com.personal.chatbot.utils.EmbeddingPrompts;
 import com.personal.chatbot.utils.VectorMath;
 
 import com.personal.chatbot.support.BlockingTextEmbedder;
+import com.personal.chatbot.observability.EmbeddingObservations;
 import com.personal.chatbot.support.FakeTextEmbedder;
+import com.personal.chatbot.support.TestObservations;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -21,10 +23,16 @@ import static org.assertj.core.api.Assertions.within;
 class PromptedEmbeddingServiceTest {
 
     private final FakeTextEmbedder backend = new FakeTextEmbedder(16);
-    private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
+    private final TestObservations observed = TestObservations.create();
+    private final SimpleMeterRegistry registry = observed.meters();
 
     private PromptedEmbeddingService service(int batchSize) {
-        return new PromptedEmbeddingService(backend, batchSize, 2, true, registry);
+        return new PromptedEmbeddingService(backend, batchSize, 2, true, embedding(backend));
+    }
+
+    /** The facade of the backend under test, over the one registry these assertions read. */
+    private EmbeddingObservations embedding(TextEmbedder embedder) {
+        return observed.embeddingObservations(embedder.provider(), embedder.modelName());
     }
 
     @Test
@@ -97,7 +105,7 @@ class PromptedEmbeddingServiceTest {
     @Test
     void neverClosesTheBackendWhileItIsEmbedding() throws InterruptedException {
         BlockingTextEmbedder blocking = new BlockingTextEmbedder(4);
-        PromptedEmbeddingService service = new PromptedEmbeddingService(blocking, 8, 2, true, registry);
+        PromptedEmbeddingService service = new PromptedEmbeddingService(blocking, 8, 2, true, embedding(blocking));
         Thread embedding = Thread.ofPlatform().name("embedding").start(() -> service.embed("held open"));
         blocking.awaitEntered();
 
@@ -118,7 +126,7 @@ class PromptedEmbeddingServiceTest {
     @Test
     void aCallWaitingForCapacityDoesNotReachAClosingBackend() throws InterruptedException {
         BlockingTextEmbedder blocking = new BlockingTextEmbedder(4);
-        PromptedEmbeddingService service = new PromptedEmbeddingService(blocking, 8, 1, true, registry);
+        PromptedEmbeddingService service = new PromptedEmbeddingService(blocking, 8, 1, true, embedding(blocking));
         Thread first = Thread.ofPlatform().start(() -> service.embed("first"));
         blocking.awaitEntered();
 
@@ -145,7 +153,7 @@ class PromptedEmbeddingServiceTest {
     @Test
     @Timeout(20)
     void closeIsIdempotentAndRefusesLaterCallsWithoutHoldingCapacity() {
-        PromptedEmbeddingService service = new PromptedEmbeddingService(backend, 8, 1, true, registry);
+        PromptedEmbeddingService service = new PromptedEmbeddingService(backend, 8, 1, true, embedding(backend));
         service.close();
         service.close();
         for (String text : List.of("too late", "still too late")) {

@@ -8,9 +8,9 @@ import com.personal.chatbot.utils.Hashes;
 import com.personal.chatbot.utils.VectorMath;
 
 import com.personal.chatbot.service.embedding.ollama.OllamaTextEmbedder;
+import com.personal.chatbot.support.TestObservations;
 import com.personal.chatbot.service.embedding.onnx.OnnxModelFiles;
 import com.personal.chatbot.service.embedding.onnx.OnnxTextEmbedder;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
@@ -56,7 +56,8 @@ class OnnxEmbeddingGemmaModelTest {
         long started = System.nanoTime();
         OnnxModelFiles files = OnnxModelFiles.resolve(modelDir(), "model.onnx", "tokenizer.json");
         backend = new OnnxTextEmbedder(files, "embeddinggemma-300m", 2048, 0, 768);
-        service = new PromptedEmbeddingService(backend, 16, 2, true, new SimpleMeterRegistry());
+        service = new PromptedEmbeddingService(backend, 16, 2, true,
+                TestObservations.embedding(backend.provider(), backend.modelName()));
         service.warmUp();
         log.info("Model load + warm-up took {} ms", (System.nanoTime() - started) / 1_000_000);
         assertThat(service.warmupDuration()).isPresent();

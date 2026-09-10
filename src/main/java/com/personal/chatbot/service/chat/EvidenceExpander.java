@@ -14,6 +14,8 @@ import com.personal.chatbot.observability.AiOperation;
 import com.personal.chatbot.observability.ChatObservations;
 import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.observability.RetrievalObservations;
+import com.personal.chatbot.observability.RetrievalStrategy;
+import com.personal.chatbot.observability.RetrievalWorkflow;
 import com.personal.chatbot.service.retrieval.SearchExpander;
 import com.personal.chatbot.utils.Texts;
 import org.slf4j.Logger;
@@ -66,18 +68,31 @@ public class EvidenceExpander {
         return settings.expandSearch().enabled() && expander.worthExpanding(evidence.retrieval());
     }
 
-    /** @return evidence merged from both passes; always marked as expanded, even when nothing was added */
+    /**
+     * @return evidence merged from both passes; always marked as expanded, even when nothing was added
+     */
     public Evidence expand(Evidence evidence, OperationContext context) {
         UserQuestion question = evidence.question();
         ExpansionStrategy strategy = settings.expandSearch().strategy();
         question.abortIfCancelled();
         question.notifyStage(AnswerStages.EXPANDING);
-        long started = System.nanoTime();
-        List<String> queries = queriesFor(strategy, question, context);
-        long buildMs = (System.nanoTime() - started) / 1_000_000;
-        RetrievalResult widened = expander.expand(question.retrievalQuery(), evidence.retrieval(), strategy, queries, buildMs);
-        retrievalObservations.expansion(strategy, widened.evidenceSufficient());
-        return new Evidence(question, widened);
+        // The branch is measured as a whole: the model call that produces the wider queries belongs to
+        // it and to no pass, and so does the merge at the end (docs/observability-plan.md §4.1).
+        try (RetrievalWorkflow workflow = retrievalObservations.startWorkflow(RetrievalStrategy.EXPANSION)) {
+            try {
+                List<String> queries = queriesFor(strategy, question, context);
+                RetrievalResult widened = expander.expand(question.retrievalQuery(), evidence.retrieval(), strategy,
+                        queries, workflow);
+                retrievalObservations.expansion(strategy, widened.evidenceSufficient());
+                // A strategy that produced nothing usable still widened the search as far as it could,
+                // and the evidence it leaves behind is the answer's: that is not a failed workflow.
+                workflow.succeeded();
+                return new Evidence(question, widened);
+            } catch (RuntimeException e) {
+                workflow.failed(e, question.cancellation().reason());
+                throw e;
+            }
+        }
     }
 
     private List<String> queriesFor(ExpansionStrategy strategy, UserQuestion question, OperationContext context) {

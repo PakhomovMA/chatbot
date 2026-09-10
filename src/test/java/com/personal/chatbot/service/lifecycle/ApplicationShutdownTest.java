@@ -3,7 +3,7 @@ package com.personal.chatbot.service.lifecycle;
 import com.personal.chatbot.service.embedding.PromptedEmbeddingService;
 import com.personal.chatbot.service.knowledge.IngestionQueue;
 import com.personal.chatbot.support.BlockingTextEmbedder;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.personal.chatbot.support.TestObservations;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
@@ -22,9 +22,10 @@ class ApplicationShutdownTest {
 
     private final BlockingTextEmbedder backend = new BlockingTextEmbedder(4);
     private final PromptedEmbeddingService embeddings =
-            new PromptedEmbeddingService(backend, 8, 1, true, new SimpleMeterRegistry());
+            new PromptedEmbeddingService(backend, 8, 1, true,
+                    TestObservations.embedding(backend.provider(), backend.modelName()));
     /** Stands in for the ingestion pipeline: the worker is inside the embedding backend when we stop. */
-    private final IngestionQueue queue = new IngestionQueue(claim -> embeddings.embed(claim.documentId()), List::of);
+    private final IngestionQueue queue = new IngestionQueue(claim -> embeddings.embed(claim.documentId()), List::of, TestObservations.ingestion());
 
     @Test
     void theWorkerIsStoppedBeforeTheBackendItUsesIsClosed() throws InterruptedException {

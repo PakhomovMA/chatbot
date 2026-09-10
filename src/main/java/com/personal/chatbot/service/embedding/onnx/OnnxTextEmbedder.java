@@ -7,6 +7,7 @@ import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 import com.personal.chatbot.exceptions.EmbeddingModelUnavailableException;
+import com.personal.chatbot.observability.MonotonicClock;
 import com.personal.chatbot.service.embedding.TextEmbedder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -70,13 +71,13 @@ public final class OnnxTextEmbedder implements TextEmbedder {
     }
 
     private OrtSession openSession(java.nio.file.Path modelFile, int intraOpThreads) {
-        long started = System.nanoTime();
+        long started = MonotonicClock.SYSTEM.nanoTime();
         try (OrtSession.SessionOptions options = new OrtSession.SessionOptions()) {
             int threads = intraOpThreads > 0 ? intraOpThreads
                     : Math.min(MAX_INTRA_OP_THREADS, Runtime.getRuntime().availableProcessors());
             options.setIntraOpNumThreads(threads);
             OrtSession created = environment.createSession(modelFile.toString(), options);
-            log.info("ONNX session created in {} ms with {} intra-op threads", (System.nanoTime() - started) / 1_000_000, threads);
+            log.info("ONNX session created in {} ms with {} intra-op threads", MonotonicClock.SYSTEM.since(started).toMillis(), threads);
             return created;
         } catch (OrtException e) {
             throw new EmbeddingModelUnavailableException("Cannot load ONNX model " + modelFile + ": " + e.getMessage(), e);

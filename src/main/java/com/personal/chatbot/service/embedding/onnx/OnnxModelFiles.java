@@ -1,6 +1,7 @@
 package com.personal.chatbot.service.embedding.onnx;
 
 import com.personal.chatbot.exceptions.EmbeddingModelUnavailableException;
+import com.personal.chatbot.observability.MonotonicClock;
 import com.personal.chatbot.utils.Hashes;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -57,10 +58,10 @@ public record OnnxModelFiles(Path modelFile, @Nullable Path dataFile, Path token
     /** Short digest of {@link #weightsFile()}, cached in a sidecar file across restarts. */
     public String artifactHash() {
         Path weights = weightsFile();
-        long started = System.nanoTime();
+        long started = MonotonicClock.SYSTEM.nanoTime();
         String hash = Hashes.cachedSha256Prefix(weights);
         log.info("Weights digest of {} resolved in {} ms: {}", weights.getFileName(),
-                (System.nanoTime() - started) / 1_000_000, hash);
+                MonotonicClock.SYSTEM.since(started).toMillis(), hash);
         return hash;
     }
 }

@@ -59,7 +59,7 @@ class QuestionDecomposerTest {
                 new ChatbotProperties.Decompose(enabled, 3, 4), ChatSettings.NO_COMPARISON);
         return new QuestionDecomposer(retriever, new SubQuestionSearch(new RetrievalTraceStore(20), RETRIEVAL),
                 new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO), new GroundingInstructions(4, 3, 3, 4), chat,
-                TestObservations.chat());
+                TestObservations.chat(), TestObservations.retrieval());
     }
 
     private void splitsInto(SubQuestions split) {

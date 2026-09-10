@@ -144,7 +144,12 @@ public class ChatService {
         // Where the v1 diagnostics stop counting, before everything below them.
         observed.agentFinished();
         ChatTimings timings = observed.timings(answer.retrievalMs());
-        RetrievalResult diagnostics = options.diagnostics() ? traces.find(answer.retrievalTraceId()).orElse(null) : null;
+        // This run's own trace first: the shared ring is short, and a busy period must not decide
+        // whether an answer can report what it retrieved (docs/observability-plan.md §4.2).
+        RetrievalResult diagnostics = options.diagnostics()
+                ? observed.diagnostics().find(answer.retrievalTraceId())
+                        .or(() -> traces.find(answer.retrievalTraceId())).orElse(null)
+                : null;
 
         // An abandoned run has no result to report: a half-written answer is not an answer, and it
         // must not enter the history the next question will be answered from.

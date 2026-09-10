@@ -11,7 +11,11 @@ import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.observability.AiOperation;
 import com.personal.chatbot.observability.ChatObservations;
+import com.personal.chatbot.observability.ExecutionDiagnostics;
 import com.personal.chatbot.observability.Measured;
+import com.personal.chatbot.observability.RetrievalObservations;
+import com.personal.chatbot.observability.RetrievalStrategy;
+import com.personal.chatbot.observability.RetrievalWorkflow;
 import com.personal.chatbot.service.retrieval.Retriever;
 import com.personal.chatbot.service.retrieval.SubQuestionSearch;
 import org.jspecify.annotations.Nullable;
@@ -61,16 +65,18 @@ public class QuestionDecomposer {
     private final GroundingInstructions instructions;
     private final ChatbotProperties.Chat settings;
     private final ChatObservations observations;
+    private final RetrievalObservations retrievalObservations;
 
     public QuestionDecomposer(Retriever retriever, SubQuestionSearch search, GroundedAnswerPrompt prompt,
                               GroundingInstructions instructions, ChatbotProperties.Chat settings,
-                              ChatObservations observations) {
+                              ChatObservations observations, RetrievalObservations retrievalObservations) {
         this.retriever = retriever;
         this.search = search;
         this.prompt = prompt;
         this.instructions = instructions;
         this.settings = settings;
         this.observations = observations;
+        this.retrievalObservations = retrievalObservations;
     }
 
     /**
@@ -94,15 +100,30 @@ public class QuestionDecomposer {
      */
     public Evidence decompose(UserQuestion question, OperationContext context) {
         question.abortIfCancelled();
-        long started = System.nanoTime();
+        // The branch is measured as a whole: the model call that splits the question belongs to it and
+        // to no pass, the passes may run in parallel, and the merge is part of it too (§4.1).
+        try (RetrievalWorkflow workflow = retrievalObservations.startWorkflow(RetrievalStrategy.DECOMPOSITION)) {
+            try {
+                Evidence evidence = decompose(question, context, workflow);
+                // A split the model could not produce, or a pass that failed and was searched again as
+                // one question, still ended in evidence to answer from; only losing the question does not.
+                workflow.succeeded();
+                return evidence;
+            } catch (RuntimeException e) {
+                workflow.failed(e, question.cancellation().reason());
+                throw e;
+            }
+        }
+    }
+
+    private Evidence decompose(UserQuestion question, OperationContext context, RetrievalWorkflow workflow) {
         List<String> parts = partsOf(question, context);
-        long buildMs = (System.nanoTime() - started) / 1_000_000;
         question.notifyStage(AnswerStages.RETRIEVING);
         question.abortIfCancelled();
         RetrievalResult result;
         ChatObservations.DecompositionOutcome outcome;
         try {
-            result = search.search(question.retrievalQuery(), parts == null ? List.of() : parts, buildMs,
+            result = search.search(question.retrievalQuery(), parts == null ? List.of() : parts, workflow,
                     queries -> passes(queries, question, context));
             outcome = result.decomposed() ? ChatObservations.DecompositionOutcome.SPLIT
                     : parts == null ? ChatObservations.DecompositionOutcome.FAILED
@@ -168,18 +189,24 @@ public class QuestionDecomposer {
      * The parts are independent searches over the same index, so they run in parallel through the
      * platform's asyncer, which carries the agent process onto the worker threads. Each search takes
      * the index read lock and sets its own embedding mode, so nothing here is shared between them.
+     *
+     * <p>The run's diagnostics are the exception, and they are handed over explicitly: registering an
+     * accessor with the platform does not prove that this executor took a snapshot, so what a pass on
+     * a worker thread records would otherwise be lost to the request that asked for it
+     * (docs/observability-plan.md §4.2). The collector is bounded and safe to write from all of them.
      */
     private List<RetrievalResult> passes(List<RetrievalQuery> queries, UserQuestion question, OperationContext context) {
         if (queries.size() == 1) {
             question.abortIfCancelled();
             return List.of(retriever.search(queries.getFirst()));
         }
+        ExecutionDiagnostics.Carrier diagnostics = ExecutionDiagnostics.capture();
         return context.parallelMap(queries, Math.min(queries.size(), settings.decompose().maxConcurrentSearches()),
-                query -> {
+                query -> diagnostics.in(() -> {
                     question.abortIfCancelled();
                     RetrievalResult result = retriever.search(query);
                     question.abortIfCancelled();
                     return result;
-                });
+                }));
     }
 }

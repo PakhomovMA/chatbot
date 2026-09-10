@@ -12,9 +12,11 @@ import java.util.Locale;
  * vocabulary is closed on purpose: an outcome is a label, and a free-form reason or exception message
  * must never become one (docs/observability-plan.md §5.3).
  *
- * <p>{@link #FALLBACK} belongs to {@code chatbot.ai.operation} alone: a best-effort branch whose model
- * call failed and whose caller carried on without it did not fail the request, and the chat run above
- * it is still a success (§5.2). The provider attempt underneath keeps its own error.
+ * <p>The last three belong to one family each and are not added to the others (§5.2):
+ * {@link #FALLBACK} to {@code chatbot.ai.operation}, {@link #SUPERSEDED} and {@link #WAITING_INDEX} to
+ * the ingestion families. A best-effort branch whose model call failed and whose caller carried on
+ * without it did not fail the request, and the chat run above it is still a success; the provider
+ * attempt underneath keeps its own error.
  */
 public enum Outcome {
 
@@ -25,7 +27,11 @@ public enum Outcome {
     REJECTED,
     SKIPPED,
     /** A recovered failure of a best-effort AI operation; the caller answered without it. */
-    FALLBACK;
+    FALLBACK,
+    /** A deletion, a newer request or a rebuild took the document over; this run had nothing to publish. */
+    SUPERSEDED,
+    /** The index could not take the document yet; it stays where reconciliation will queue it again. */
+    WAITING_INDEX;
 
     private final String label = name().toLowerCase(Locale.ROOT);
 

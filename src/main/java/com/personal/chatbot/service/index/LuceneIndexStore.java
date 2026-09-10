@@ -15,6 +15,7 @@ import com.personal.chatbot.models.embedding.EmbeddingFingerprint;
 import com.personal.chatbot.models.index.IndexInfo;
 import com.personal.chatbot.models.index.IndexManifest;
 import com.personal.chatbot.models.index.IndexState;
+import com.personal.chatbot.observability.RetrievalObservations;
 import com.personal.chatbot.utils.Directories;
 import com.personal.chatbot.utils.EmbeddingAudit;
 import org.apache.lucene.util.Version;
@@ -265,8 +266,8 @@ public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, Auto
     }
 
     /** Search capabilities for Embabel tools, guarded by this store's lock and state (Phase 9c). */
-    public LockedSearchOperations searchOperations() {
-        return new LockedSearchOperations(this);
+    public LockedSearchOperations searchOperations(RetrievalObservations observations) {
+        return new LockedSearchOperations(this, observations);
     }
 
     /** Drops all content and starts a fresh index under the current fingerprint. */

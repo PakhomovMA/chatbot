@@ -6,7 +6,6 @@ import com.personal.chatbot.service.embedding.PromptedEmbeddingService;
 import com.personal.chatbot.service.embedding.TextEmbedder;
 import com.personal.chatbot.service.index.LuceneIndexStore;
 import com.personal.chatbot.service.parsing.ProvenanceChunkTransformer;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.jspecify.annotations.Nullable;
 
 import java.nio.file.Path;
@@ -20,7 +19,8 @@ public final class IndexStores {
     }
 
     public static PromptedEmbeddingService embeddings(TextEmbedder backend) {
-        return new PromptedEmbeddingService(backend, 8, 1, true, new SimpleMeterRegistry());
+        return new PromptedEmbeddingService(backend, 8, 1, true,
+                TestObservations.embedding(backend.provider(), backend.modelName()));
     }
 
     /** Unopened store; call {@link LuceneIndexStore#open()}. */

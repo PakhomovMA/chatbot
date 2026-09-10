@@ -1,7 +1,6 @@
 package com.personal.chatbot.service.sse;
 
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Timer;
+import com.personal.chatbot.observability.SseObservations;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,7 +13,6 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
@@ -52,8 +50,7 @@ public final class SseConnection {
     private final BlockingQueue<Item> queue;
     private final Consumer<String> onAbandoned;
     private final Runnable onFinished;
-    private final Counter overflows;
-    private final Timer sends;
+    private final SseObservations observations;
 
     private final AtomicBoolean finished = new AtomicBoolean();
     private final AtomicBoolean completing = new AtomicBoolean();
@@ -61,14 +58,13 @@ public final class SseConnection {
     private volatile @Nullable Future<?> sender;
 
     SseConnection(String stream, SseEmitter emitter, int bufferSize, Consumer<String> onAbandoned, Runnable onFinished,
-                  Counter overflows, Timer sends) {
+                  SseObservations observations) {
         this.stream = stream;
         this.emitter = emitter;
         this.queue = new ArrayBlockingQueue<>(bufferSize);
         this.onAbandoned = onAbandoned;
         this.onFinished = onFinished;
-        this.overflows = overflows;
-        this.sends = sends;
+        this.observations = observations;
         emitter.onCompletion(() -> abandon("client closed the stream"));
         emitter.onTimeout(() -> abandon("stream timed out"));
         emitter.onError(e -> abandon("stream failed: " + e));
@@ -159,7 +155,7 @@ public final class SseConnection {
             return;
         }
         if (!queue.offer(item)) {
-            overflows.increment();
+            observations.overflowed(stream);
             log.warn("{} SSE connection fell behind by more than {} events; dropping it", stream, queue.size());
             abandon("send buffer full");
         }
@@ -193,23 +189,24 @@ public final class SseConnection {
 
     /** @return false once the client is gone and there is no point in trying again */
     private boolean deliver(Item item) {
-        long started = System.nanoTime();
-        try {
-            switch (item) {
-                case Item.Event event -> emitter.send(builderFor(event));
-                case Item.Comment comment -> {
-                    emitter.send(SseEmitter.event().comment(comment.text()));
-                    heartbeatPending.set(false);
+        // The write is measured, not its delivery: that the emitter took the event says nothing about
+        // the client having read it (docs/observability/metric-catalog.json, chatbot.sse.send).
+        try (SseObservations.Send _ = observations.startSend(stream)) {
+            try {
+                switch (item) {
+                    case Item.Event event -> emitter.send(builderFor(event));
+                    case Item.Comment comment -> {
+                        emitter.send(SseEmitter.event().comment(comment.text()));
+                        heartbeatPending.set(false);
+                    }
+                    case Item.End _ -> throw new IllegalStateException("End is handled by the sender loop");
                 }
-                case Item.End _ -> throw new IllegalStateException("End is handled by the sender loop");
+                return true;
+            } catch (IOException | IllegalStateException e) {
+                log.debug("Client of the {} stream went away: {}", stream, e.toString());
+                end("client went away"); // no cancel(true) here: this is the sender's own thread
+                return false;
             }
-            return true;
-        } catch (IOException | IllegalStateException e) {
-            log.debug("Client of the {} stream went away: {}", stream, e.toString());
-            end("client went away"); // no cancel(true) here: this is the sender's own thread
-            return false;
-        } finally {
-            sends.record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
         }
     }
 

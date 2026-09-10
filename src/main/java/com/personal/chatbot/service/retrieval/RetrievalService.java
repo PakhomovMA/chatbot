@@ -12,6 +12,7 @@ import com.personal.chatbot.models.retrieval.RetrievalTimings;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.observability.RetrievalObservations;
+import com.personal.chatbot.observability.RetrievalStage;
 import com.personal.chatbot.service.index.LuceneIndexStore;
 import com.personal.chatbot.utils.CosineScores;
 import com.personal.chatbot.utils.EmbeddingModeScope;
@@ -24,6 +25,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /**
  * Deterministic hybrid retrieval (docs/system-plan.md §6, D4, INV-01): runs the vector and BM25
@@ -62,7 +64,7 @@ public class RetrievalService implements Retriever {
         // it replaces counted only the passes that came back with something.
         try (Measured pass = observations.startSearch(mode)) {
             try {
-                RetrievalResult result = run(query, mode);
+                RetrievalResult result = run(query, mode, pass);
                 observations.passages(result.hits().size());
                 pass.succeeded();
                 return result;
@@ -73,33 +75,55 @@ public class RetrievalService implements Retriever {
         }
     }
 
-    private RetrievalResult run(RetrievalQuery query, RetrievalMode mode) {
-        long started = System.nanoTime();
+    private RetrievalResult run(RetrievalQuery query, RetrievalMode mode, Measured pass) {
         String text = query.query().strip();
         int topK = query.topK() != null ? query.topK() : settings.topK();
         Set<String> documentFilter = query.documentIds() == null || query.documentIds().isEmpty() ? null : query.documentIds();
         int candidates = topK * settings.candidateMultiplier() * (documentFilter != null ? 2 : 1);
 
-        long vectorStart = System.nanoTime();
-        List<SimilarityResult<Chunk>> vector = mode == RetrievalMode.TEXT ? List.of() : vectorSearch(text, candidates);
-        long vectorMs = millisSince(vectorStart);
-        long textStart = System.nanoTime();
-        List<SimilarityResult<Chunk>> lexical = mode == RetrievalMode.VECTOR ? List.of() : textSearch(text, candidates);
-        long textMs = millisSince(textStart);
+        // A facet the mode does not run publishes no stage: zero milliseconds and "did not happen" are
+        // different statements, and only the second one is true here.
+        Staged<List<SimilarityResult<Chunk>>> vector = mode == RetrievalMode.TEXT ? Staged.skipped()
+                : stage(RetrievalStage.VECTOR, mode, () -> vectorSearch(text, candidates));
+        Staged<List<SimilarityResult<Chunk>>> lexical = mode == RetrievalMode.VECTOR ? Staged.skipped()
+                : stage(RetrievalStage.TEXT, mode, () -> textSearch(text, candidates));
 
         // Expansion is timed with fusion: both are post-processing of the two facet queries.
-        long fusionStart = System.nanoTime();
-        List<RetrievedChunk> hits = neighbourExpansion(query).expand(fusion.fuse(mode, vector, lexical, documentFilter, topK));
-        long fusionMs = millisSince(fusionStart);
+        Staged<List<RetrievedChunk>> postprocessed = stage(RetrievalStage.POSTPROCESS, mode, () ->
+                neighbourExpansion(query).expand(fusion.fuse(mode, vector.value(), lexical.value(), documentFilter, topK)));
+        List<RetrievedChunk> hits = postprocessed.value();
 
         double maxVector = maxVectorScore(hits);
         boolean sufficient = sufficient(hits, maxVector, settings.sufficientCosine());
+        RetrievalTimings timings = new RetrievalTimings(vector.millis(), lexical.millis(), postprocessed.millis(),
+                pass.elapsed().toMillis());
         RetrievalResult result = new RetrievalResult(UUID.randomUUID().toString(), text, mode, topK, candidates, hits,
-                sufficient, maxVector, new RetrievalTimings(vectorMs, textMs, fusionMs, millisSince(started)), Instant.now());
+                sufficient, maxVector, timings, Instant.now());
         traces.record(result);
         log.debug("Retrieval [{}] mode={} '{}' -> {} passages (maxCosine={}, sufficient={}) in {} ms", result.traceId(), mode,
                 text, hits.size(), String.format("%.3f", maxVector), sufficient, result.timings().totalMs());
         return result;
+    }
+
+    /** What a stage produced and how long it took, in the milliseconds the v1 diagnostics report. */
+    private record Staged<T>(T value, long millis) {
+
+        static <T> Staged<List<T>> skipped() {
+            return new Staged<>(List.of(), 0);
+        }
+    }
+
+    private <T> Staged<T> stage(RetrievalStage stage, RetrievalMode mode, Supplier<T> work) {
+        try (Measured measured = observations.startStage(stage, mode)) {
+            try {
+                T value = work.get();
+                measured.succeeded();
+                return new Staged<>(value, measured.elapsed().toMillis());
+            } catch (RuntimeException e) {
+                measured.failed(e);
+                throw e;
+            }
+        }
     }
 
     /** Best cosine among the hits, or -1 when the vector facet matched nothing. */
@@ -128,9 +152,5 @@ public class RetrievalService implements Retriever {
     private List<SimilarityResult<Chunk>> textSearch(String text, int candidates) {
         return indexStore.search(ops ->
                 ops.textSearch(TextSimilaritySearchRequest.create(text, settings.minTextScore(), candidates), Chunk.class));
-    }
-
-    private static long millisSince(long startNanos) {
-        return (System.nanoTime() - startNanos) / 1_000_000;
     }
 }

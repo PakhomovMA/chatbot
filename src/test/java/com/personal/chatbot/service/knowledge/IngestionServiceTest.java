@@ -14,7 +14,7 @@ import com.personal.chatbot.support.FakeTextEmbedder;
 import com.personal.chatbot.support.IndexStores;
 import com.personal.chatbot.support.PausingDocumentParser;
 import com.personal.chatbot.support.TestDocuments;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import com.personal.chatbot.support.TestObservations;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -50,6 +50,8 @@ class IngestionServiceTest {
     private final AtomicBoolean finishActiveWhileMarkingRebuild = new AtomicBoolean();
     /** What a rebuild did, in the order it happened: one entry per marked document, one per rebuild. */
     private final List<String> rebuildSteps = new CopyOnWriteArrayList<>();
+    /** One facade for the whole test, so what every run reported survives a re-wiring of the index. */
+    private final TestObservations observed = TestObservations.create();
     private DocumentRegistry registry;
     private BlobStore blobStore;
     private LuceneIndexStore indexStore;
@@ -81,8 +83,9 @@ class IngestionServiceTest {
         };
         DocumentStatusUpdater status = new DocumentStatusUpdater(registry, publisher);
         IngestionFailureLog failures = new IngestionFailureLog();
+        var observations = observed.ingestionObservations();
         DocumentIngestionPipeline pipeline = new DocumentIngestionPipeline(registry, blobStore, parser,
-                indexStore, status, failures, Clock.systemUTC(), new SimpleMeterRegistry());
+                indexStore, status, failures, Clock.systemUTC(), observations);
         queue = new IngestionQueue(pipeline::process, () -> {
             rebuildSteps.add("rebuild");
             if (rebuildFails.get()) {
@@ -90,7 +93,7 @@ class IngestionServiceTest {
             }
             indexStore.rebuild();
             return registry.findAll().stream().map(Document::id).toList();
-        });
+        }, observations);
         IndexReconciler reconciler = new IndexReconciler(registry, indexStore, status, queue,
                 properties().ingestion(), Clock.systemUTC());
         ingestion = new IngestionService(queue, reconciler, status, failures, registry, indexStore, Clock.systemUTC());
@@ -113,6 +116,27 @@ class IngestionServiceTest {
     /** Stops the worker the way the application does, so a test never leaves one running. */
     private ShutdownSequence.Result stopIngestion() {
         return new ShutdownSequence(List.of(queue), Duration.ofSeconds(5), Duration.ofSeconds(5)).stop();
+    }
+
+    /**
+     * How many runs ended in {@code outcome}, as the pipeline itself reported. Ingestion handles most
+     * of its endings internally and returns nothing either way, so this is the only thing that can
+     * tell a document that vanished from one that was indexed (docs/observability-plan.md §5.2).
+     */
+    private long processed(String outcome) {
+        return observed.meters().find("chatbot.ingestion.processing").tag("outcome", outcome)
+                .timers().stream().mapToLong(io.micrometer.core.instrument.Timer::count).sum();
+    }
+
+    /** How many accepted requests ended their wait for the single writer in {@code outcome}. */
+    private long queued(String outcome) {
+        return observed.meters().find("chatbot.ingestion.queue.wait").tag("outcome", outcome)
+                .timers().stream().mapToLong(io.micrometer.core.instrument.Timer::count).sum();
+    }
+
+    private double failuresAt(String stage) {
+        return observed.meters().find("chatbot.ingestion.failures").tag("stage", stage)
+                .counters().stream().mapToDouble(io.micrometer.core.instrument.Counter::count).sum();
     }
 
     /**
@@ -169,6 +193,9 @@ class IngestionServiceTest {
             assertThat(indexStore.containsDocument(DocumentParser.uriOf(id))).isTrue();
         }
         assertThat(indexStore.documentUris()).hasSize(3);
+        // Three requests waited for the single writer and three runs ended in a READY commit.
+        assertThat(queued("success")).isEqualTo(3);
+        assertThat(processed("success")).isEqualTo(3);
         assertThat(published).filteredOn(DocumentEvent.StatusChanged.class::isInstance)
                 .map(e -> ((DocumentEvent.StatusChanged) e).view().status())
                 .contains(DocumentStatus.PARSING, DocumentStatus.INDEXING, DocumentStatus.READY);
@@ -181,6 +208,8 @@ class IngestionServiceTest {
         assertThat(failed.error()).isNotNull();
         assertThat(failed.error().stage()).isEqualTo("parse");
         assertThat(indexStore.containsDocument(DocumentParser.uriOf(id))).isFalse();
+        assertThat(processed("error")).isEqualTo(1);
+        assertThat(failuresAt("parse")).isEqualTo(1);
     }
 
     @Test
@@ -330,6 +359,10 @@ class IngestionServiceTest {
                 assertThat(registry.findById(id).orElseThrow().statusMessage()).contains("INCOMPATIBLE"));
         assertThat(registry.findById(id).orElseThrow().status()).isEqualTo(DocumentStatus.UPLOADED);
 
+        // Parked, not failed: the document is waiting for an index that can take it.
+        assertThat(processed("waiting_index")).isEqualTo(1);
+        assertThat(failuresAt("ingestion")).isZero();
+
         ingestion.reindexAll();
         awaitStatus(id, DocumentStatus.READY);
     }
@@ -354,6 +387,10 @@ class IngestionServiceTest {
         assertThat(registry.findById(id).orElseThrow().error()).isNull();
         assertThat(ingestion.enqueue(id)).isFalse();
         assertThat(ingestion.recentFailures()).isEmpty();
+        // A clean restart is not an ingestion that went wrong, and it is not counted as one.
+        assertThat(processed("cancelled")).isEqualTo(1);
+        assertThat(processed("error")).isZero();
+        assertThat(failuresAt("parse")).isZero();
 
         // What the next start makes of it: an interrupted stage is re-queued and indexed.
         indexStore.close();
@@ -379,6 +416,9 @@ class IngestionServiceTest {
         });
         awaitIdleQueue();
         assertThat(indexStore.allChunks()).isNotEmpty().allMatch(c -> c.getId().startsWith(id + ":2:"));
+        // The run that was reading v1 lost the document to the replacement; only the second one committed.
+        assertThat(processed("superseded")).isEqualTo(1);
+        assertThat(processed("success")).isEqualTo(1);
     }
 
     @Test
@@ -441,6 +481,12 @@ class IngestionServiceTest {
         parser.resume();
 
         awaitIdleQueue();
+        // Deleted under the run: the parser lost the original with the document, and that is a
+        // supersession rather than a failure — there is no document left for a failure to belong to.
+        assertThat(processed("superseded")).isEqualTo(1);
+        assertThat(processed("error")).isZero();
+        assertThat(failuresAt("parse")).isZero();
+        assertThat(ingestion.recentFailures()).isEmpty();
         assertThat(registry.findById(id)).isEmpty();
         assertThat(registry.count()).isZero();
         assertThat(indexStore.containsDocument(DocumentParser.uriOf(id))).isFalse();
@@ -462,6 +508,9 @@ class IngestionServiceTest {
         awaitIdleQueue();
         assertThat(registry.findById(id).orElseThrow().status()).isEqualTo(DocumentStatus.READY);
         assertThat(parser.parses()).isEqualTo(2);
+        // Five re-index requests collapsed into one re-run: four of them never waited for a worker.
+        assertThat(queued("superseded")).isEqualTo(4);
+        assertThat(queued("success")).isEqualTo(2);
     }
 
     @Test

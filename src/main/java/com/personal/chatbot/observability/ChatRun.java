@@ -26,6 +26,8 @@ public final class ChatRun implements AutoCloseable {
 
     private final Observations observations;
     private final Measured request;
+    private final ExecutionDiagnostics diagnostics = ExecutionDiagnostics.open();
+    private final ExecutionDiagnostics.Scope installed;
 
     ChatRun(Observations observations, boolean streaming, AnswerMode answerMode) {
         this.observations = observations;
@@ -33,6 +35,16 @@ public final class ChatRun implements AutoCloseable {
                 MeasuredOperation.Labels.MODE, streaming ? "stream" : "sync",
                 MeasuredOperation.Labels.ANSWER_MODE, answerMode.name().toLowerCase(Locale.ROOT),
                 MeasuredOperation.Labels.GROUNDING, MeasuredOperation.Labels.NONE);
+        this.installed = diagnostics.install();
+    }
+
+    /**
+     * What this run measured for itself, for the diagnostics of its own answer. Bounded and released
+     * with the run, and independent of the shared trace ring, of sampling and of any exporter
+     * (docs/observability-plan.md §4.2).
+     */
+    public ExecutionDiagnostics diagnostics() {
+        return diagnostics;
     }
 
     /**
@@ -100,6 +112,10 @@ public final class ChatRun implements AutoCloseable {
 
     @Override
     public void close() {
-        request.close();
+        try {
+            installed.close();
+        } finally {
+            request.close();
+        }
     }
 }

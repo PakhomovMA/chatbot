@@ -7,7 +7,6 @@ import com.personal.chatbot.exceptions.ServiceStoppingException;
 import com.personal.chatbot.models.chat.ChatRequest;
 import com.personal.chatbot.service.chat.ChatService;
 import com.personal.chatbot.service.sse.SseConnections;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -28,8 +27,9 @@ import static org.mockito.Mockito.when;
  */
 class ChatControllerLifecycleTest {
 
-    private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
-    private final SseConnections connections = new SseConnections(meters, new ChatbotProperties.Sse(256));
+    private final TestObservations observed = TestObservations.create();
+    private final SseConnections connections =
+            new SseConnections(observed.sseObservations(), new ChatbotProperties.Sse(256));
     private final ChatController controller = new ChatController(mock(ChatService.class), connections,
             ChatSettings.defaults(), TestObservations.chat());
     private final ChatRequest question = new ChatRequest(null, "anything", null);
@@ -64,7 +64,7 @@ class ChatControllerLifecycleTest {
 
         assertThat(controller.awaitQuiet(Duration.ofSeconds(5))).as("nothing is left counted as running").isTrue();
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertThat(
-                meters.get("chatbot.sse.connections").tag("stream", "chat").gauge().value()).isZero());
+                observed.meters().get("chatbot.sse.connections").tag("stream", "chat").gauge().value()).isZero());
     }
 
     @Test

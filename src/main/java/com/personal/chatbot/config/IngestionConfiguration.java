@@ -9,8 +9,8 @@ import com.personal.chatbot.service.knowledge.BlobStore;
 import com.personal.chatbot.service.knowledge.IndexReconciler;
 import com.personal.chatbot.service.knowledge.IngestionFailureLog;
 import com.personal.chatbot.service.knowledge.IngestionQueue;
+import com.personal.chatbot.observability.IngestionObservations;
 import com.personal.chatbot.service.parsing.DocumentParser;
-import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -38,8 +38,8 @@ class IngestionConfiguration {
     DocumentIngestionPipeline documentIngestionPipeline(DocumentRegistry registry, BlobStore blobStore,
                                                         DocumentParser parser, LuceneIndexStore indexStore,
                                                         DocumentStatusUpdater status, IngestionFailureLog failures,
-                                                        Clock clock, MeterRegistry meterRegistry) {
-        return new DocumentIngestionPipeline(registry, blobStore, parser, indexStore, status, failures, clock, meterRegistry);
+                                                        Clock clock, IngestionObservations observations) {
+        return new DocumentIngestionPipeline(registry, blobStore, parser, indexStore, status, failures, clock, observations);
     }
 
     /**
@@ -48,11 +48,12 @@ class IngestionConfiguration {
      * the worker is stopped by the shutdown sequence, before anything it writes to is closed (C08).
      */
     @Bean
-    IngestionQueue ingestionQueue(DocumentIngestionPipeline pipeline, LuceneIndexStore indexStore, DocumentRegistry registry) {
+    IngestionQueue ingestionQueue(DocumentIngestionPipeline pipeline, LuceneIndexStore indexStore,
+                                  DocumentRegistry registry, IngestionObservations observations) {
         return new IngestionQueue(pipeline::process, () -> {
             indexStore.rebuild();
             return registry.findAll().stream().map(Document::id).toList();
-        });
+        }, observations);
     }
 
     @Bean

@@ -163,6 +163,58 @@ class CanonicalMetricsTest extends AbstractChatbotIntegrationTest {
         assertThat(count("chatbot.chat.request", "outcome", "success")).isEqualTo(runs + 1);
     }
 
+    /**
+     * O03: the capabilities that were still registering their own meters now declare their boundaries
+     * to a facade, and the boundaries that were never measured at all — waiting for a batch slot,
+     * waiting for the single writer, the stages of a pass — are there beside them.
+     */
+    @Test
+    void everyCapabilityPublishesItsOwnBoundariesInTheRunningApplication() throws Exception {
+        // The fixture above uploaded and indexed a document through the real queue and pipeline.
+        assertThat(count("chatbot.ingestion.processing", "outcome", "success")).isPositive();
+        assertThat(count("chatbot.ingestion.queue.wait", "outcome", "success")).isPositive();
+        assertThat(count("chatbot.ingestion.stage", "stage", "total")).isPositive();
+        assertThat(count("chatbot.ingestion.stage", "stage", "parse")).isPositive();
+        assertThat(count("chatbot.embedding", "mode", "document")).isPositive();
+        assertThat(count("chatbot.embedding.wait", "outcome", "success")).isPositive();
+
+        String question = "Where are the secrets kept?";
+        whenCreateObject(p -> p.contains("Question: " + question), GroundedAnswerDraft.class)
+                .thenReturn(new GroundedAnswerDraft("In Vault [1].", List.of(1), true, null));
+        long vector = count("chatbot.retrieval.stage", "stage", "vector", "mode", "hybrid");
+
+        ask(question).andExpect(status().isOk());
+
+        // One pass, and the facets and postprocessing inside it; a hybrid search runs both facets.
+        assertThat(count("chatbot.retrieval.stage", "stage", "vector", "mode", "hybrid")).isEqualTo(vector + 1);
+        assertThat(count("chatbot.retrieval.stage", "stage", "text", "mode", "hybrid")).isPositive();
+        assertThat(count("chatbot.retrieval.stage", "stage", "postprocess", "mode", "hybrid")).isPositive();
+        assertThat(count("chatbot.embedding", "mode", "query")).isPositive();
+        // The batch timer keeps the labels it had before the catalog; failures are a separate event.
+        assertThat(meters.get("chatbot.embedding").tag("mode", "query").timer().getId().getTags())
+                .extracting(Tag::getKey).containsExactlyInAnyOrder("mode", "provider", "model");
+    }
+
+    /**
+     * The response's diagnostics come from what the run measured for itself, so they do not depend on
+     * a sampler, an exporter or a shared ring buffer that a busy period may have moved on
+     * (docs/observability-plan.md §4.2, §5.3). Tracing is off and sampling is zero in this profile.
+     */
+    @Test
+    void theDiagnosticsOfAnAnswerAreAvailableWithNoTracePipelineAtAll() throws Exception {
+        String question = "How is the canary rolled out?";
+        whenCreateObject(p -> p.contains("Question: " + question), GroundedAnswerDraft.class)
+                .thenReturn(new GroundedAnswerDraft("Five percent for thirty minutes [1].", List.of(1), true, null));
+
+        mockMvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"message\":\"" + question + "\",\"options\":{\"includeDiagnostics\":true}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.retrievalTraceId").isString())
+                .andExpect(jsonPath("$.diagnostics.traceId").isString())
+                .andExpect(jsonPath("$.diagnostics.timings.totalMs").isNumber())
+                .andExpect(jsonPath("$.timings.totalMs").isNumber());
+    }
+
     private ResultActions ask(String message) throws Exception {
         return mockMvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"message\":\"" + message + "\"}"));

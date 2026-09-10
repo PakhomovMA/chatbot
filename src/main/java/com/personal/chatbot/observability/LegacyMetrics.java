@@ -57,8 +57,11 @@ public final class LegacyMetrics {
             // The old try/finally recorded whatever the operation ended in, cancellations included.
             case AI_OPERATION ->
                     record("chatbot.llm", elapsed, "operation", label(labels, MeasuredOperation.Labels.OPERATION));
-            // chatbot.chat.wait has no predecessor: waiting for the lease was never measured.
-            case CHAT_WAIT -> {
+            // The rest have no predecessor to keep: either the boundary was never measured before
+            // (the two waits, the retrieval workflow and stages, ingestion processing) or the meter
+            // kept its own name and is written by its facade under the canonical schema.
+            case CHAT_WAIT, RETRIEVAL_WORKFLOW, RETRIEVAL_STAGE, EMBEDDING, EMBEDDING_WAIT,
+                 INGESTION_PROCESSING, INGESTION_QUEUE_WAIT, INGESTION_STAGE -> {
             }
         }
     }

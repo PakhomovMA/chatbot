@@ -1,11 +1,15 @@
 package com.personal.chatbot.service.knowledge;
 
+import com.personal.chatbot.observability.IngestionObservations;
+import com.personal.chatbot.observability.Measured;
+import com.personal.chatbot.observability.Outcome;
 import com.personal.chatbot.service.lifecycle.ActiveWork;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -56,9 +60,12 @@ public class IngestionQueue implements ActiveWork {
 
     /**
      * One accepted request. {@code request} distinguishes repeated requests for the same version
-     * (a re-index), {@code generation} ties the request to the index it was made against.
+     * (a re-index), {@code generation} ties the request to the index it was made against, and
+     * {@code queued} measures how long it took to be claimed — or what happened instead. Requests are
+     * never equal to one another: {@code request} is unique, so the identity this record already had
+     * is unchanged.
      */
-    private record Job(String documentId, long request, long generation) {
+    private record Job(String documentId, long request, long generation, Measured queued) {
     }
 
     private record Token(IngestionQueue queue, Job job) implements IngestionClaim {
@@ -81,6 +88,7 @@ public class IngestionQueue implements ActiveWork {
 
     private final Consumer<IngestionClaim> processor;
     private final Rebuild rebuild;
+    private final IngestionObservations observations;
     private final Thread worker;
     private final Object monitor = new Object();
 
@@ -101,9 +109,10 @@ public class IngestionQueue implements ActiveWork {
      * @param processor invoked on the worker thread once a document has been claimed
      * @param rebuild   invoked on the worker thread when a full rebuild has been requested
      */
-    public IngestionQueue(Consumer<IngestionClaim> processor, Rebuild rebuild) {
+    public IngestionQueue(Consumer<IngestionClaim> processor, Rebuild rebuild, IngestionObservations observations) {
         this.processor = processor;
         this.rebuild = rebuild;
+        this.observations = observations;
         this.worker = Thread.ofPlatform().name("ingestion-worker").daemon(true).unstarted(this::work);
         this.worker.start();
     }
@@ -123,21 +132,26 @@ public class IngestionQueue implements ActiveWork {
      * The callback must not publish events or wait for the worker; announce its result afterwards.
      */
     public <T> Optional<T> enqueue(String documentId, Supplier<T> prepare) {
+        T prepared;
+        Job replaced;
         synchronized (monitor) {
             if (stopping) {
                 log.warn("Ingestion queue is stopping; request for {} rejected", documentId);
                 return Optional.empty();
             }
-            T prepared = Objects.requireNonNull(prepare.get());
-            Job job = new Job(documentId, ++requests, generation);
+            prepared = Objects.requireNonNull(prepare.get());
+            Job job = new Job(documentId, ++requests, generation, observations.startQueueWait());
             if (active != null && active.documentId().equals(documentId)) {
+                replaced = rerun;
                 rerun = job;
             } else {
-                pending.put(documentId, job);
+                replaced = pending.put(documentId, job);
             }
             monitor.notifyAll();
-            return Optional.of(prepared);
         }
+        // The request this one collapsed into never waited for a worker of its own.
+        settle(replaced, Outcome.SUPERSEDED);
+        return Optional.of(prepared);
     }
 
     /**
@@ -145,15 +159,20 @@ public class IngestionQueue implements ActiveWork {
      * right to publish anything about it.
      */
     public void invalidate(String documentId) {
+        Job dropped;
+        Job droppedRerun = null;
         synchronized (monitor) {
-            pending.remove(documentId);
+            dropped = pending.remove(documentId);
             if (rerun != null && rerun.documentId().equals(documentId)) {
+                droppedRerun = rerun;
                 rerun = null;
             }
             if (active != null && active.documentId().equals(documentId)) {
                 activeIsCurrent = false;
             }
         }
+        settle(dropped, Outcome.CANCELLED);
+        settle(droppedRerun, Outcome.CANCELLED);
     }
 
     /**
@@ -169,20 +188,26 @@ public class IngestionQueue implements ActiveWork {
 
     /** Like {@link #enqueue(String, Supplier)}, but invalidates the old generation before releasing the monitor. */
     public <T> Optional<T> requestRebuild(Supplier<T> prepare) {
+        T prepared;
+        List<Job> invalidated;
         synchronized (monitor) {
             if (stopping) {
                 log.warn("Ingestion queue is stopping; index rebuild rejected");
                 return Optional.empty();
             }
-            T prepared = Objects.requireNonNull(prepare.get());
+            prepared = Objects.requireNonNull(prepare.get());
             generation++;
+            invalidated = waiting();
             pending.clear();
             rerun = null;
             activeIsCurrent = false;
             rebuildRequested = true;
             monitor.notifyAll();
-            return Optional.of(prepared);
         }
+        // The rebuild reports what has to be ingested afterwards, so these requests are replaced
+        // rather than lost; each of the documents is queued again, with a wait of its own.
+        invalidated.forEach(job -> settle(job, Outcome.SUPERSEDED));
+        return Optional.of(prepared);
     }
 
     public Status status() {
@@ -203,15 +228,18 @@ public class IngestionQueue implements ActiveWork {
      */
     @Override
     public void stopAccepting() {
+        List<Job> abandoned;
         synchronized (monitor) {
             if (stopping) {
                 return;
             }
             stopping = true;
+            abandoned = waiting();
             pending.clear();
             rerun = null;
             monitor.notifyAll();
         }
+        abandoned.forEach(job -> settle(job, Outcome.CANCELLED));
     }
 
     /** The worker ends once the run in flight is over, so its thread dying is what "quiet" means. */
@@ -244,6 +272,11 @@ public class IngestionQueue implements ActiveWork {
                         monitor.wait();
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
+                        // Nothing here will ever be claimed now; leaving the waits open would leave
+                        // their measurements unfinished rather than reporting what became of them.
+                        waiting().forEach(job -> settle(job, Outcome.CANCELLED));
+                        pending.clear();
+                        rerun = null;
                         return;
                     }
                 }
@@ -277,6 +310,8 @@ public class IngestionQueue implements ActiveWork {
     }
 
     private void runJob(Job job) {
+        // The wait is over the moment the worker takes the job on; what follows is the run itself.
+        settle(job, Outcome.SUCCESS);
         try {
             processor.accept(new Token(this, job));
         } catch (RuntimeException e) {
@@ -326,5 +361,26 @@ public class IngestionQueue implements ActiveWork {
     /** Must be called under the monitor. */
     private boolean holdsClaim(Job job) {
         return activeIsCurrent && job.equals(active) && job.generation() == generation;
+    }
+
+    /** Every request that is still waiting for a worker. Must be called under the monitor. */
+    private List<Job> waiting() {
+        List<Job> jobs = new ArrayList<>(pending.values());
+        if (rerun != null) {
+            jobs.add(rerun);
+        }
+        return jobs;
+    }
+
+    /**
+     * Ends a request's wait with what became of it. Called outside the monitor wherever the caller can
+     * arrange it: publishing a measurement is not work the single writer should be holding a lock for.
+     */
+    private static void settle(@Nullable Job job, Outcome outcome) {
+        if (job == null) {
+            return;
+        }
+        job.queued().finished(outcome);
+        job.queued().close();
     }
 }

@@ -2,13 +2,12 @@ package com.personal.chatbot.service.embedding;
 
 import com.personal.chatbot.models.embedding.EmbeddingFingerprint;
 import com.personal.chatbot.models.embedding.EmbeddingMode;
+import com.personal.chatbot.observability.EmbeddingObservations;
+import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.utils.EmbeddingModeScope;
 import com.personal.chatbot.utils.EmbeddingPrompts;
 import com.personal.chatbot.utils.VectorMath;
 
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,9 +15,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
-import java.util.EnumMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -28,12 +25,15 @@ import java.util.stream.IntStream;
 /**
  * Backend-agnostic {@link KnowledgeEmbeddingService}: applies EmbeddingGemma prefixes for the ambient
  * {@link EmbeddingMode}, batches inputs (longest first, to minimise padding), bounds backend
- * concurrency, L2-normalises the result and records Micrometer timings.
+ * concurrency and L2-normalises the result. What it measures — the wait for capacity, the batch, the
+ * texts and the failures — it declares to {@link EmbeddingObservations}; no meter is built here.
  *
  * <p>It also guards the backend's lifetime (docs/concurrency-plan.md C08): every backend call is
  * registered, {@link #close()} waits for the calls in flight, and no call may start once closing has
  * begun. An ONNX session closed under a running inference does not throw — it takes the JVM down —
- * and inference ignores interruption, so waiting is the only way to know it is safe.
+ * and inference ignores interruption, so waiting is the only way to know it is safe. The deadline of
+ * that wait is a monotonic reading of its own: it controls execution rather than reporting it, which
+ * is why it is not a measurement (docs/observability-plan.md §4.1).
  */
 public final class PromptedEmbeddingService implements KnowledgeEmbeddingService {
 
@@ -46,8 +46,7 @@ public final class PromptedEmbeddingService implements KnowledgeEmbeddingService
     private final int batchSize;
     private final boolean normalize;
     private final Semaphore concurrency;
-    private final Map<EmbeddingMode, Timer> timers = new EnumMap<>(EmbeddingMode.class);
-    private final Counter textsCounter;
+    private final EmbeddingObservations observations;
     private volatile Duration warmupDuration;
 
     /** Guards {@link #inFlight} and {@link #closing}; held only around bookkeeping and the close itself. */
@@ -61,7 +60,7 @@ public final class PromptedEmbeddingService implements KnowledgeEmbeddingService
             int batchSize,
             int maxConcurrentBatches,
             boolean normalize,
-            MeterRegistry meterRegistry
+            EmbeddingObservations observations
     ) {
         if (batchSize < 1 || maxConcurrentBatches < 1) {
             throw new IllegalArgumentException("batchSize and maxConcurrentBatches must be >= 1");
@@ -70,18 +69,7 @@ public final class PromptedEmbeddingService implements KnowledgeEmbeddingService
         this.batchSize = batchSize;
         this.normalize = normalize;
         this.concurrency = new Semaphore(maxConcurrentBatches, true);
-        for (EmbeddingMode mode : EmbeddingMode.values()) {
-            timers.put(mode, Timer.builder("chatbot.embedding")
-                    .description("Time spent embedding one batch")
-                    .tag("provider", backend.provider())
-                    .tag("model", backend.modelName())
-                    .tag("mode", mode.name().toLowerCase())
-                    .register(meterRegistry));
-        }
-        this.textsCounter = Counter.builder("chatbot.embedding.texts")
-                .description("Number of texts embedded")
-                .tag("provider", backend.provider())
-                .register(meterRegistry);
+        this.observations = observations;
     }
 
     @Override
@@ -103,40 +91,52 @@ public final class PromptedEmbeddingService implements KnowledgeEmbeddingService
                 result[window.get(k)] = vectors.get(k);
             }
         }
-        textsCounter.increment(prefixed.size());
+        // Only a request that embedded every one of its batches; a later failure leaves the vectors of
+        // the earlier ones with nobody to receive them, so they were never delivered.
+        observations.embedded(prefixed.size());
         return Arrays.asList(result);
     }
 
     private List<float[]> embedBatch(List<String> batch, EmbeddingMode mode) {
-        acquire();
-        long started = System.nanoTime();
-        boolean registered = false;
-        try {
-            begin();
-            registered = true;
-            List<float[]> vectors = backend.embed(batch);
-            if (vectors.size() != batch.size()) {
-                throw new IllegalStateException("Backend returned " + vectors.size()
-                        + " vectors for " + batch.size() + " texts");
-            }
-            int expected = backend.dimensions();
-            List<float[]> out = new ArrayList<>(vectors.size());
-            for (float[] vector : vectors) {
-                if (vector.length != expected) {
-                    throw new IllegalStateException("Backend returned " + vector.length
-                            + " dimensions, expected " + expected);
+        acquire(mode);
+        // The batch is measured from here, as it always was: the wait above is its own measurement,
+        // so a busy backend and a slow one no longer look the same.
+        try (Measured measured = observations.startBatch(mode)) {
+            boolean registered = false;
+            try {
+                begin();
+                registered = true;
+                List<float[]> vectors = backend.embed(batch);
+                if (vectors.size() != batch.size()) {
+                    throw new IllegalStateException("Backend returned " + vectors.size()
+                            + " vectors for " + batch.size() + " texts");
                 }
-                out.add(normalize ? VectorMath.normalized(vector) : vector.clone());
+                int expected = backend.dimensions();
+                List<float[]> out = new ArrayList<>(vectors.size());
+                for (float[] vector : vectors) {
+                    if (vector.length != expected) {
+                        throw new IllegalStateException("Backend returned " + vector.length
+                                + " dimensions, expected " + expected);
+                    }
+                    out.add(normalize ? VectorMath.normalized(vector) : vector.clone());
+                }
+                measured.succeeded();
+                return out;
+            } catch (RuntimeException e) {
+                // A batch refused before it reached the backend was not attempted, so it did not fail.
+                if (registered) {
+                    observations.batchFailed(mode);
+                }
+                measured.failed(e);
+                throw e;
+            } finally {
+                // begin() refuses a call that arrives while closing, so the capacity it claimed has to be
+                // given back here rather than by end(). Both happen before the batch stops being measured.
+                if (registered) {
+                    end();
+                }
+                concurrency.release();
             }
-            return out;
-        } finally {
-            // begin() refuses a call that arrives while closing, so the capacity it claimed has to be
-            // given back here rather than by end().
-            if (registered) {
-                end();
-            }
-            concurrency.release();
-            timers.get(mode).record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
         }
     }
 
@@ -161,21 +161,28 @@ public final class PromptedEmbeddingService implements KnowledgeEmbeddingService
         }
     }
 
-    private void acquire() {
-        try {
-            concurrency.acquire();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("Interrupted while waiting for embedding capacity", e);
+    /** Waits for a batch slot. A wait of no time at all is measured too: it says the limit was not binding. */
+    private void acquire(EmbeddingMode mode) {
+        try (Measured wait = observations.startWait(mode)) {
+            try {
+                concurrency.acquire();
+                wait.succeeded();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                IllegalStateException failure =
+                        new IllegalStateException("Interrupted while waiting for embedding capacity", e);
+                wait.failed(failure);
+                throw failure;
+            }
         }
     }
 
     /** Runs one embedding in each mode so the first real request does not pay model warm-up costs. */
     public void warmUp() {
-        long started = System.nanoTime();
+        long started = observations.clock().nanoTime();
         EmbeddingModeScope.inMode(EmbeddingMode.DOCUMENT, () -> embed("warm-up document"));
         EmbeddingModeScope.inMode(EmbeddingMode.QUERY, () -> embed("warm-up query"));
-        warmupDuration = Duration.ofNanos(System.nanoTime() - started);
+        warmupDuration = observations.clock().since(started);
         log.info("Embedding service warmed up in {} ms: {}", warmupDuration.toMillis(), fingerprint().value());
     }
 

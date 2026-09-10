@@ -5,6 +5,7 @@ import com.personal.chatbot.models.retrieval.QuestionDecomposition;
 import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
+import com.personal.chatbot.observability.RetrievalWorkflow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,18 +45,20 @@ public class SubQuestionSearch {
     }
 
     /**
-     * @param parts   the parts of the question; blanks, duplicates and repetitions of the whole
-     *                question are dropped, and an empty result means one plain search
-     * @param buildMs time already spent splitting the question (the model call)
-     * @param passes  runs the searches, in whatever order and concurrency the caller chooses, and
-     *                returns their results in the order the queries were given
+     * @param parts    the parts of the question; blanks, duplicates and repetitions of the whole
+     *                 question are dropped, and an empty result means one plain search
+     * @param workflow the measurement of the whole branch, opened by the caller before it asked the
+     *                 model to split the question. This class marks where the merge starts and reads
+     *                 the duration the v1 diagnostics report from it; it neither times anything itself
+     *                 nor receives durations to add up (docs/observability-plan.md §4.2)
+     * @param passes   runs the searches, in whatever order and concurrency the caller chooses, and
+     *                 returns their results in the order the queries were given
      * @return the merged result, recorded as its own trace and carrying a {@link QuestionDecomposition}
      * marker; an undecomposed question comes back as the plain single-pass result, unmarked, so that
      * the widening branch of Phase 9a can still do its own work on it
      */
-    public RetrievalResult search(RetrievalQuery whole, List<String> parts, long buildMs,
+    public RetrievalResult search(RetrievalQuery whole, List<String> parts, RetrievalWorkflow workflow,
                                   Function<List<RetrievalQuery>, List<RetrievalResult>> passes) {
-        long started = System.nanoTime();
         List<String> subQuestions = parts.stream().map(String::strip).filter(part -> !part.isBlank())
                 .filter(part -> !part.equalsIgnoreCase(whole.query().strip())).distinct().toList();
         List<RetrievalQuery> queries = new ArrayList<>(subQuestions.size() + 1);
@@ -69,7 +72,8 @@ public class SubQuestionSearch {
         if (subQuestions.isEmpty()) {
             return results.getFirst();
         }
-        long tookMs = buildMs + (System.nanoTime() - started) / 1_000_000;
+        workflow.merging();
+        long tookMs = workflow.tookMs();
         RetrievalResult merged = merge(results, subQuestions, whole, tookMs);
         traces.record(merged);
         log.info("Decomposed search [{}] into {} parts: {} hits (+{} new), sufficient {} -> {} in {} ms",
@@ -89,7 +93,7 @@ public class SubQuestionSearch {
                 PassFusion.query(whole.query().strip(), subQuestions), first.mode(), topK,
                 passes.stream().mapToInt(RetrievalResult::candidates).sum(), hits,
                 RetrievalService.sufficient(hits, maxVector, settings.sufficientCosine()), maxVector,
-                PassFusion.timings(passes, tookMs), Instant.now(), null,
+                PassDiagnostics.timings(passes, tookMs), Instant.now(), null,
                 new QuestionDecomposition(subQuestions, merged.addedHits(), tookMs));
     }
 }

@@ -2,6 +2,7 @@ package com.personal.chatbot.observability;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.observation.DefaultMeterObservationHandler;
 import io.micrometer.observation.ObservationRegistry;
 
@@ -46,5 +47,15 @@ public record Observations(ObservationRegistry observationRegistry, MeterRegistr
     /** A counter of the canonical schema, registered here rather than on a hot path. */
     Counter counter(String name, String description, String... tags) {
         return Counter.builder(name).description(description).tags(tags).register(meterRegistry);
+    }
+
+    /**
+     * A timer for a boundary that is deliberately not an {@link io.micrometer.observation.Observation}
+     * — because a span per record would say nothing and there would be very many of them. Everything
+     * else measures boundaries through {@link #start}, which publishes the timer and the span together
+     * (docs/observability-plan.md §3.1 rule 2).
+     */
+    Timer timer(String name, String description, String... tags) {
+        return Timer.builder(name).description(description).tags(tags).register(meterRegistry);
     }
 }

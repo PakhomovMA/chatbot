@@ -1,7 +1,6 @@
 package com.personal.chatbot.service.retrieval;
 
 import com.personal.chatbot.models.retrieval.RetrievalResult;
-import com.personal.chatbot.models.retrieval.RetrievalTimings;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.utils.RankFusion;
 import org.jspecify.annotations.Nullable;
@@ -29,7 +28,10 @@ import java.util.stream.Collectors;
  * <p>The merged ranking is cut to {@code topK} by the same {@link DocumentSpread} as a single pass,
  * so searching twice cannot undo what the quota does for one search.
  *
- * <p>{@link #query} and {@link #timings} describe the merged result the same way for both branches.
+ * <p>{@link #query} describes the merged result the same way for both branches. How long the branch
+ * took is none of this class's business: it fuses rankings, and the durations the v1 diagnostics
+ * report are assembled by {@link PassDiagnostics} from what the workflow measured
+ * (docs/observability-plan.md §4.2).
  */
 final class PassFusion {
 
@@ -102,17 +104,5 @@ final class PassFusion {
         all.add(first);
         all.addAll(rest);
         return String.join(" | ", all.stream().distinct().toList());
-    }
-
-    /**
-     * Facet times add up over the passes, but the total is the wall time of the branch: the extra
-     * passes may have run in parallel, and the time spent producing their queries counts too.
-     */
-    static RetrievalTimings timings(List<RetrievalResult> passes, long totalMs) {
-        return new RetrievalTimings(
-                passes.stream().mapToLong(p -> p.timings().vectorMs()).sum(),
-                passes.stream().mapToLong(p -> p.timings().textMs()).sum(),
-                passes.stream().mapToLong(p -> p.timings().fusionMs()).sum(),
-                totalMs);
     }
 }

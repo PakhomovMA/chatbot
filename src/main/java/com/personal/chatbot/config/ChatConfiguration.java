@@ -71,8 +71,8 @@ class ChatConfiguration {
     @Bean
     QuestionDecomposer questionDecomposer(Retriever retriever, SubQuestionSearch search, GroundedAnswerPrompt prompt,
                                           GroundingInstructions instructions, ChatbotProperties.Chat chat,
-                                          ChatObservations observations) {
-        return new QuestionDecomposer(retriever, search, prompt, instructions, chat, observations);
+                                          ChatObservations observations, RetrievalObservations retrievalObservations) {
+        return new QuestionDecomposer(retriever, search, prompt, instructions, chat, observations, retrievalObservations);
     }
 
     @Bean

@@ -1,6 +1,7 @@
 package com.personal.chatbot.service.retrieval;
 
 import com.personal.chatbot.models.retrieval.RetrievalResult;
+import com.personal.chatbot.observability.ExecutionDiagnostics;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -27,7 +28,14 @@ public class RetrievalTraceStore {
         this.capacity = capacity;
     }
 
+    /**
+     * Keeps the result here and offers it to the execution that produced it. The ring is shared and
+     * short: by the time an answer is written, a busy period may already have pushed its own trace
+     * out of it, so the run that needs the trace for its response holds on to it itself
+     * (docs/observability-plan.md §4.2). Nothing here depends on that having happened.
+     */
     public void record(RetrievalResult result) {
+        ExecutionDiagnostics.collect(result);
         synchronized (traces) {
             traces.addFirst(result);
             while (traces.size() > capacity) {

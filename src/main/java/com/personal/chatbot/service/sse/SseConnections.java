@@ -1,22 +1,17 @@
 package com.personal.chatbot.service.sse;
 
 import com.personal.chatbot.config.ChatbotProperties;
+import com.personal.chatbot.observability.SseObservations;
 import com.personal.chatbot.service.lifecycle.ActiveWork;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.time.Duration;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
@@ -30,16 +25,15 @@ import java.util.function.Consumer;
 @Component
 public class SseConnections implements ActiveWork {
 
-    private final MeterRegistry meterRegistry;
+    private final SseObservations observations;
     private final int bufferSize;
     private final ExecutorService senders = Executors.newThreadPerTaskExecutor(
             Thread.ofVirtual().name("sse-sender-", 0).factory());
-    private final Map<String, AtomicInteger> counters = new ConcurrentHashMap<>();
     /** Connections handed out, pruned as new ones are opened; the senders are the source of truth. */
     private final Set<SseConnection> open = ConcurrentHashMap.newKeySet();
 
-    public SseConnections(MeterRegistry meterRegistry, ChatbotProperties.Sse settings) {
-        this.meterRegistry = meterRegistry;
+    public SseConnections(SseObservations observations, ChatbotProperties.Sse settings) {
+        this.observations = observations;
         this.bufferSize = settings.bufferSize();
     }
 
@@ -51,27 +45,14 @@ public class SseConnections implements ActiveWork {
      */
     public SseConnection open(String stream, Duration timeout, Consumer<String> onAbandoned) {
         open.removeIf(connection -> !connection.isOpen());
-        AtomicInteger active = active(stream);
-        active.incrementAndGet();
-        Counter overflows = Counter.builder("chatbot.sse.overflows").tag("stream", stream).register(meterRegistry);
-        Timer sends = Timer.builder("chatbot.sse.send").tag("stream", stream).register(meterRegistry);
         SseConnection connection = new SseConnection(stream, new SseEmitter(timeout.toMillis()), bufferSize,
-                onAbandoned, active::decrementAndGet, overflows, sends);
+                onAbandoned, observations.opened(stream), observations);
         open.add(connection);
         return connection.start(senders);
     }
 
     public int bufferSize() {
         return bufferSize;
-    }
-
-    private AtomicInteger active(String stream) {
-        return counters.computeIfAbsent(stream, name -> {
-            AtomicInteger count = new AtomicInteger();
-            Gauge.builder("chatbot.sse.connections", count, AtomicInteger::doubleValue)
-                    .tag("stream", name).description("Open server-sent-events connections").register(meterRegistry);
-            return count;
-        });
     }
 
     @Override
