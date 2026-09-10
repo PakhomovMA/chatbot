@@ -7,6 +7,7 @@ import com.embabel.agent.rag.tools.ToolishRag;
 import com.embabel.agent.core.support.InvalidLlmReturnFormatException;
 import com.embabel.common.ai.model.LlmOptions;
 import com.personal.chatbot.agents.CancellableTool;
+import com.personal.chatbot.agents.SearchBudget;
 import com.personal.chatbot.config.ChatbotProperties;
 import com.personal.chatbot.models.agent.AgenticDraft;
 import com.personal.chatbot.models.agent.AnswerAttempt;
@@ -132,12 +133,15 @@ public class AgenticResearcher {
         AgenticDraft draft;
         question.abortIfCancelled();
         long researchStarted = System.nanoTime();
+        // The searches the model may run are a budget, not a line in the prompt: the instructions name
+        // the same number, and this is what holds the model to it.
+        SearchBudget budget = new SearchBudget(settings.agenticMaxSearches(), question.messageId(), meterRegistry);
         try {
             // withReference(rag) would register the tools twice (deprecated toolObject() plus tools()) under
             // two different prefixes; register the flat tool list and the prompt contribution explicitly.
             draft = context.ai()
                     .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()))
-                    .withTools(CancellableTool.wrapAll(rag.tools(), question.cancellation(), question.messageId()))
+                    .withTools(CancellableTool.wrapAll(budget.limit(rag.tools()), question.cancellation(), question.messageId()))
                     .withPromptContributors(List.of(instructions.agenticResearch(), rag))
                     .creating(AgenticDraft.class)
                     .fromPrompt(prompt.buildForAgentic(question.question(), question.effectiveQuery(), question.history(), shownSeed));

@@ -18,15 +18,18 @@ import java.util.Set;
 
 /**
  * Merges the vector and lexical facets into one ranked result (docs/system-plan.md D4): optional
- * document filter, reciprocal rank fusion in HYBRID mode, the facet's own order otherwise, then
- * truncation to {@code topK}. Both raw scores travel with every hit so the playground can show them.
+ * document filter, reciprocal rank fusion in HYBRID mode, the facet's own order otherwise, then the
+ * {@code topK} hits {@link DocumentSpread} allows one document to take. Both raw scores travel with
+ * every hit so the playground can show them.
  */
 public class HitFusion {
 
     private final int rrfK;
+    private final DocumentSpread spread;
 
-    public HitFusion(int rrfK) {
+    public HitFusion(int rrfK, double maxDocumentShare) {
         this.rrfK = rrfK;
+        this.spread = new DocumentSpread(maxDocumentShare);
     }
 
     public List<RetrievedChunk> fuse(RetrievalMode mode, List<SimilarityResult<Chunk>> vector,
@@ -55,11 +58,9 @@ public class HitFusion {
             case VECTOR -> singleFacet(vectorRanking, cosines);
             case TEXT -> singleFacet(textRanking, bm25);
         };
-        List<RetrievedChunk> hits = new ArrayList<>(Math.min(topK, ranked.size()));
-        for (RankFusion.Fused fused : ranked) {
-            if (hits.size() == topK) {
-                break;
-            }
+        List<RankFusion.Fused> shown = spread.select(ranked, fused -> documentOf(chunks.get(fused.key())), topK);
+        List<RetrievedChunk> hits = new ArrayList<>(shown.size());
+        for (RankFusion.Fused fused : shown) {
             hits.add(ChunkMapper.toRetrievedChunk(chunks.get(fused.key()), cosines.get(fused.key()),
                     bm25.get(fused.key()), fused.score(), hits.size() + 1));
         }
@@ -82,7 +83,12 @@ public class HitFusion {
         if (documentFilter == null) {
             return true;
         }
+        String documentId = documentOf(chunk);
+        return documentId != null && documentFilter.contains(documentId);
+    }
+
+    private static @Nullable String documentOf(Chunk chunk) {
         Object documentId = chunk.getMetadata().get(ProvenanceChunkTransformer.DOCUMENT_ID);
-        return documentId != null && documentFilter.contains(documentId.toString());
+        return documentId != null ? documentId.toString() : null;
     }
 }

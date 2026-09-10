@@ -20,7 +20,7 @@ class PassFusionTest {
         RetrievedChunk second = hit("second", 0.6);
         var merged = PassFusion.merge(List.of(
                 pass(first, neighbour("shared", first)),
-                pass(first, neighbour("shared", first), second, neighbour("shared", second))), 2, 60);
+                pass(first, neighbour("shared", first), second, neighbour("shared", second))), 2, 60, DocumentSpread.UNLIMITED);
 
         assertThat(merged.hits()).extracting(RetrievedChunk::chunkId)
                 .containsExactly("first", "shared", "second");
@@ -30,7 +30,7 @@ class PassFusionTest {
     void aNeighbourThatIsAlsoASelectedHitKeepsItsOwnRank() {
         RetrievedChunk first = hit("first", 0.2);
         RetrievedChunk second = hit("second", 0.6);
-        var merged = PassFusion.merge(List.of(pass(first, neighbour("second", first)), pass(second)), 2, 60);
+        var merged = PassFusion.merge(List.of(pass(first, neighbour("second", first)), pass(second)), 2, 60, DocumentSpread.UNLIMITED);
 
         assertThat(merged.hits()).extracting(RetrievedChunk::chunkId).containsExactly("first", "second");
         assertThat(merged.hits().getLast().isHit()).isTrue();
@@ -41,7 +41,7 @@ class PassFusionTest {
     void aNeighbourIsRetainedEvenWhenItsOwnHitRankFallsOutsideTopK() {
         RetrievedChunk first = hit("first", 0.2);
         var merged = PassFusion.merge(List.of(pass(first, neighbour("second", first)),
-                pass(first, hit("second", 0.6))), 1, 60);
+                pass(first, hit("second", 0.6))), 1, 60, DocumentSpread.UNLIMITED);
 
         assertThat(merged.hits()).extracting(RetrievedChunk::chunkId).containsExactly("first", "second");
         assertThat(merged.hits().getLast().neighbourOf()).isEqualTo("first");
@@ -49,7 +49,7 @@ class PassFusionTest {
 
     @Test
     void aStrongMatchInALaterPassIsNotLostToAWeakFirstMatch() {
-        var merged = PassFusion.merge(List.of(pass(hit("same", 0.2)), pass(hit("same", 0.8))), 1, 60);
+        var merged = PassFusion.merge(List.of(pass(hit("same", 0.2)), pass(hit("same", 0.8))), 1, 60, DocumentSpread.UNLIMITED);
 
         double score = RetrievalService.maxVectorScore(merged.hits());
         assertThat(score).isEqualTo(0.8);
@@ -64,14 +64,27 @@ class PassFusionTest {
         RetrievedChunk textOnly = new RetrievedChunk(base.chunkId(), base.text(), base.provenance(),
                 null, 0.4, 1.0, 1, null);
 
-        assertThat(PassFusion.merge(List.of(pass(vectorOnly), pass(vectorOnly)), 1, 60)
+        assertThat(PassFusion.merge(List.of(pass(vectorOnly), pass(vectorOnly)), 1, 60, DocumentSpread.UNLIMITED)
                 .hits().getFirst().textScore()).isNull();
-        assertThat(PassFusion.merge(List.of(pass(textOnly), pass(textOnly)), 1, 60)
+        assertThat(PassFusion.merge(List.of(pass(textOnly), pass(textOnly)), 1, 60, DocumentSpread.UNLIMITED)
                 .hits().getFirst().vectorScore()).isNull();
-        RetrievedChunk combined = PassFusion.merge(List.of(pass(vectorOnly), pass(textOnly)), 1, 60)
+        RetrievedChunk combined = PassFusion.merge(List.of(pass(vectorOnly), pass(textOnly)), 1, 60, DocumentSpread.UNLIMITED)
                 .hits().getFirst();
         assertThat(combined.vectorScore()).isEqualTo(0.6);
         assertThat(combined.textScore()).isEqualTo(0.4);
+    }
+
+    @Test
+    void mergingPassesGivesEveryDocumentItsShareJustAsOnePassDoes() {
+        RetrievalResult whole = pass(hit("kimi", "kimi:1", 0.6), hit("kimi", "kimi:2", 0.5),
+                hit("kimi", "kimi:3", 0.4), hit("glm", "glm:1", 0.3));
+        RetrievalResult part = pass(hit("kimi", "kimi:1", 0.6), hit("kimi", "kimi:2", 0.5),
+                hit("kimi", "kimi:3", 0.4), hit("glm", "glm:1", 0.3));
+
+        assertThat(PassFusion.merge(List.of(whole, part), 3, 60, DocumentSpread.UNLIMITED).hits())
+                .extracting(RetrievedChunk::chunkId).containsExactly("kimi:1", "kimi:2", "kimi:3");
+        assertThat(PassFusion.merge(List.of(whole, part), 3, 60, new DocumentSpread(0.6)).hits())
+                .extracting(RetrievedChunk::chunkId).containsExactly("kimi:1", "kimi:2", "glm:1");
     }
 
     private static RetrievalResult pass(RetrievedChunk... hits) {
@@ -80,8 +93,12 @@ class PassFusionTest {
     }
 
     private static RetrievedChunk hit(String id, double cosine) {
+        return hit("doc", id, cosine);
+    }
+
+    private static RetrievedChunk hit(String documentId, String id, double cosine) {
         return new RetrievedChunk(id, "text of " + id,
-                new Provenance("doc", "Doc", 1, "Section", List.of("Section"), id, 1, 0, 10, "text/markdown"),
+                new Provenance(documentId, documentId, 1, "Section", List.of("Section"), id, 1, 0, 10, "text/markdown"),
                 cosine, 0.1, 1.0, 1, null);
     }
 

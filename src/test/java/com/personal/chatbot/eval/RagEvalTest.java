@@ -53,6 +53,7 @@ import tools.jackson.databind.json.JsonMapper;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
@@ -97,8 +98,9 @@ class RagEvalTest {
     record QuestionSet(String description, List<Question> questions) {
     }
 
+    /** @param hitDocuments the document of every returned hit, in rank order: what one document filled */
     record QuestionOutcome(String id, RetrievalMode mode, int firstRelevantRank, double topCosine, boolean sufficient,
-                           long totalMs, List<String> topDocuments) {
+                           long totalMs, List<String> hitDocuments) {
     }
 
     /**
@@ -159,6 +161,8 @@ class RagEvalTest {
     private final int overlap = Integer.getInteger("eval.overlap", 100);
     private final double minRecall = Double.parseDouble(System.getProperty("eval.minRecall", "0.8"));
     private final double sufficientCosine = Double.parseDouble(System.getProperty("eval.sufficientCosine", "0.3"));
+    /** The production chatbot.retrieval.max-document-share; sweep it with -Peval.maxDocumentShare. */
+    private final double maxDocumentShare = Double.parseDouble(System.getProperty("eval.maxDocumentShare", "0.6"));
 
     private PromptedEmbeddingService embeddings;
     private LuceneIndexStore store;
@@ -189,7 +193,7 @@ class RagEvalTest {
         store = new LuceneIndexStore(dir.resolve("index"), new EmbabelEmbeddingServiceAdapter(embeddings), fingerprint,
                 new IndexManifest.Chunker(chunkSize, overlap, ProvenanceChunkTransformer.TRANSFORMER_VERSION), 16,
                 new ProvenanceChunkTransformer()).open();
-        retrievalSettings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, 0, 500);
+        retrievalSettings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, 0, maxDocumentShare, 500);
         retrieval = new RetrievalService(store, new RetrievalTraceStore(500), retrievalSettings, new SimpleMeterRegistry());
 
         questionSet = questionSet("questions.json");
@@ -256,7 +260,7 @@ class RagEvalTest {
                 Files.readString(Path.of("src/test/resources/eval/questions-conversation.json")), ConversationSet.class);
         var rewriter = new ConversationQueryRewriter(
                 new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO),
-                new GroundingInstructions(4, 3, 3, 4), 10, new SimpleMeterRegistry());
+                new GroundingInstructions(4, 3, 3, 4), 10, Duration.ofSeconds(20), new SimpleMeterRegistry());
         var context = Mockito.mock(OperationContext.class,
                 Mockito.RETURNS_DEEP_STUBS);
         List<Map<String, Object>> outcomes = new ArrayList<>();
@@ -365,7 +369,7 @@ class RagEvalTest {
     }
 
     private ExpansionSummary measureExpansion(int expandNeighbours) {
-        var settings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, expandNeighbours, 500);
+        var settings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, expandNeighbours, maxDocumentShare, 500);
         RetrievalService service = new RetrievalService(store, new RetrievalTraceStore(500), settings, new SimpleMeterRegistry());
         GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(EVIDENCE_CHAR_BUDGET, 0, AnswerLanguage.EN);
         int positives = 0;
@@ -780,7 +784,7 @@ class RagEvalTest {
             }
             outcomes.add(new QuestionOutcome(question.id(), mode, firstRelevant, result.maxVectorScore(),
                     result.evidenceSufficient(), result.timings().totalMs(),
-                    result.hits().stream().limit(3).map(h -> h.provenance().documentId()).toList()));
+                    result.hits().stream().map(h -> h.provenance().documentId()).toList()));
         }
         latencies.sort(null);
         return new ModeSummary(mode, positives, negatives, recallHits / positives, reciprocalRanks / positives,

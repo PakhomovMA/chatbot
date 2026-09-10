@@ -1,6 +1,8 @@
 package com.personal.chatbot.config;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -119,6 +121,8 @@ public record ChatbotProperties(
      * @param minTextScore        noise floor for normalised BM25 (0 = rank only, as recommended by Embabel)
      * @param sufficientCosine    best-hit cosine at or above which retrieval counts as sufficient evidence
      * @param expandNeighbours    chunks fetched on each side of every hit as continuation context (0 = off)
+     * @param maxDocumentShare    share of the returned hits one document may fill while another has
+     *                            candidates left; 1.0 lets a single document take them all
      * @param traceBufferSize     retrieval traces kept for diagnostics
      */
     public record Retrieval(
@@ -129,6 +133,7 @@ public record ChatbotProperties(
             @DefaultValue("0.0") double minTextScore,
             @DefaultValue("0.3") double sufficientCosine,
             @Min(0) @DefaultValue("0") int expandNeighbours,
+            @DecimalMin("0.1") @DecimalMax("1.0") @DefaultValue("0.6") double maxDocumentShare,
             @Min(1) @DefaultValue("200") int traceBufferSize
     ) {
     }
@@ -141,8 +146,12 @@ public record ChatbotProperties(
      * @param compareSources     comparison of the sources before the answer is written (Phase 9d)
      * @param mode               default answer mode: DETERMINISTIC (retrieve-then-generate) or AGENTIC (ToolishRag, Phase 9c)
      * @param answerLanguage     language of the answer: AUTO follows the question, RU or EN force it
-     * @param agenticMaxSearches searches the model is told it may issue in agentic mode
+     * @param agenticMaxSearches searches the model may issue in agentic mode, told to it and enforced
      * @param agenticMinCosine   vector noise floor for the agentic search tools (plain cosine)
+     * @param queryRewriteTimeout how long the conversational rewrite may take before the question is
+     *                            searched as it was asked (Phase 9b)
+     * @param streamTimeout      how long one streaming answer may run before it is stopped and the
+     *                           client told so
      * @param temperature        sampling temperature for the grounded answer
      * @param evidenceCharBudget maximum characters of evidence passages placed in the prompt
      * @param quoteMaxChars      maximum length of a citation quote in the response
@@ -156,6 +165,8 @@ public record ChatbotProperties(
             @DefaultValue("AUTO") AnswerLanguage answerLanguage,
             @Min(1) @DefaultValue("4") int agenticMaxSearches,
             @DefaultValue("0.2") double agenticMinCosine,
+            @DefaultValue("20s") Duration queryRewriteTimeout,
+            @DefaultValue("10m") Duration streamTimeout,
             @DefaultValue("0.1") double temperature,
             @Min(500) @DefaultValue("6000") int evidenceCharBudget,
             @Min(50) @DefaultValue("600") int quoteMaxChars,

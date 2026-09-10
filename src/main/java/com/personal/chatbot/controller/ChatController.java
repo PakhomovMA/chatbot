@@ -1,9 +1,11 @@
 package com.personal.chatbot.controller;
 
+import com.personal.chatbot.config.ChatbotProperties;
 import com.personal.chatbot.exceptions.ServiceStoppingException;
 import com.personal.chatbot.models.agent.ChatCancellation;
 import com.personal.chatbot.models.chat.ChatRequest;
 import com.personal.chatbot.models.chat.ChatResponse;
+import com.personal.chatbot.models.chat.ChatStreamEvent;
 import com.personal.chatbot.models.chat.ConversationView;
 import com.personal.chatbot.service.chat.ChatService;
 import com.personal.chatbot.service.lifecycle.ActiveWork;
@@ -45,12 +47,20 @@ import java.util.concurrent.TimeUnit;
 @RequestMapping("/api")
 public class ChatController implements ActiveWork {
 
-    /** How long a streaming request may run in total; stages do not extend it. */
-    static final Duration STREAM_TIMEOUT = Duration.ofMinutes(10);
     static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(15);
+    /**
+     * How much longer than the stream timeout the container keeps the response open. The deadline is
+     * ours to enforce, because the container's is silent: it completes the response from its own
+     * thread, and the client is left with a stream that simply stops. The grace period is only there
+     * so that the two never race — by the time it could matter, the error event has been sent.
+     */
+    static final Duration STREAM_TIMEOUT_GRACE = Duration.ofSeconds(30);
+    static final String TIMED_OUT = "The assistant did not finish in time and the request was stopped.";
 
     private final ChatService chatService;
     private final SseConnections connections;
+    /** How long a streaming request may run in total; stages do not extend it. */
+    private final Duration streamTimeout;
     private final ExecutorService streamExecutor = Executors.newThreadPerTaskExecutor(
             Thread.ofVirtual().name("chat-stream-", 0).factory());
     private final ScheduledExecutorService heartbeats = Executors.newSingleThreadScheduledExecutor(
@@ -59,9 +69,10 @@ public class ChatController implements ActiveWork {
     private final Set<ChatCancellation> running = ConcurrentHashMap.newKeySet();
     private boolean stopping;
 
-    public ChatController(ChatService chatService, SseConnections connections) {
+    public ChatController(ChatService chatService, SseConnections connections, ChatbotProperties.Chat settings) {
         this.chatService = chatService;
         this.connections = connections;
+        this.streamTimeout = settings.streamTimeout();
     }
 
     @PostMapping("/chat")
@@ -81,23 +92,29 @@ public class ChatController implements ActiveWork {
      * through silent phases (an agentic tool loop can run for minutes without an event); the scheduler
      * only queues them, so one unreachable client cannot delay the heartbeats of the others.
      *
-     * <p>A disconnect, the {@link #STREAM_TIMEOUT}, a connection that fell too far behind and shutdown
+     * <p>A disconnect, the stream timeout, a connection that fell too far behind and shutdown
      * all end in the same cancellation. What that stops is cooperative: the streamed model call is
      * dropped through its subscription, and the other stages stop at the next retrieval, model or tool
      * boundary. Nothing here proves that generation already handed to Ollama has stopped on its side.
+     *
+     * <p>The timeout is the one case of the four where somebody is still listening, so it is also the
+     * one that owes an explanation: the deadline below sends an {@code error} event before it cancels.
+     * A client that left gets nothing, as before — there is nobody to tell.
      */
     @PostMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter chatStream(@Valid @RequestBody ChatRequest request) {
         ChatCancellation cancellation = start();
         SseConnection connection = null;
-        ScheduledFuture<?> heartbeat = null;
+        List<ScheduledFuture<?>> timers = List.of();
         try {
-            SseConnection opened = connections.open("chat", STREAM_TIMEOUT, cancellation::cancel);
+            SseConnection opened = connections.open("chat", streamTimeout.plus(STREAM_TIMEOUT_GRACE), cancellation::cancel);
             connection = opened;
             long interval = HEARTBEAT_INTERVAL.toMillis();
-            ScheduledFuture<?> scheduled = heartbeats.scheduleAtFixedRate(opened::heartbeat, interval, interval,
-                    TimeUnit.MILLISECONDS);
-            heartbeat = scheduled;
+            List<ScheduledFuture<?>> scheduled = List.of(
+                    heartbeats.scheduleAtFixedRate(opened::heartbeat, interval, interval, TimeUnit.MILLISECONDS),
+                    heartbeats.schedule(() -> timeOut(opened, cancellation), streamTimeout.toMillis(),
+                            TimeUnit.MILLISECONDS));
+            timers = scheduled;
             Future<?> work = streamExecutor.submit(() -> {
                 try {
                     chatService.stream(request, event -> opened.send(event.type(), null, event), cancellation);
@@ -115,9 +132,23 @@ public class ChatController implements ActiveWork {
         } catch (RuntimeException e) {
             // Shutdown between the check above and here: whatever was created is given back, so the
             // request is not left counted as running (docs/concurrency-plan.md C10).
-            release(cancellation, heartbeat, connection);
+            release(cancellation, timers, connection);
             throw e instanceof RejectedExecutionException ? new ServiceStoppingException("chat") : e;
         }
+    }
+
+    /**
+     * The server's own deadline. The event is queued before the run is cancelled, and the connection
+     * is completed only once its queue has drained, so the client reads the error rather than a stream
+     * that stopped. A request that has already finished has cancelled this timer.
+     */
+    private void timeOut(SseConnection connection, ChatCancellation cancellation) {
+        if (cancellation.isCancelled()) {
+            return;
+        }
+        ChatStreamEvent.Error event = new ChatStreamEvent.Error(TIMED_OUT);
+        connection.send(event.type(), null, event);
+        cancellation.cancel("stream timed out after " + streamTimeout);
     }
 
     @GetMapping("/conversations/{id}")
@@ -185,14 +216,12 @@ public class ChatController implements ActiveWork {
     }
 
     /**
-     * Idempotent: whichever path gets here first releases everything the request held. The heartbeat
-     * is null when the request failed before one was scheduled.
+     * Idempotent: whichever path gets here first releases everything the request held. The timers are
+     * empty when the request failed before any was scheduled.
      */
-    private void release(ChatCancellation cancellation, @Nullable ScheduledFuture<?> heartbeat,
+    private void release(ChatCancellation cancellation, List<ScheduledFuture<?>> timers,
                          @Nullable SseConnection connection) {
-        if (heartbeat != null) {
-            heartbeat.cancel(false);
-        }
+        timers.forEach(timer -> timer.cancel(false));
         running.remove(cancellation);
         if (connection != null) {
             connection.complete();

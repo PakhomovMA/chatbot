@@ -1,6 +1,7 @@
 package com.personal.chatbot.controller;
 
 import com.personal.chatbot.config.ChatbotProperties;
+import com.personal.chatbot.support.ChatSettings;
 import com.personal.chatbot.exceptions.ServiceStoppingException;
 import com.personal.chatbot.models.chat.ChatRequest;
 import com.personal.chatbot.service.chat.ChatService;
@@ -28,7 +29,7 @@ class ChatControllerLifecycleTest {
 
     private final SimpleMeterRegistry meters = new SimpleMeterRegistry();
     private final SseConnections connections = new SseConnections(meters, new ChatbotProperties.Sse(256));
-    private final ChatController controller = new ChatController(mock(ChatService.class), connections);
+    private final ChatController controller = new ChatController(mock(ChatService.class), connections, ChatSettings.defaults());
     private final ChatRequest question = new ChatRequest(null, "anything", null);
 
     @AfterEach
@@ -68,7 +69,7 @@ class ChatControllerLifecycleTest {
     void aFailureWhileOpeningTheConnectionReleasesTheRequest() {
         SseConnections unavailable = mock(SseConnections.class);
         when(unavailable.open(anyString(), any(), any())).thenThrow(new RejectedExecutionException("stopped"));
-        ChatController failing = new ChatController(mock(ChatService.class), unavailable);
+        ChatController failing = new ChatController(mock(ChatService.class), unavailable, ChatSettings.defaults());
         try {
             assertThatThrownBy(() -> failing.chatStream(question)).isInstanceOf(ServiceStoppingException.class);
         } finally {

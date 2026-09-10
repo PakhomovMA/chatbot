@@ -73,7 +73,7 @@ class GroundingInstructionsTest {
                 .contains("knowledge_base_zoomOut")
                 // {% raw %} keeps the marker the model must emit out of Jinja's hands
                 .contains("{{chunk:<id>}}")
-                .contains("at most 7 searches in total");
+                .contains("You get 7 searches in total");
     }
 
     /** Phase 9d: both branches say what they are for and, above all, what they must not do. */

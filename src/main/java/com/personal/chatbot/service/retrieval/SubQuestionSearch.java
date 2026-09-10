@@ -34,10 +34,12 @@ public class SubQuestionSearch {
 
     private final RetrievalTraceStore traces;
     private final ChatbotProperties.Retrieval settings;
+    private final DocumentSpread spread;
 
     public SubQuestionSearch(RetrievalTraceStore traces, ChatbotProperties.Retrieval settings) {
         this.traces = traces;
         this.settings = settings;
+        this.spread = new DocumentSpread(settings.maxDocumentShare());
     }
 
     /**
@@ -79,7 +81,7 @@ public class SubQuestionSearch {
                                   long tookMs) {
         RetrievalResult first = passes.getFirst();
         int topK = first.topK();
-        PassFusion.Merged merged = PassFusion.merge(passes, topK, settings.rrfK());
+        PassFusion.Merged merged = PassFusion.merge(passes, topK, settings.rrfK(), spread);
         List<RetrievedChunk> hits = merged.hits();
         double maxVector = RetrievalService.maxVectorScore(hits);
         return new RetrievalResult(UUID.randomUUID().toString(),

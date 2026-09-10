@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
@@ -23,9 +24,11 @@ import static org.mockito.Mockito.*;
 
 class ConversationQueryRewriterTest {
 
+    private static final Duration TIMEOUT = Duration.ofSeconds(20);
+
     private final GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(6000, 2, AnswerLanguage.AUTO);
     private final ConversationQueryRewriter rewriter = new ConversationQueryRewriter(prompt,
-            new GroundingInstructions(4, 3, 3, 4), 2, new SimpleMeterRegistry());
+            new GroundingInstructions(4, 3, 3, 4), 2, TIMEOUT, new SimpleMeterRegistry());
     private final OperationContext context = mock(OperationContext.class, RETURNS_DEEP_STUBS);
 
     private UserQuestion question(String text) {
@@ -48,6 +51,26 @@ class ConversationQueryRewriterTest {
         assertThat(rewriter.shouldRewrite(question(text))).isTrue();
     }
 
+    /**
+     * The gate used to let every short question through, and a question that already names its subject
+     * cost a model call for nothing — 132 s of it on a busy local model (docs/eval-log.md, 2026-09-10).
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"Расскажи про GLM-5.3", "Какова длина контекста у GLM и Kimi?",
+            "What changed in SEV-1 handling?", "Where does Vault keep the keys?"})
+    void aShortQuestionThatNamesItsOwnSubjectIsSearchedAsItWasAsked(String text) {
+        assertThat(rewriter.shouldRewrite(question(text))).isFalse();
+        assertThat(rewriter.rewrite(question(text), context).effectiveQuery()).isEqualTo(text);
+        verifyNoInteractions(context);
+    }
+
+    /** A follow-up that names something specific but opens as a continuation still needs its history. */
+    @ParameterizedTest
+    @ValueSource(strings = {"А у Kimi?", "And what about GLM-5.3?", "Расскажи про его контекст"})
+    void aContinuationOrAReferenceIsResolvedEvenWhenItNamesSomething(String text) {
+        assertThat(rewriter.shouldRewrite(question(text))).isTrue();
+    }
+
     @Test
     void firstTurnsDisabledHistoryAndLongStandaloneQuestionsNeedNoModel() {
         UserQuestion first = new UserQuestion("c", "m", "Restart it?", List.of(), null, null);
@@ -55,7 +78,7 @@ class ConversationQueryRewriterTest {
         UserQuestion standalone = question("Describe all required steps to safely restart the payments service during business hours without losing any pending transactions or active customer sessions.");
         assertThat(rewriter.rewrite(standalone, context)).isSameAs(standalone);
         ConversationQueryRewriter disabled = new ConversationQueryRewriter(prompt, new GroundingInstructions(4, 3, 3, 4),
-                0, new SimpleMeterRegistry());
+                0, TIMEOUT, new SimpleMeterRegistry());
         assertThat(disabled.rewrite(question("Restart it?"), context).effectiveQuery()).isEqualTo("Restart it?");
         verifyNoInteractions(context);
     }
@@ -127,7 +150,7 @@ class ConversationQueryRewriterTest {
     @Test
     void aOneTurnBudgetCanResolveTheSubjectFromTheLastAssistantMessage() {
         var oneTurn = new ConversationQueryRewriter(new GroundedAnswerPrompt(6000, 1, AnswerLanguage.AUTO),
-                new GroundingInstructions(4, 3, 3, 4), 1, new SimpleMeterRegistry());
+                new GroundingInstructions(4, 3, 3, 4), 1, TIMEOUT, new SimpleMeterRegistry());
         assertThat(oneTurn.shouldRewrite(question("How do I restart it?"))).isTrue();
     }
 }

@@ -42,7 +42,8 @@ public final class ChatSettings {
                                             ChatbotProperties.Decompose decompose,
                                             ChatbotProperties.CompareSources compareSources,
                                             ChatbotProperties.SectionTools sectionTools) {
-        return new ChatbotProperties.Chat(AnswerMode.DETERMINISTIC, AnswerLanguage.AUTO, 4, 0.2, 0.1, 6000, 600, 10,
-                1000, Duration.ofHours(24), expandSearch, decompose, compareSources, sectionTools);
+        return new ChatbotProperties.Chat(AnswerMode.DETERMINISTIC, AnswerLanguage.AUTO, 4, 0.2, Duration.ofSeconds(20),
+                Duration.ofMinutes(10), 0.1, 6000, 600, 10, 1000, Duration.ofHours(24), expandSearch, decompose,
+                compareSources, sectionTools);
     }
 }

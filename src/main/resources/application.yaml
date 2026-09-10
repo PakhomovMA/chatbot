@@ -56,12 +56,24 @@ chatbot:
     min-text-score: 0.0                  # BM25 is corpus-relative: rank only
     sufficient-cosine: 0.3               # calibrated on the eval set (docs/eval-log.md): negatives max 0.22, positives min 0.32
     expand-neighbours: 0                 # section chunks shown on each side of every hit (0 = off); also the agentic search tools
+    # Share of the returned hits one document may fill while another still has candidates. BM25 matches a
+    # document's own name in nearly every chunk of it, so a question naming two documents gets a lexical
+    # ranking of documents rather than of chunks, and the second document falls out of top-k entirely
+    # (docs/eval-log.md 2026-09-10). What exceeds the quota is demoted, never dropped: a corpus, filter or
+    # question where one document holds every answer is unaffected. 1.0 switches the quota off.
+    max-document-share: 0.6
     trace-buffer-size: 200
   chat:
     mode: AGENTIC                  # or DETERMINISTIC: retrieve-then-answer. AGENTIC = model searches via Embabel ToolishRag tools (Phase 9c)
     answer-language: AUTO                # AUTO = language of the question (RU detected by script); RU or EN force it
-    agentic-max-searches: 4
+    agentic-max-searches: 4              # told to the model in the prompt and enforced on the search tools
     agentic-min-cosine: 0.2
+    # A preparation step must not cost more than the answer it prepares: past this the question is
+    # searched as it was asked. Embabel may retry the call once, so the worst case is about twice this.
+    query-rewrite-timeout: 20s
+    # How long one streaming answer may run before it is stopped and the client told so with an `error`
+    # event. The container keeps the response open a little longer, so the deadline is always ours.
+    stream-timeout: 10m
     temperature: 0.1
     evidence-char-budget: 6000           # evidence passages shown to the model (§6.7)
     quote-max-chars: 600

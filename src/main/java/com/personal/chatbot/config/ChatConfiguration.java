@@ -29,7 +29,8 @@ class ChatConfiguration {
     @Bean
     ConversationQueryRewriter conversationQueryRewriter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
                                                        ChatbotProperties.Chat chat, MeterRegistry meterRegistry) {
-        return new ConversationQueryRewriter(prompt, instructions, chat.historyTurns(), meterRegistry);
+        return new ConversationQueryRewriter(prompt, instructions, chat.historyTurns(), chat.queryRewriteTimeout(),
+                meterRegistry);
     }
 
     @Bean

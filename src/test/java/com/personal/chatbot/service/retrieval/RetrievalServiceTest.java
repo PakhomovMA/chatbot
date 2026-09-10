@@ -88,7 +88,7 @@ class RetrievalServiceTest {
     }
 
     private ChatbotProperties.Retrieval properties(double sufficientCosine, int expandNeighbours) {
-        return new ChatbotProperties.Retrieval(5, 3, 60, -1.0, 0.0, sufficientCosine, expandNeighbours, 50);
+        return new ChatbotProperties.Retrieval(5, 3, 60, -1.0, 0.0, sufficientCosine, expandNeighbours, 1.0, 50);
     }
 
     private NavigableDocument parsed(String id, String title, String markdown) throws Exception {

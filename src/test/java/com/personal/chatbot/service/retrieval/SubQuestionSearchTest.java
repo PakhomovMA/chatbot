@@ -23,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SubQuestionSearchTest {
 
     private static final ChatbotProperties.Retrieval SETTINGS =
-            new ChatbotProperties.Retrieval(4, 3, 60, 0.0, 0.0, 0.5, 0, 200);
+            new ChatbotProperties.Retrieval(4, 3, 60, 0.0, 0.0, 0.5, 0, 1.0, 200);
 
     private final RetrievalTraceStore traces = new RetrievalTraceStore(20);
     private final SubQuestionSearch search = new SubQuestionSearch(traces, SETTINGS);

@@ -99,6 +99,7 @@ tasks.named('bootRun') {
 // The expandSearch comparison (Phase 9a) also uses Ollama when it is running; without it, only the
 // strategies that need no model call are measured.
 //   ./gradlew ragEval [-Peval.chunkSize=800 -Peval.overlap=100 -Peval.minRecall=0.8 -Peval.sufficientCosine=0.5]
+//                     [-Peval.maxDocumentShare=0.6]
 //                     [-Peval.llm=qwen3:14b -Peval.ollamaUrl=http://localhost:11434]
 tasks.register('ragEval', Test) {
     description = 'Runs the RAG retrieval evaluation against the golden question set'
@@ -108,7 +109,8 @@ tasks.register('ragEval', Test) {
     useJUnitPlatform { includeTags 'eval' }
     jvmArgs nativeAccessJvmArgs
     outputs.upToDateWhen { false }
-    ['eval.chunkSize', 'eval.overlap', 'eval.minRecall', 'eval.sufficientCosine', 'eval.llm', 'eval.ollamaUrl'].each { key ->
+    ['eval.chunkSize', 'eval.overlap', 'eval.minRecall', 'eval.sufficientCosine', 'eval.maxDocumentShare',
+     'eval.llm', 'eval.ollamaUrl'].each { key ->
         if (project.hasProperty(key)) {
             systemProperty key, project.property(key)
         }

@@ -28,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EvidenceExpanderTest {
 
     private static final ChatbotProperties.Retrieval RETRIEVAL =
-            new ChatbotProperties.Retrieval(4, 3, 60, 0.0, 0.0, 0.5, 0, 200);
+            new ChatbotProperties.Retrieval(4, 3, 60, 0.0, 0.0, 0.5, 0, 1.0, 200);
 
     private final Retriever retriever = query -> result(query.query(), true);
 

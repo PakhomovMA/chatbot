@@ -11,8 +11,10 @@ import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Best-effort reference resolution before retrieval; model output is search text only (Phase 9b). */
@@ -23,28 +25,73 @@ public class ConversationQueryRewriter {
             "(?iu)(?<![\\p{L}\\p{N}_])(?:it|its|they|them|their|this|that|these|those|former|latter|"
                     + "он|она|оно|они|его|её|ее|их|ему|ей|им|ним|ней|них|него|неё|нее|"
                     + "этот|эта|это|эти|этого|этой|этих|этом|такой|такая|такое|также)(?![\\p{L}\\p{N}_])");
+    /** A question that opens as a continuation of the last one, without naming what it continues. */
+    private static final Pattern CONTINUATION = Pattern.compile(
+            "(?iu)^(?:а|и|но|ну|ещё|еще|and|but|so|then|also|ok|okay)(?![\\p{L}\\p{N}_])");
+    /** Words of a question, punctuation trimmed; identifiers keep the characters they are written with. */
+    private static final Pattern WORD = Pattern.compile("[\\p{L}\\p{N}][\\p{L}\\p{N}._:/-]*");
 
     private final GroundedAnswerPrompt prompt;
     private final GroundingInstructions instructions;
     private final int historyTurns;
+    private final Duration timeout;
     private final MeterRegistry meters;
 
     public ConversationQueryRewriter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
-                                     int historyTurns, MeterRegistry meters) {
+                                     int historyTurns, Duration timeout, MeterRegistry meters) {
         this.prompt = prompt;
         this.instructions = instructions;
         this.historyTurns = historyTurns;
+        this.timeout = timeout;
         this.meters = meters;
     }
 
-    /** A cheap gate: no model call for first turns, disabled history or long standalone questions. */
+    /**
+     * A cheap gate: no model call for first turns, disabled history or long standalone questions —
+     * and none for a short question that already names what it is about.
+     *
+     * <p>Length alone used to decide it, which made every short question with any history worth a
+     * model call, including "Расскажи про GLM-5.3": nothing to resolve, and 132 s spent resolving it
+     * on a busy local model (docs/eval-log.md, 2026-09-10). A question is left alone when it points at
+     * nothing earlier — no reference word, no opening that continues the previous turn — and names
+     * something the search can use: an identifier, a version, a product name. Everything the branch
+     * was built for still goes through, because a question that needs its history says so with one of
+     * those words.
+     */
     public boolean shouldRewrite(UserQuestion question) {
         List<ConversationTurn> recent = question.history().subList(
                 Math.max(0, question.history().size() - historyTurns), question.history().size());
         boolean hasContext = recent.stream().anyMatch(t -> !t.content().isBlank());
+        if (!hasContext) {
+            return false;
+        }
         String text = question.question().strip();
-        return hasContext && ((text.length() <= 120 && text.split("\\s+").length <= 12)
-                || REFERENCE.matcher(text).find());
+        if (REFERENCE.matcher(text).find() || CONTINUATION.matcher(text).find()) {
+            return true;
+        }
+        return text.length() <= 120 && text.split("\\s+").length <= 12 && !namesSomethingSpecific(text);
+    }
+
+    /**
+     * Whether the question names something a search can go on by itself: a token carrying a digit
+     * ({@code GLM-5.3}, {@code SEV-1}), an inner capital ({@code GLM}, {@code PagerDuty}) or a
+     * capitalised name that is not merely the first word of the sentence.
+     */
+    static boolean namesSomethingSpecific(String text) {
+        Matcher words = WORD.matcher(text);
+        boolean first = true;
+        while (words.find()) {
+            String word = words.group();
+            boolean hasDigit = word.chars().anyMatch(Character::isDigit);
+            boolean hasLetter = word.chars().anyMatch(Character::isLetter);
+            boolean innerCapital = word.codePoints().skip(1).anyMatch(Character::isUpperCase);
+            boolean name = !first && word.length() > 1 && Character.isUpperCase(word.codePointAt(0));
+            if ((hasDigit && hasLetter) || innerCapital || name) {
+                return true;
+            }
+            first = false;
+        }
+        return false;
     }
 
     public UserQuestion rewrite(UserQuestion question, OperationContext context) {
@@ -56,7 +103,12 @@ public class ConversationQueryRewriter {
         long started = System.nanoTime();
         String outcome = "fallback";
         try {
-            StandaloneQuery result = context.ai().withLlm(LlmOptions.withDefaultLlm().withTemperature(0.0))
+            // Bounded, unlike the answer it prepares: this call only makes the search text better, and
+            // waiting for it longer than the platform default costs the user the answer itself. A
+            // question the model does not resolve in time is searched as it was asked, which is what
+            // happens on any other failure here. Embabel may still retry once around this bound.
+            StandaloneQuery result = context.ai()
+                    .withLlm(LlmOptions.withDefaultLlm().withTemperature(0.0).withTimeout(timeout))
                     .withPromptContributor(instructions.conversationRewrite())
                     .creating(StandaloneQuery.class)
                     .fromPrompt(prompt.buildForConversationRewrite(question.question(), question.history()));

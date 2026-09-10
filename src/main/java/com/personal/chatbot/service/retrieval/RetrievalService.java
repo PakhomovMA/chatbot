@@ -53,7 +53,7 @@ public class RetrievalService implements Retriever {
         this.indexStore = indexStore;
         this.traces = traces;
         this.settings = settings;
-        this.fusion = new HitFusion(settings.rrfK());
+        this.fusion = new HitFusion(settings.rrfK(), settings.maxDocumentShare());
         this.meterRegistry = meterRegistry;
     }
 

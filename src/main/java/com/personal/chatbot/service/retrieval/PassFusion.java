@@ -26,6 +26,9 @@ import java.util.stream.Collectors;
  * passes, so a weak whole-question match cannot hide a strong match for a part. Each chunk appears
  * once, and a selected hit keeps its own rank even if another pass returned it as a neighbour.
  *
+ * <p>The merged ranking is cut to {@code topK} by the same {@link DocumentSpread} as a single pass,
+ * so searching twice cannot undo what the quota does for one search.
+ *
  * <p>{@link #query} and {@link #timings} describe the merged result the same way for both branches.
  */
 final class PassFusion {
@@ -37,7 +40,7 @@ final class PassFusion {
     private PassFusion() {
     }
 
-    static Merged merge(List<RetrievalResult> passes, int topK, int rrfK) {
+    static Merged merge(List<RetrievalResult> passes, int topK, int rrfK, DocumentSpread spread) {
         Map<String, RetrievedChunk> byId = new LinkedHashMap<>();
         Map<String, List<RetrievedChunk>> neighbours = new LinkedHashMap<>();
         List<List<String>> rankings = new ArrayList<>(passes.size());
@@ -56,7 +59,8 @@ final class PassFusion {
         Set<String> firstPass = new LinkedHashSet<>(rankings.getFirst());
 
         List<RetrievedChunk> hits = new ArrayList<>();
-        List<RankFusion.Fused> selected = RankFusion.reciprocalRank(rankings, rrfK).stream().limit(topK).toList();
+        List<RankFusion.Fused> selected = spread.select(RankFusion.reciprocalRank(rankings, rrfK),
+                fused -> byId.get(fused.key()).provenance().documentId(), topK);
         Set<String> selectedIds = selected.stream().map(RankFusion.Fused::key).collect(Collectors.toSet());
         Set<String> emitted = new LinkedHashSet<>();
         int added = 0;

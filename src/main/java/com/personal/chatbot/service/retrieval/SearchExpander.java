@@ -29,11 +29,13 @@ public class SearchExpander {
     private final Retriever retriever;
     private final RetrievalTraceStore traces;
     private final ChatbotProperties.Retrieval settings;
+    private final DocumentSpread spread;
 
     public SearchExpander(Retriever retriever, RetrievalTraceStore traces, ChatbotProperties.Retrieval settings) {
         this.retriever = retriever;
         this.traces = traces;
         this.settings = settings;
+        this.spread = new DocumentSpread(settings.maxDocumentShare());
     }
 
     /**
@@ -92,7 +94,7 @@ public class SearchExpander {
 
     private RetrievalResult merge(List<RetrievalResult> passes, ExpansionStrategy strategy, List<String> extraQueries,
                                   int topK, long tookMs) {
-        PassFusion.Merged merged = PassFusion.merge(passes, topK, settings.rrfK());
+        PassFusion.Merged merged = PassFusion.merge(passes, topK, settings.rrfK(), spread);
         List<RetrievedChunk> hits = merged.hits();
         double maxVector = RetrievalService.maxVectorScore(hits);
         RetrievalResult first = passes.getFirst();

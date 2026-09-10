@@ -63,7 +63,7 @@ class IngestionServiceTest {
                 new ChatbotProperties.Knowledge(DataSize.ofMegabytes(5), Set.of("md", "txt", "pdf", "docx")),
                 new ChatbotProperties.Index(null, true, 400, 50, 8),
                 new ChatbotProperties.Ingestion(true, true),
-                new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, 0.5, 0, 200),
+                new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, 0.5, 0, 1.0, 200),
                 com.personal.chatbot.support.ChatSettings.defaults(),
                 new ChatbotProperties.Sse(256));
     }

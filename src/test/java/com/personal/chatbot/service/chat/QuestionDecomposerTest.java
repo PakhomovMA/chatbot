@@ -45,7 +45,7 @@ import static org.mockito.Mockito.when;
 class QuestionDecomposerTest {
 
     private static final ChatbotProperties.Retrieval RETRIEVAL =
-            new ChatbotProperties.Retrieval(4, 3, 60, 0.0, 0.0, 0.5, 0, 200);
+            new ChatbotProperties.Retrieval(4, 3, 60, 0.0, 0.0, 0.5, 0, 1.0, 200);
 
     private final List<String> searched = new ArrayList<>();
     private final Retriever retriever = query -> {
