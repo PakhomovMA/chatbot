@@ -9,10 +9,11 @@ import com.personal.chatbot.models.agent.SubQuestions;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
+import com.personal.chatbot.observability.AiOperation;
+import com.personal.chatbot.observability.ChatObservations;
+import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.service.retrieval.Retriever;
 import com.personal.chatbot.service.retrieval.SubQuestionSearch;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,7 +21,6 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
@@ -60,17 +60,17 @@ public class QuestionDecomposer {
     private final GroundedAnswerPrompt prompt;
     private final GroundingInstructions instructions;
     private final ChatbotProperties.Chat settings;
-    private final MeterRegistry meterRegistry;
+    private final ChatObservations observations;
 
     public QuestionDecomposer(Retriever retriever, SubQuestionSearch search, GroundedAnswerPrompt prompt,
                               GroundingInstructions instructions, ChatbotProperties.Chat settings,
-                              MeterRegistry meterRegistry) {
+                              ChatObservations observations) {
         this.retriever = retriever;
         this.search = search;
         this.prompt = prompt;
         this.instructions = instructions;
         this.settings = settings;
-        this.meterRegistry = meterRegistry;
+        this.observations = observations;
     }
 
     /**
@@ -100,11 +100,13 @@ public class QuestionDecomposer {
         question.notifyStage(AnswerStages.RETRIEVING);
         question.abortIfCancelled();
         RetrievalResult result;
-        String outcome;
+        ChatObservations.DecompositionOutcome outcome;
         try {
             result = search.search(question.retrievalQuery(), parts == null ? List.of() : parts, buildMs,
                     queries -> passes(queries, question, context));
-            outcome = result.decomposed() ? "split" : parts == null ? "failed" : "single";
+            outcome = result.decomposed() ? ChatObservations.DecompositionOutcome.SPLIT
+                    : parts == null ? ChatObservations.DecompositionOutcome.FAILED
+                    : ChatObservations.DecompositionOutcome.SINGLE;
         } catch (Exception e) {
             // A pass that fails takes the whole split with it: the question is answered from the
             // evidence one search finds, which is what it would have had without this branch.
@@ -115,49 +117,50 @@ public class QuestionDecomposer {
             log.warn("Searching the parts of [{}] failed; searching the question as a whole: {}",
                     question.messageId(), e.toString());
             result = retriever.search(question.retrievalQuery());
-            outcome = "failed";
+            outcome = ChatObservations.DecompositionOutcome.FAILED;
         }
         question.abortIfCancelled();
-        meterRegistry.counter("chatbot.chat.decomposition", "outcome", outcome).increment();
+        observations.decomposition(outcome);
         return new Evidence(question, result);
     }
 
     /** @return the parts of the question, empty when it asks for one thing, null when the call failed */
     private @Nullable List<String> partsOf(UserQuestion question, OperationContext context) {
         question.notifyStage(AnswerStages.DECOMPOSING);
-        long started = System.nanoTime();
-        try {
-            SubQuestions split = context.ai()
-                    .withLlm(LlmOptions.withDefaultLlm().withTemperature(0.0))
-                    .withPromptContributor(instructions.questionDecomposition())
-                    .creating(SubQuestions.class)
-                    .fromPrompt(prompt.buildForDecomposition(question.effectiveQuery()));
-            question.abortIfCancelled();
-            Set<String> seen = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-            seen.add(question.effectiveQuery().strip());
-            List<String> parts = split == null ? List.of() : split.questionsOrEmpty().stream()
-                    .filter(part -> part != null && !part.isBlank())
-                    .map(String::strip)
-                    // Reject broken output rather than truncating it into a different search intent.
-                    .filter(part -> part.length() <= 1000 && part.codePoints().noneMatch(Character::isISOControl))
-                    .filter(seen::add)
-                    .limit(settings.decompose().maxSubQuestions())
-                    .toList();
-            // One part is the question again, said differently; that is the widening branch's job, not this one.
-            List<String> useful = parts.size() < 2 ? List.of() : parts;
-            log.debug("Decomposed [{}] into {}", question.messageId(), useful);
-            return useful;
-        } catch (Exception e) {
-            if (ChatCancelledException.isCancellation(e)) {
-                throw new ChatCancelledException(question.messageId(), "cancelled while splitting the question");
+        try (Measured operation = observations.startAiOperation(AiOperation.DECOMPOSE_QUESTION)) {
+            operation.legacyBegins();
+            try {
+                SubQuestions split = context.ai()
+                        .withLlm(LlmOptions.withDefaultLlm().withTemperature(0.0))
+                        .withPromptContributor(instructions.questionDecomposition())
+                        .creating(SubQuestions.class)
+                        .fromPrompt(prompt.buildForDecomposition(question.effectiveQuery()));
+                question.abortIfCancelled();
+                Set<String> seen = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+                seen.add(question.effectiveQuery().strip());
+                List<String> parts = split == null ? List.of() : split.questionsOrEmpty().stream()
+                        .filter(part -> part != null && !part.isBlank())
+                        .map(String::strip)
+                        // Reject broken output rather than truncating it into a different search intent.
+                        .filter(part -> part.length() <= 1000 && part.codePoints().noneMatch(Character::isISOControl))
+                        .filter(seen::add)
+                        .limit(settings.decompose().maxSubQuestions())
+                        .toList();
+                // One part is the question again, said differently; that is the widening branch's job, not this one.
+                List<String> useful = parts.size() < 2 ? List.of() : parts;
+                log.debug("Decomposed [{}] into {}", question.messageId(), useful);
+                operation.succeeded();
+                return useful;
+            } catch (Exception e) {
+                operation.recovered(e, question.cancellation().reason());
+                if (ChatCancelledException.isCancellation(e)) {
+                    throw new ChatCancelledException(question.messageId(), "cancelled while splitting the question");
+                }
+                question.abortIfCancelled();
+                log.warn("Question decomposition failed for [{}]; searching the question as a whole: {}",
+                        question.messageId(), e.toString());
+                return null;
             }
-            question.abortIfCancelled();
-            log.warn("Question decomposition failed for [{}]; searching the question as a whole: {}",
-                    question.messageId(), e.toString());
-            return null;
-        } finally {
-            Timer.builder("chatbot.llm").tag("operation", "decompose-question").register(meterRegistry)
-                    .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
         }
     }
 

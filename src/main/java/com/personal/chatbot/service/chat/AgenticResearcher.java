@@ -20,6 +20,9 @@ import com.personal.chatbot.models.retrieval.RetrievalMode;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievalTimings;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
+import com.personal.chatbot.observability.AiOperation;
+import com.personal.chatbot.observability.ChatObservations;
+import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.service.index.LockedSearchOperations;
 import com.personal.chatbot.service.index.ScopedSearchOperations;
 import com.personal.chatbot.service.index.SectionCatalog;
@@ -31,8 +34,6 @@ import com.personal.chatbot.utils.AnswerLanguages;
 import com.personal.chatbot.utils.CitationMarkers;
 import com.personal.chatbot.utils.CosineScores;
 import com.personal.chatbot.utils.Throwables;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -41,7 +42,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -74,7 +74,7 @@ public class AgenticResearcher {
     private final RetrievalTraceStore traces;
     private final ChatbotProperties.Chat settings;
     private final ChatbotProperties.Retrieval retrievalSettings;
-    private final MeterRegistry meterRegistry;
+    private final ChatObservations observations;
     private final QuestionDecomposer decomposer;
     private final SectionCatalog catalog;
     private final Retriever retriever;
@@ -82,7 +82,7 @@ public class AgenticResearcher {
     public AgenticResearcher(LockedSearchOperations searchOperations, GroundedAnswerPrompt prompt,
                              GroundingInstructions instructions, RetrievalTraceStore traces,
                              ChatbotProperties.Chat settings, ChatbotProperties.Retrieval retrievalSettings,
-                             MeterRegistry meterRegistry, QuestionDecomposer decomposer, SectionCatalog catalog,
+                             ChatObservations observations, QuestionDecomposer decomposer, SectionCatalog catalog,
                              Retriever retriever) {
         this.retriever = retriever;
         this.searchOperations = searchOperations;
@@ -91,13 +91,30 @@ public class AgenticResearcher {
         this.traces = traces;
         this.settings = settings;
         this.retrievalSettings = retrievalSettings;
-        this.meterRegistry = meterRegistry;
+        this.observations = observations;
         this.decomposer = decomposer;
         this.catalog = catalog;
     }
 
+    /**
+     * The whole branch is one AI operation: the seed decomposition, the tool loop, the mapping and the
+     * repair below are its parts, not operations of the request in their own right. The narrower window
+     * the legacy {@code chatbot.llm} timer measured — the tool loop alone — is marked inside it.
+     */
     public AnswerAttempt research(UserQuestion question, OperationContext context) {
-        long started = System.nanoTime();
+        try (Measured research = observations.startAiOperation(AiOperation.RESEARCH_AGENTIC)) {
+            try {
+                AnswerAttempt attempt = attempt(question, context, research);
+                research.succeeded();
+                return attempt;
+            } catch (Exception e) {
+                research.failed(e, question.cancellation().reason());
+                throw e;
+            }
+        }
+    }
+
+    private AnswerAttempt attempt(UserQuestion question, OperationContext context, Measured research) {
         question.abortIfCancelled();
         RetrievalResult seed = decomposer.shouldDecompose(question)
                 ? decomposer.decompose(question, context).retrieval() : null;
@@ -132,10 +149,10 @@ public class AgenticResearcher {
         }
         AgenticDraft draft;
         question.abortIfCancelled();
-        long researchStarted = System.nanoTime();
+        research.legacyBegins();
         // The searches the model may run are a budget, not a line in the prompt: the instructions name
         // the same number, and this is what holds the model to it.
-        SearchBudget budget = new SearchBudget(settings.agenticMaxSearches(), question.messageId(), meterRegistry);
+        SearchBudget budget = new SearchBudget(settings.agenticMaxSearches(), question.messageId(), observations);
         try {
             // withReference(rag) would register the tools twice (deprecated toolObject() plus tools()) under
             // two different prefixes; register the flat tool list and the prompt contribution explicitly.
@@ -153,11 +170,11 @@ public class AgenticResearcher {
             // numbered passages — a failed binding is not a failed request.
             log.info("Agentic draft for [{}] did not bind ({}); answering from the collected evidence instead",
                     question.messageId(), Throwables.rootMessage(e));
-            meterRegistry.counter("chatbot.chat.agentic.draft", "outcome", "unparsable").increment();
+            observations.agenticDraftUnparsable();
             draft = new AgenticDraft("", List.of(), true, null);
         } finally {
-            Timer.builder("chatbot.llm").tag("operation", "research-agentic").register(meterRegistry)
-                    .record(System.nanoTime() - researchStarted, TimeUnit.NANOSECONDS);
+            // The legacy timer stopped here, before the mapping, the fallback and the repair below.
+            research.legacyEnds();
         }
         question.abortIfCancelled();
 
@@ -181,14 +198,13 @@ public class AgenticResearcher {
             question.abortIfCancelled();
             fallback = retriever.search(question.retrievalQuery());
             seen = fallback.hits();
-            meterRegistry.counter("chatbot.chat.agentic.fallback", "outcome", seen.isEmpty() ? "nothing" : "passages")
-                    .increment();
+            observations.agenticFallback(!seen.isEmpty());
             log.info("Agentic research for [{}] used no knowledge-base tool; deterministic retrieval found {} passages",
                     question.messageId(), seen.size());
         }
         // The fallback result carries a trace of its own, recorded by the retrieval service.
         RetrievalResult trace = fallback != null ? fallback
-                : traceOf(question, collector, seen, seed, (System.nanoTime() - started) / 1_000_000);
+                : traceOf(question, collector, seen, seed, research.elapsed().toMillis());
         if (fallback == null) {
             traces.record(trace);
         }
@@ -198,18 +214,21 @@ public class AgenticResearcher {
             // numbered prompt; the speculative draft is deliberately not part of that prompt.
             question.notifyStage(AnswerStages.GENERATING);
             question.abortIfCancelled();
-            long repairStarted = System.nanoTime();
-            try {
-                numbered = context.ai()
-                        .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()))
-                        .withPromptContributor(instructions.groundedAnswer())
-                        .creating(GroundedAnswerDraft.class)
-                        .fromPrompt(prompt.build(question.question(), question.history(), seen));
-            } catch (InvalidLlmReturnFormatException e) {
-                numbered = ProseAnswerRecovery.answerOrRethrow(e);
-            } finally {
-                Timer.builder("chatbot.llm").tag("operation", "repair-agentic-answer").register(meterRegistry)
-                        .record(System.nanoTime() - repairStarted, TimeUnit.NANOSECONDS);
+            try (Measured repair = observations.startAiOperation(AiOperation.REPAIR_AGENTIC_ANSWER)) {
+                try {
+                    numbered = context.ai()
+                            .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()))
+                            .withPromptContributor(instructions.groundedAnswer())
+                            .creating(GroundedAnswerDraft.class)
+                            .fromPrompt(prompt.build(question.question(), question.history(), seen));
+                    repair.succeeded();
+                } catch (InvalidLlmReturnFormatException e) {
+                    numbered = ProseAnswerRecovery.answerOrRethrow(e);
+                    repair.recovered(e, question.cancellation().reason());
+                } catch (Exception e) {
+                    repair.failed(e, question.cancellation().reason());
+                    throw e;
+                }
             }
             question.abortIfCancelled();
             passagesShown = prompt.includedHits(seen);

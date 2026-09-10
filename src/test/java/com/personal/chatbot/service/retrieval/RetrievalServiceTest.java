@@ -14,7 +14,6 @@ import com.personal.chatbot.service.parsing.DocumentParser;
 import com.personal.chatbot.support.FakeTextEmbedder;
 import com.personal.chatbot.support.IndexStores;
 import com.personal.chatbot.support.TestDocuments;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +28,7 @@ import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import com.personal.chatbot.support.TestObservations;
 
 /** Phase 4 gate: hybrid retrieval over an in-memory store with deterministic fake embeddings. */
 class RetrievalServiceTest {
@@ -72,7 +72,7 @@ class RetrievalServiceTest {
     void setUp() throws Exception {
         store = IndexStores.store(null, new FakeTextEmbedder(32)).open();
         traces = new RetrievalTraceStore(50);
-        service = new RetrievalService(store, traces, properties(0.3), new SimpleMeterRegistry());
+        service = new RetrievalService(store, traces, properties(0.3), TestObservations.retrieval());
         store.writeDocument(parsed("runbook", "Payments Runbook", TestDocuments.MARKDOWN));
         store.writeDocument(parsed("deploy", "Deployment Guide", DEPLOY_DOC));
         store.writeDocument(parsed("handbook", "On-call Handbook", HANDBOOK_DOC));
@@ -156,7 +156,7 @@ class RetrievalServiceTest {
         assertThat(lenient.maxVectorScore()).isGreaterThan(0.3);
         assertThat(lenient.evidenceSufficient()).isTrue();
 
-        RetrievalService strict = new RetrievalService(store, traces, properties(0.999), new SimpleMeterRegistry());
+        RetrievalService strict = new RetrievalService(store, traces, properties(0.999), TestObservations.retrieval());
         assertThat(strict.search(RetrievalQuery.of("systemctl restart payments")).evidenceSufficient()).isFalse();
         assertThat(service.search(new RetrievalQuery("systemctl", null, RetrievalMode.TEXT, null)).evidenceSufficient()).isFalse();
     }
@@ -166,7 +166,7 @@ class RetrievalServiceTest {
         RetrievalQuery query = new RetrievalQuery("secondary on-call responsibilities", 2, RetrievalMode.VECTOR, null);
         List<RetrievedChunk> plain = service.search(query).hits();
 
-        RetrievalService expanding = new RetrievalService(store, traces, properties(0.3, 1), new SimpleMeterRegistry());
+        RetrievalService expanding = new RetrievalService(store, traces, properties(0.3, 1), TestObservations.retrieval());
         List<RetrievedChunk> expanded = expanding.search(query).hits();
 
         assertThat(expanded).filteredOn(RetrievedChunk::isHit).containsExactlyElementsOf(plain);
@@ -191,11 +191,11 @@ class RetrievalServiceTest {
     void unavailableIndexIsReported() {
         store.close();
         try (LuceneIndexStore other = IndexStores.store(null, new FakeTextEmbedder(8)).open()) {
-            RetrievalService empty = new RetrievalService(other, traces, properties(0.5), new SimpleMeterRegistry());
+            RetrievalService empty = new RetrievalService(other, traces, properties(0.5), TestObservations.retrieval());
             assertThat(empty.search(RetrievalQuery.of("anything")).hits()).isEmpty();
         }
         LuceneIndexStore closed = IndexStores.store(null, new FakeTextEmbedder(8));
-        RetrievalService unopened = new RetrievalService(closed, traces, properties(0.5), new SimpleMeterRegistry());
+        RetrievalService unopened = new RetrievalService(closed, traces, properties(0.5), TestObservations.retrieval());
         assertThatThrownBy(() -> unopened.search(RetrievalQuery.of("x"))).isInstanceOf(IndexUnavailableException.class);
     }
 }

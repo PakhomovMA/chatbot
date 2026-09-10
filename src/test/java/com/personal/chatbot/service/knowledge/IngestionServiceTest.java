@@ -65,7 +65,8 @@ class IngestionServiceTest {
                 new ChatbotProperties.Ingestion(true, true),
                 new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, 0.5, 0, 1.0, 200),
                 com.personal.chatbot.support.ChatSettings.defaults(),
-                new ChatbotProperties.Sse(256));
+                new ChatbotProperties.Sse(256),
+                new ChatbotProperties.Observability(true, true));
     }
 
     /** Wires the same objects the Spring context would; events are dispatched directly to the service. */

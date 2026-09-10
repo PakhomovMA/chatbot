@@ -10,12 +10,11 @@ import com.personal.chatbot.models.retrieval.RetrievalQuery;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievalTimings;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
+import com.personal.chatbot.observability.Measured;
+import com.personal.chatbot.observability.RetrievalObservations;
 import com.personal.chatbot.service.index.LuceneIndexStore;
 import com.personal.chatbot.utils.CosineScores;
 import com.personal.chatbot.utils.EmbeddingModeScope;
-import io.micrometer.core.instrument.DistributionSummary;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,7 +24,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Deterministic hybrid retrieval (docs/system-plan.md §6, D4, INV-01): runs the vector and BM25
@@ -46,22 +44,38 @@ public class RetrievalService implements Retriever {
     private final RetrievalTraceStore traces;
     private final ChatbotProperties.Retrieval settings;
     private final HitFusion fusion;
-    private final MeterRegistry meterRegistry;
+    private final RetrievalObservations observations;
 
     public RetrievalService(LuceneIndexStore indexStore, RetrievalTraceStore traces, ChatbotProperties.Retrieval settings,
-                            MeterRegistry meterRegistry) {
+                            RetrievalObservations observations) {
         this.indexStore = indexStore;
         this.traces = traces;
         this.settings = settings;
         this.fusion = new HitFusion(settings.rrfK(), settings.maxDocumentShare());
-        this.meterRegistry = meterRegistry;
+        this.observations = observations;
     }
 
     @Override
     public RetrievalResult search(RetrievalQuery query) {
+        RetrievalMode mode = Objects.requireNonNullElse(query.mode(), RetrievalMode.HYBRID);
+        // The pass is measured whatever it ends in, index lock and query embedding included; the timer
+        // it replaces counted only the passes that came back with something.
+        try (Measured pass = observations.startSearch(mode)) {
+            try {
+                RetrievalResult result = run(query, mode);
+                observations.passages(result.hits().size());
+                pass.succeeded();
+                return result;
+            } catch (Exception e) {
+                pass.failed(e);
+                throw e;
+            }
+        }
+    }
+
+    private RetrievalResult run(RetrievalQuery query, RetrievalMode mode) {
         long started = System.nanoTime();
         String text = query.query().strip();
-        RetrievalMode mode = Objects.requireNonNullElse(query.mode(), RetrievalMode.HYBRID);
         int topK = query.topK() != null ? query.topK() : settings.topK();
         Set<String> documentFilter = query.documentIds() == null || query.documentIds().isEmpty() ? null : query.documentIds();
         int candidates = topK * settings.candidateMultiplier() * (documentFilter != null ? 2 : 1);
@@ -83,9 +97,6 @@ public class RetrievalService implements Retriever {
         RetrievalResult result = new RetrievalResult(UUID.randomUUID().toString(), text, mode, topK, candidates, hits,
                 sufficient, maxVector, new RetrievalTimings(vectorMs, textMs, fusionMs, millisSince(started)), Instant.now());
         traces.record(result);
-        Timer.builder("chatbot.retrieval").tag("mode", mode.name().toLowerCase()).register(meterRegistry)
-                .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
-        DistributionSummary.builder("chatbot.retrieval.hits").register(meterRegistry).record(hits.size());
         log.debug("Retrieval [{}] mode={} '{}' -> {} passages (maxCosine={}, sufficient={}) in {} ms", result.traceId(), mode,
                 text, hits.size(), String.format("%.3f", maxVector), sufficient, result.timings().totalMs());
         return result;

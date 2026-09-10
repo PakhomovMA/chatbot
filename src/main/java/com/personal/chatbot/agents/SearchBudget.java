@@ -3,7 +3,7 @@ package com.personal.chatbot.agents;
 import com.embabel.agent.api.tool.DelegatingTool;
 import com.embabel.agent.api.tool.Tool;
 import com.embabel.agent.api.tool.ToolCallContext;
-import io.micrometer.core.instrument.MeterRegistry;
+import com.personal.chatbot.observability.ChatObservations;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,15 +51,15 @@ public final class SearchBudget {
 
     private final int maxSearches;
     private final String messageId;
-    private final MeterRegistry meterRegistry;
+    private final ChatObservations observations;
     private final Set<String> queries = new LinkedHashSet<>();
     private final Object lock = new Object();
     private int spent;
 
-    public SearchBudget(int maxSearches, String messageId, MeterRegistry meterRegistry) {
+    public SearchBudget(int maxSearches, String messageId, ChatObservations observations) {
         this.maxSearches = maxSearches;
         this.messageId = messageId;
-        this.meterRegistry = meterRegistry;
+        this.observations = observations;
     }
 
     /** The same tools, with the search ones bounded by this budget. */
@@ -131,12 +131,12 @@ public final class SearchBudget {
         public Result call(@NotNull String input, @NotNull ToolCallContext context) {
             Verdict verdict = admit(input);
             if (!verdict.allowed()) {
-                meterRegistry.counter("chatbot.chat.agentic.search", "outcome", "refused").increment();
+                observations.agenticSearch(ChatObservations.SearchDecision.REFUSED);
                 log.info("Agentic search for [{}] refused after {} searches: {}", messageId, maxSearches, input);
                 return Result.Companion.text(verdict.note());
             }
-            meterRegistry.counter("chatbot.chat.agentic.search", "outcome",
-                    verdict.note().isEmpty() ? "ran" : "repeated").increment();
+            observations.agenticSearch(verdict.note().isEmpty()
+                    ? ChatObservations.SearchDecision.RAN : ChatObservations.SearchDecision.REPEATED);
             Result result = delegate.call(input, context);
             if (verdict.note().isEmpty()) {
                 return result;

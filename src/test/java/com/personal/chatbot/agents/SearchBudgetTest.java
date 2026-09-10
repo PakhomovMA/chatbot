@@ -1,13 +1,13 @@
 package com.personal.chatbot.agents;
 
 import com.embabel.agent.api.tool.Tool;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import com.personal.chatbot.support.TestObservations;
 
 class SearchBudgetTest {
 
@@ -20,7 +20,7 @@ class SearchBudgetTest {
             input -> Tool.Result.Companion.text("wider chunk #" + expansions.incrementAndGet()));
 
     private List<Tool> limited(int maxSearches) {
-        return new SearchBudget(maxSearches, "m", new SimpleMeterRegistry()).limit(List.of(vectorSearch, broaden));
+        return new SearchBudget(maxSearches, "m", TestObservations.chat()).limit(List.of(vectorSearch, broaden));
     }
 
     private static String call(Tool tool, String input) {

@@ -11,12 +11,11 @@ import com.personal.chatbot.models.agent.Evidence;
 import com.personal.chatbot.models.agent.GroundedAnswerDraft;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.models.chat.AnswerLanguage;
+import com.personal.chatbot.observability.AiOperation;
+import com.personal.chatbot.observability.ChatObservations;
+import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.utils.AnswerLanguages;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import reactor.core.publisher.Sinks;
-
-import java.util.concurrent.TimeUnit;
 
 /**
  * Writes the answer draft for the deterministic branch (docs/system-plan.md D10): retrieved evidence
@@ -37,48 +36,59 @@ public class AnswerDrafter {
     private final GroundedAnswerPrompt prompt;
     private final GroundingInstructions instructions;
     private final ChatbotProperties.Chat settings;
-    private final MeterRegistry meterRegistry;
+    private final ChatObservations observations;
 
     public AnswerDrafter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
-                         ChatbotProperties.Chat settings, MeterRegistry meterRegistry) {
+                         ChatbotProperties.Chat settings, ChatObservations observations) {
         this.prompt = prompt;
         this.instructions = instructions;
         this.settings = settings;
-        this.meterRegistry = meterRegistry;
+        this.observations = observations;
     }
 
     public GroundedAnswerDraft draft(Evidence evidence, OperationContext context) {
         UserQuestion question = evidence.question();
         if (evidence.isEmpty()) {
+            // The application writes this one itself, so there is no AI operation to measure.
             return noEvidence(question);
         }
         question.notifyStage(AnswerStages.GENERATING);
         question.abortIfCancelled();
-        PromptRunner runner = context.ai().withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()));
-        String userPrompt = prompt.build(question.question(), question.history(), evidence.hits(), evidence.comparison());
-        long started = System.nanoTime();
-        String operation = "draft-answer";
-        try {
-            AnswerStreamSink sink = question.stream();
-            if (sink != null && runner.supportsStreaming()) {
-                operation = "draft-answer-stream";
-                return streamed(runner.withPromptContributor(instructions.streamingAnswer()), question, userPrompt, sink);
-            }
-            GroundedAnswerDraft draft;
+        try (Measured operation = observations.startAiOperation(AiOperation.DRAFT_ANSWER)) {
             try {
-                draft = runner.withPromptContributor(instructions.groundedAnswer())
-                        .creating(GroundedAnswerDraft.class)
-                        .fromPrompt(userPrompt);
-            } catch (InvalidLlmReturnFormatException e) {
-                draft = ProseAnswerRecovery.answerOrRethrow(e);
+                PromptRunner runner = context.ai()
+                        .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()));
+                String userPrompt = prompt.build(question.question(), question.history(), evidence.hits(),
+                        evidence.comparison());
+                operation.legacyBegins(); // where chatbot.llm has always started: after the prompt is built
+                AnswerStreamSink sink = question.stream();
+                if (sink != null && runner.supportsStreaming()) {
+                    operation.operation(AiOperation.DRAFT_ANSWER_STREAM);
+                    GroundedAnswerDraft streamed = streamed(
+                            runner.withPromptContributor(instructions.streamingAnswer()), question, userPrompt, sink);
+                    operation.succeeded();
+                    return streamed;
+                }
+                GroundedAnswerDraft draft;
+                try {
+                    draft = runner.withPromptContributor(instructions.groundedAnswer())
+                            .creating(GroundedAnswerDraft.class)
+                            .fromPrompt(userPrompt);
+                } catch (InvalidLlmReturnFormatException e) {
+                    // Prose where JSON was asked for is still an answer; recovering it is not a failure
+                    // of the request, but it is not the operation working as intended either.
+                    draft = ProseAnswerRecovery.answerOrRethrow(e);
+                    operation.recovered(e, question.cancellation().reason());
+                }
+                if (sink != null) {
+                    sink.delta(draft.answer() != null ? draft.answer() : "");
+                }
+                operation.succeeded(); // ignored when the draft above had to be recovered
+                return draft;
+            } catch (Exception e) {
+                operation.failed(e, question.cancellation().reason());
+                throw e;
             }
-            if (sink != null) {
-                sink.delta(draft.answer() != null ? draft.answer() : "");
-            }
-            return draft;
-        } finally {
-            Timer.builder("chatbot.llm").tag("operation", operation).register(meterRegistry)
-                    .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
         }
     }
 

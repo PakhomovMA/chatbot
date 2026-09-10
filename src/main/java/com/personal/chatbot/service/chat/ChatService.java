@@ -17,11 +17,11 @@ import com.personal.chatbot.models.chat.ChatTimings;
 import com.personal.chatbot.models.chat.ConversationTurn;
 import com.personal.chatbot.models.chat.ConversationView;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
+import com.personal.chatbot.observability.ChatObservations;
+import com.personal.chatbot.observability.ChatRun;
 import com.personal.chatbot.observability.RequestContext;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.utils.Throwables;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +31,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -48,16 +47,16 @@ public class ChatService {
     private final AgentPlatform agentPlatform;
     private final ConversationStore conversations;
     private final RetrievalTraceStore traces;
-    private final MeterRegistry meterRegistry;
+    private final ChatObservations observations;
     private final Clock clock;
     private final AnswerMode defaultMode;
 
     public ChatService(AgentPlatform agentPlatform, ConversationStore conversations, RetrievalTraceStore traces,
-                       MeterRegistry meterRegistry, Clock clock, ChatbotProperties.Chat settings) {
+                       ChatObservations observations, Clock clock, ChatbotProperties.Chat settings) {
         this.agentPlatform = agentPlatform;
         this.conversations = conversations;
         this.traces = traces;
-        this.meterRegistry = meterRegistry;
+        this.observations = observations;
         this.clock = clock;
         this.defaultMode = settings.mode();
     }
@@ -98,30 +97,42 @@ public class ChatService {
     }
 
     private ChatResponse run(ChatRequest request, @Nullable AnswerStreamSink sink, ChatCancellation cancellation) {
-        long started = System.nanoTime();
         String conversationId = request.conversationId() != null && !request.conversationId().isBlank()
                 ? request.conversationId() : UUID.randomUUID().toString();
         String messageId = UUID.randomUUID().toString();
-        // Nobody is waiting: stop before queueing behind whatever else this conversation is doing.
-        cancellation.abortIfCancelled(messageId);
-        // The lease serialises the requests of this conversation: the next one reads a history that
-        // already contains this exchange instead of a half-written one. Waiting for it ends as soon
-        // as this request is cancelled, however long the one ahead still takes.
-        ConversationStore.Lease lease = conversations.begin(conversationId, cancellation::isCancelled)
-                .orElseThrow(() -> new ChatCancelledException(messageId, cancellation.reason()));
-        try (lease) {
-            return answer(request, sink, cancellation, lease, messageId, started);
+        ChatRequest.Options options = request.optionsOrDefault();
+        AnswerMode mode = options.mode() != null ? options.mode() : defaultMode;
+        // The run is measured from here, whatever it ends in; the wait below is measured inside it, so
+        // that queueing behind the previous question is never read as time spent in the model.
+        try (ChatRun observed = observations.startRun(sink != null, mode)) {
+            try {
+                // Nobody is waiting: stop before queueing behind whatever else this conversation is doing.
+                cancellation.abortIfCancelled(messageId);
+                // The lease serialises the requests of this conversation: the next one reads a history that
+                // already contains this exchange instead of a half-written one. Waiting for it ends as soon
+                // as this request is cancelled, however long the one ahead still takes.
+                ConversationStore.Lease lease = observed
+                        .awaitConversation(() -> conversations.begin(conversationId, cancellation::isCancelled),
+                                cancellation::reason)
+                        .orElseThrow(() -> new ChatCancelledException(messageId, cancellation.reason()));
+                try (lease) {
+                    return answer(request, mode, sink, cancellation, lease, messageId, observed);
+                }
+            } catch (Exception e) { // Embabel (Kotlin) can surface checked exceptions from here as well
+                observed.failed(e, cancellation.reason());
+                throw e;
+            }
         }
     }
 
-    private ChatResponse answer(ChatRequest request, @Nullable AnswerStreamSink sink, ChatCancellation cancellation,
-                                ConversationStore.Lease conversation, String messageId, long started) {
+    private ChatResponse answer(ChatRequest request, AnswerMode mode, @Nullable AnswerStreamSink sink,
+                                ChatCancellation cancellation, ConversationStore.Lease conversation,
+                                String messageId, ChatRun observed) {
         String conversationId = conversation.conversationId();
         String question = request.message().strip();
         ChatRequest.Options options = request.optionsOrDefault();
         List<ConversationTurn> history = conversation.history();
 
-        AnswerMode mode = options.mode() != null ? options.mode() : defaultMode;
         UserQuestion input = new UserQuestion(conversationId, messageId, question, history, options.topK(),
                 options.documentIds(), mode, sink, cancellation);
         GroundedAnswer answer;
@@ -130,8 +141,9 @@ public class ChatService {
             answer = AgentInvocation.create(agentPlatform, GroundedAnswer.class).invoke(input);
         }
 
-        long totalMs = (System.nanoTime() - started) / 1_000_000;
-        ChatTimings timings = new ChatTimings(answer.retrievalMs(), Math.max(0, totalMs - answer.retrievalMs()), totalMs);
+        // Where the v1 diagnostics stop counting, before everything below them.
+        observed.agentFinished();
+        ChatTimings timings = observed.timings(answer.retrievalMs());
         RetrievalResult diagnostics = options.diagnostics() ? traces.find(answer.retrievalTraceId()).orElse(null) : null;
 
         // An abandoned run has no result to report: a half-written answer is not an answer, and it
@@ -142,11 +154,9 @@ public class ChatService {
                 ConversationTurn.assistant(answer.answer(), answer.citations(), now))) {
             log.info("Conversation {} was deleted while [{}] ran; the exchange was not stored", conversationId, messageId);
         }
-        Timer.builder("chatbot.chat").tag("grounding", answer.grounding().name().toLowerCase())
-                .tag("mode", sink != null ? "stream" : "sync").tag("answerMode", mode.name().toLowerCase()).register(meterRegistry)
-                .record(totalMs, TimeUnit.MILLISECONDS);
-        log.info("Chat [{}] {} in {} ms ({} citations, retrieval {} ms{})", messageId, answer.grounding(), totalMs,
-                answer.citations().size(), answer.retrievalMs(), sink != null ? ", streamed" : "");
+        observed.succeeded(answer.grounding());
+        log.info("Chat [{}] {} in {} ms ({} citations, retrieval {} ms{})", messageId, answer.grounding(),
+                timings.totalMs(), answer.citations().size(), answer.retrievalMs(), sink != null ? ", streamed" : "");
         return new ChatResponse(conversationId, messageId, answer.answer(), answer.grounding(), answer.citations(),
                 answer.notes(), timings, answer.retrievalTraceId(), diagnostics);
     }

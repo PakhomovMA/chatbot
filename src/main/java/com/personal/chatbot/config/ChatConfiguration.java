@@ -1,5 +1,7 @@
 package com.personal.chatbot.config;
 
+import com.personal.chatbot.observability.ChatObservations;
+import com.personal.chatbot.observability.RetrievalObservations;
 import com.personal.chatbot.service.chat.AgenticResearcher;
 import com.personal.chatbot.service.chat.AnswerDrafter;
 import com.personal.chatbot.service.chat.ConversationQueryRewriter;
@@ -16,7 +18,6 @@ import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.service.retrieval.Retriever;
 import com.personal.chatbot.service.retrieval.SearchExpander;
 import com.personal.chatbot.service.retrieval.SubQuestionSearch;
-import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -28,9 +29,9 @@ class ChatConfiguration {
 
     @Bean
     ConversationQueryRewriter conversationQueryRewriter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
-                                                       ChatbotProperties.Chat chat, MeterRegistry meterRegistry) {
+                                                       ChatbotProperties.Chat chat, ChatObservations observations) {
         return new ConversationQueryRewriter(prompt, instructions, chat.historyTurns(), chat.queryRewriteTimeout(),
-                meterRegistry);
+                observations);
     }
 
     @Bean
@@ -56,37 +57,37 @@ class ChatConfiguration {
 
     @Bean
     AnswerDrafter answerDrafter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
-                                ChatbotProperties.Chat chat, MeterRegistry meterRegistry) {
-        return new AnswerDrafter(prompt, instructions, chat, meterRegistry);
+                                ChatbotProperties.Chat chat, ChatObservations observations) {
+        return new AnswerDrafter(prompt, instructions, chat, observations);
     }
 
     @Bean
     EvidenceExpander evidenceExpander(SearchExpander expander, GroundedAnswerPrompt prompt,
                                       GroundingInstructions instructions, ChatbotProperties.Chat chat,
-                                      MeterRegistry meterRegistry) {
-        return new EvidenceExpander(expander, prompt, instructions, chat, meterRegistry);
+                                      ChatObservations observations, RetrievalObservations retrievalObservations) {
+        return new EvidenceExpander(expander, prompt, instructions, chat, observations, retrievalObservations);
     }
 
     @Bean
     QuestionDecomposer questionDecomposer(Retriever retriever, SubQuestionSearch search, GroundedAnswerPrompt prompt,
                                           GroundingInstructions instructions, ChatbotProperties.Chat chat,
-                                          MeterRegistry meterRegistry) {
-        return new QuestionDecomposer(retriever, search, prompt, instructions, chat, meterRegistry);
+                                          ChatObservations observations) {
+        return new QuestionDecomposer(retriever, search, prompt, instructions, chat, observations);
     }
 
     @Bean
     SourceComparator sourceComparator(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
-                                      ChatbotProperties.Chat chat, MeterRegistry meterRegistry) {
-        return new SourceComparator(prompt, instructions, chat, meterRegistry);
+                                      ChatbotProperties.Chat chat, ChatObservations observations) {
+        return new SourceComparator(prompt, instructions, chat, observations);
     }
 
     @Bean
     AgenticResearcher agenticResearcher(LockedSearchOperations searchOperations, GroundedAnswerPrompt prompt,
                                         GroundingInstructions instructions, RetrievalTraceStore traces,
                                         ChatbotProperties.Chat chat, ChatbotProperties.Retrieval retrieval,
-                                        MeterRegistry meterRegistry, QuestionDecomposer decomposer,
+                                        ChatObservations observations, QuestionDecomposer decomposer,
                                         SectionCatalog catalog, Retriever retriever) {
-        return new AgenticResearcher(searchOperations, prompt, instructions, traces, chat, retrieval, meterRegistry,
+        return new AgenticResearcher(searchOperations, prompt, instructions, traces, chat, retrieval, observations,
                 decomposer, catalog, retriever);
     }
 }

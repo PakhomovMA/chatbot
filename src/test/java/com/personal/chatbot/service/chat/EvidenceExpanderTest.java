@@ -15,7 +15,6 @@ import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.service.retrieval.Retriever;
 import com.personal.chatbot.service.retrieval.SearchExpander;
 import com.personal.chatbot.support.ChatSettings;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -23,6 +22,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import com.personal.chatbot.support.TestObservations;
 
 /** Phase 9a: when the {@code expandSearch} branch fires, and what it does when the model call fails. */
 class EvidenceExpanderTest {
@@ -37,7 +37,7 @@ class EvidenceExpanderTest {
                 ChatSettings.NO_DECOMPOSITION, ChatSettings.NO_COMPARISON);
         return new EvidenceExpander(new SearchExpander(retriever, new RetrievalTraceStore(20), RETRIEVAL),
                 new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO), new GroundingInstructions(4, 3, 3, 4), chat,
-                new SimpleMeterRegistry());
+                TestObservations.chat(), TestObservations.retrieval());
     }
 
     private static Evidence evidence(RetrievalResult retrieval) {

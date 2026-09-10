@@ -8,13 +8,13 @@ import com.personal.chatbot.models.agent.Evidence;
 import com.personal.chatbot.models.agent.SourceComparison;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
+import com.personal.chatbot.observability.AiOperation;
+import com.personal.chatbot.observability.ChatObservations;
+import com.personal.chatbot.observability.Measured;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 /**
@@ -47,14 +47,14 @@ public class SourceComparator {
     private final GroundedAnswerPrompt prompt;
     private final GroundingInstructions instructions;
     private final ChatbotProperties.Chat settings;
-    private final MeterRegistry meterRegistry;
+    private final ChatObservations observations;
 
     public SourceComparator(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
-                            ChatbotProperties.Chat settings, MeterRegistry meterRegistry) {
+                            ChatbotProperties.Chat settings, ChatObservations observations) {
         this.prompt = prompt;
         this.instructions = instructions;
         this.settings = settings;
-        this.meterRegistry = meterRegistry;
+        this.observations = observations;
     }
 
     /**
@@ -75,34 +75,38 @@ public class SourceComparator {
         UserQuestion question = evidence.question();
         question.abortIfCancelled();
         question.notifyStage(AnswerStages.COMPARING);
-        long started = System.nanoTime();
-        String outcome = "failed";
-        try {
-            SourceComparison drafted = context.ai()
-                    .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()))
-                    .withPromptContributor(instructions.sourceComparison())
-                    .creating(SourceComparison.class)
-                    .fromPrompt(prompt.buildForComparison(question.question(), evidence.hits()));
-            question.abortIfCancelled();
-            SourceComparison comparison = drafted == null ? SourceComparison.none()
-                    : drafted.limitedTo(prompt.includedHits(evidence.hits()), settings.compareSources().maxAspects());
-            outcome = comparison.isEmpty() ? "none" : comparison.hasConflict() ? "conflict" : "agreement";
-            log.debug("Compared {} sources for [{}]: {}", documentsShown(evidence), question.messageId(),
-                    comparison.aspectsOrEmpty());
-            return evidence.withComparison(comparison);
-        } catch (Exception e) {
-            if (ChatCancelledException.isCancellation(e)) {
-                throw new ChatCancelledException(question.messageId(), "cancelled while comparing the sources");
+        ChatObservations.ComparisonOutcome outcome = ChatObservations.ComparisonOutcome.FAILED;
+        try (Measured operation = observations.startAiOperation(AiOperation.COMPARE_SOURCES)) {
+            operation.legacyBegins();
+            try {
+                SourceComparison drafted = context.ai()
+                        .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()))
+                        .withPromptContributor(instructions.sourceComparison())
+                        .creating(SourceComparison.class)
+                        .fromPrompt(prompt.buildForComparison(question.question(), evidence.hits()));
+                question.abortIfCancelled();
+                SourceComparison comparison = drafted == null ? SourceComparison.none()
+                        : drafted.limitedTo(prompt.includedHits(evidence.hits()), settings.compareSources().maxAspects());
+                outcome = comparison.isEmpty() ? ChatObservations.ComparisonOutcome.NONE
+                        : comparison.hasConflict() ? ChatObservations.ComparisonOutcome.CONFLICT
+                        : ChatObservations.ComparisonOutcome.AGREEMENT;
+                log.debug("Compared {} sources for [{}]: {}", documentsShown(evidence), question.messageId(),
+                        comparison.aspectsOrEmpty());
+                operation.succeeded();
+                return evidence.withComparison(comparison);
+            } catch (Exception e) {
+                operation.recovered(e, question.cancellation().reason());
+                if (ChatCancelledException.isCancellation(e)) {
+                    throw new ChatCancelledException(question.messageId(), "cancelled while comparing the sources");
+                }
+                question.abortIfCancelled();
+                log.warn("Comparing the sources of [{}] failed; answering from the passages alone: {}",
+                        question.messageId(), e.toString());
+                // Marked all the same: an unmarked evidence would send the planner back into this branch.
+                return evidence.withComparison(SourceComparison.none());
+            } finally {
+                observations.comparison(outcome);
             }
-            question.abortIfCancelled();
-            log.warn("Comparing the sources of [{}] failed; answering from the passages alone: {}",
-                    question.messageId(), e.toString());
-            // Marked all the same: an unmarked evidence would send the planner back into this branch.
-            return evidence.withComparison(SourceComparison.none());
-        } finally {
-            Timer.builder("chatbot.llm").tag("operation", "compare-sources").register(meterRegistry)
-                    .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
-            meterRegistry.counter("chatbot.chat.comparison", "outcome", outcome).increment();
         }
     }
 

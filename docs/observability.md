@@ -2,7 +2,8 @@
 
 Что и где смотреть, когда RAG отвечает не так, как ожидалось, или медленно (docs/system-plan.md D14, Phase 8).
 
-Проверенный стек и ограничения текущих измерений: [O01 baseline](observability/o01/README.md). Контракт миграции: [metric catalog](observability/metric-catalog.json), порядок работ: [observability-plan.md](observability-plan.md). Canonical families из каталога вводятся в O02/O03; этот checkpoint фиксирует текущее поведение.
+Проверенный стек и ограничения текущих измерений: [O01 baseline](observability/o01/README.md). Контракт миграции: [metric catalog](observability/metric-catalog.json), порядок работ: [observability-plan.md](observability-plan.md).
+Canonical families chat, AI и одного retrieval pass введены в [O02](observability/o02/README.md); ingestion, embedding и SSE переходят на них в O03, полный runbook обновляется в O07.
 
 ## Корреляция логов (MDC)
 
@@ -34,13 +35,19 @@ Overall-статус агрегируется Spring: OUT_OF_SERVICE/DOWN люб
 
 | Метрика | Тип | Теги | Смысл |
 |---|---|---|---|
-| `chatbot.chat` | timer | `grounding`, `mode` (sync/stream), `answerMode` (deterministic/agentic) | только успешные runs, до завершения agent invocation |
-| `chatbot.llm` | timer | `operation` (draft-answer / draft-answer-stream / research-agentic / conversation-query-rewrite / expand-search-rewrite / expand-search-hyde / decompose-question / compare-sources / repair-agentic-answer) | генерация ответа и стоимость каждой вспомогательной ветки отдельно |
+| `chatbot.chat.request` | timer | `mode` (sync/stream), `answer.mode` (deterministic/agentic), `grounding`, `outcome` | все принятые runs, включая error / cancelled / timeout / rejected; до записи истории |
+| `chatbot.chat.wait` | timer | `outcome` | ожидание lease разговора; не входит в время модели |
+| `chatbot.ai.operation` | timer | `operation` (draft-answer / draft-answer-stream / research-agentic / conversation-query-rewrite / expand-search-rewrite / expand-search-hyde / decompose-question / compare-sources / repair-agentic-answer), `outcome` (+`fallback`) | логическая AI-операция целиком: prompt, вызовы модели, tools, валидация и восстановление |
+| `chatbot.retrieval.search` | timer | `mode`, `outcome` | один deterministic pass, включая lock, query embedding и postprocessing |
+| `chatbot.chat.active` | gauge | — | принятые runs, которые ещё не завершились |
+| `chatbot.chat.rejected` | counter | `reason` (stopping / capacity) | отказ до принятия run; не входит в знаменатель принятых |
+| `chatbot.chat` | timer | `grounding`, `mode` (sync/stream), `answerMode` (deterministic/agentic) | **legacy**: только успешные runs, до завершения agent invocation |
+| `chatbot.llm` | timer | `operation` | **legacy**: прежние границы try/finally; для `research-agentic` только tool loop |
 | `chatbot.chat.query.rewrite` | counter | `outcome` (rewritten / unchanged / fallback) | результат попытки восстановления вопроса; вопросы без попытки не учитываются |
 | `chatbot.retrieval.expansion` | counter | `strategy`, `outcome` (sufficient / insufficient) | сработавшее расширение поиска (Phase 9a) |
 | `chatbot.chat.decomposition` | counter | `outcome` (split / single / failed) | разбор многосоставного вопроса (Phase 9d); вопросы без попытки не учитываются |
 | `chatbot.chat.comparison` | counter | `outcome` (conflict / agreement / none / failed) | сравнение источников перед ответом (Phase 9d) |
-| `chatbot.retrieval` | timer | `mode` | vector + text + fusion |
+| `chatbot.retrieval` | timer | `mode` | **legacy**: только успешные passes, clock read после записи trace |
 | `chatbot.retrieval.hits` | summary | — | hits на запрос |
 | `chatbot.embedding` | timer | `mode` (query/document), `provider`, `model` | один батч эмбеддинга |
 | `chatbot.embedding.texts` | counter | `provider` | текстов заэмбеждено |
@@ -50,6 +57,11 @@ Overall-статус агрегируется Spring: OUT_OF_SERVICE/DOWN люб
 | `chatbot.index.chunks`, `chatbot.index.documents`, `chatbot.index.writable` | gauge | — | состояние индекса |
 | `chatbot.documents` | gauge | `status` | документы в реестре по статусу |
 | `chatbot.conversations`, `chatbot.retrieval.traces` | gauge | — | память диалогов, буфер трейсов |
+
+Три метрики, помеченные **legacy**, публикует отключаемый compatibility adapter (`chatbot.observability.legacy-metrics=false`).
+Они измеряют другие границы и другую population, чем canonical families рядом с ними, и складывать их нельзя.
+Buckets для percentile включены у canonical timers, `chatbot.embedding` и `chatbot.sse.send`
+(`chatbot.observability.histograms=false` их снимает).
 
 Embabel (`embabel.agent.platform.observability.metrics-enabled=true`, включено всегда): `embabel.agent.duration`,
 `embabel.agent.active`, `embabel.agent.errors.total`, `embabel.llm.duration`, `embabel.llm.requests.total`,

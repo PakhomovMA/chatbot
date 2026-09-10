@@ -6,7 +6,6 @@ import com.personal.chatbot.models.agent.StandaloneQuery;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.models.chat.AnswerLanguage;
 import com.personal.chatbot.models.chat.ConversationTurn;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -21,6 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
+import com.personal.chatbot.support.TestObservations;
 
 class ConversationQueryRewriterTest {
 
@@ -28,7 +28,7 @@ class ConversationQueryRewriterTest {
 
     private final GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(6000, 2, AnswerLanguage.AUTO);
     private final ConversationQueryRewriter rewriter = new ConversationQueryRewriter(prompt,
-            new GroundingInstructions(4, 3, 3, 4), 2, TIMEOUT, new SimpleMeterRegistry());
+            new GroundingInstructions(4, 3, 3, 4), 2, TIMEOUT, TestObservations.chat());
     private final OperationContext context = mock(OperationContext.class, RETURNS_DEEP_STUBS);
 
     private UserQuestion question(String text) {
@@ -78,7 +78,7 @@ class ConversationQueryRewriterTest {
         UserQuestion standalone = question("Describe all required steps to safely restart the payments service during business hours without losing any pending transactions or active customer sessions.");
         assertThat(rewriter.rewrite(standalone, context)).isSameAs(standalone);
         ConversationQueryRewriter disabled = new ConversationQueryRewriter(prompt, new GroundingInstructions(4, 3, 3, 4),
-                0, TIMEOUT, new SimpleMeterRegistry());
+                0, TIMEOUT, TestObservations.chat());
         assertThat(disabled.rewrite(question("Restart it?"), context).effectiveQuery()).isEqualTo("Restart it?");
         verifyNoInteractions(context);
     }
@@ -150,7 +150,7 @@ class ConversationQueryRewriterTest {
     @Test
     void aOneTurnBudgetCanResolveTheSubjectFromTheLastAssistantMessage() {
         var oneTurn = new ConversationQueryRewriter(new GroundedAnswerPrompt(6000, 1, AnswerLanguage.AUTO),
-                new GroundingInstructions(4, 3, 3, 4), 1, TIMEOUT, new SimpleMeterRegistry());
+                new GroundingInstructions(4, 3, 3, 4), 1, TIMEOUT, TestObservations.chat());
         assertThat(oneTurn.shouldRewrite(question("How do I restart it?"))).isTrue();
     }
 }

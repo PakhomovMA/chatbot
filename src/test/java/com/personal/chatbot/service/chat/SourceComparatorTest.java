@@ -14,7 +14,6 @@ import com.personal.chatbot.models.retrieval.RetrievalResult;
 import com.personal.chatbot.models.retrieval.RetrievalTimings;
 import com.personal.chatbot.models.retrieval.RetrievedChunk;
 import com.personal.chatbot.support.ChatSettings;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -31,6 +30,7 @@ import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import com.personal.chatbot.support.TestObservations;
 
 /** Phase 9d: when {@code compareSources} fires, what it keeps of the model's answer, and how it fails. */
 class SourceComparatorTest {
@@ -45,7 +45,7 @@ class SourceComparatorTest {
         ChatbotProperties.Chat chat = ChatSettings.of(ChatSettings.NO_EXPANSION, ChatSettings.NO_DECOMPOSITION,
                 new ChatbotProperties.CompareSources(enabled, 2, 2));
         return new SourceComparator(new GroundedAnswerPrompt(evidenceCharBudget, 10, AnswerLanguage.AUTO),
-                new GroundingInstructions(4, 3, 3, 4), chat, new SimpleMeterRegistry());
+                new GroundingInstructions(4, 3, 3, 4), chat, TestObservations.chat());
     }
 
     private void compares(SourceComparison comparison) {

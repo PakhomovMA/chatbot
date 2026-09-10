@@ -3,10 +3,12 @@ package com.personal.chatbot.controller;
 import com.personal.chatbot.config.ChatbotProperties;
 import com.personal.chatbot.exceptions.ServiceStoppingException;
 import com.personal.chatbot.models.agent.ChatCancellation;
+import com.personal.chatbot.models.chat.AnswerMode;
 import com.personal.chatbot.models.chat.ChatRequest;
 import com.personal.chatbot.models.chat.ChatResponse;
 import com.personal.chatbot.models.chat.ChatStreamEvent;
 import com.personal.chatbot.models.chat.ConversationView;
+import com.personal.chatbot.observability.ChatObservations;
 import com.personal.chatbot.service.chat.ChatService;
 import com.personal.chatbot.service.lifecycle.ActiveWork;
 import com.personal.chatbot.service.sse.SseConnection;
@@ -59,8 +61,10 @@ public class ChatController implements ActiveWork {
 
     private final ChatService chatService;
     private final SseConnections connections;
+    private final ChatObservations observations;
     /** How long a streaming request may run in total; stages do not extend it. */
     private final Duration streamTimeout;
+    private final AnswerMode defaultMode;
     private final ExecutorService streamExecutor = Executors.newThreadPerTaskExecutor(
             Thread.ofVirtual().name("chat-stream-", 0).factory());
     private final ScheduledExecutorService heartbeats = Executors.newSingleThreadScheduledExecutor(
@@ -69,10 +73,15 @@ public class ChatController implements ActiveWork {
     private final Set<ChatCancellation> running = ConcurrentHashMap.newKeySet();
     private boolean stopping;
 
-    public ChatController(ChatService chatService, SseConnections connections, ChatbotProperties.Chat settings) {
+    public ChatController(ChatService chatService, SseConnections connections, ChatbotProperties.Chat settings,
+                          ChatObservations observations) {
         this.chatService = chatService;
         this.connections = connections;
+        this.observations = observations;
         this.streamTimeout = settings.streamTimeout();
+        this.defaultMode = settings.mode();
+        // Accepted runs that have not finished, whether or not a connection is still open for them.
+        observations.trackActiveRuns(running::size);
     }
 
     @PostMapping("/chat")
@@ -133,7 +142,13 @@ public class ChatController implements ActiveWork {
             // Shutdown between the check above and here: whatever was created is given back, so the
             // request is not left counted as running (docs/concurrency-plan.md C10).
             release(cancellation, timers, connection);
-            throw e instanceof RejectedExecutionException ? new ServiceStoppingException("chat") : e;
+            if (e instanceof RejectedExecutionException) {
+                // Accepted and then refused a thread of its own: the run never started, but its caller
+                // was told the request failed, so it is one of the accepted runs (metric-catalog §5.2).
+                observations.rejectedAfterAdmission(true, answerMode(request));
+                throw new ServiceStoppingException("chat");
+            }
+            throw e;
         }
     }
 
@@ -149,6 +164,12 @@ public class ChatController implements ActiveWork {
         ChatStreamEvent.Error event = new ChatStreamEvent.Error(TIMED_OUT);
         connection.send(event.type(), null, event);
         cancellation.cancel("stream timed out after " + streamTimeout);
+    }
+
+    /** What the run would have answered with; the same default the chat service applies. */
+    private AnswerMode answerMode(ChatRequest request) {
+        AnswerMode requested = request.optionsOrDefault().mode();
+        return requested != null ? requested : defaultMode;
     }
 
     @GetMapping("/conversations/{id}")
@@ -204,15 +225,18 @@ public class ChatController implements ActiveWork {
         heartbeats.shutdownNow();
     }
 
+    /** Admission: from here the request is an accepted run, and is measured as one. */
     private ChatCancellation start() {
+        ChatCancellation cancellation = new ChatCancellation();
         synchronized (running) {
-            if (stopping) {
-                throw new ServiceStoppingException("chat");
+            if (!stopping) {
+                running.add(cancellation);
+                return cancellation;
             }
-            ChatCancellation cancellation = new ChatCancellation();
-            running.add(cancellation);
-            return cancellation;
         }
+        // Counted apart from the accepted runs: a question that was never taken on did not fail one.
+        observations.rejected(ChatObservations.Rejection.STOPPING);
+        throw new ServiceStoppingException("chat");
     }
 
     /**

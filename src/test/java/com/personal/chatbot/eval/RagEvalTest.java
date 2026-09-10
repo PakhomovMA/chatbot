@@ -34,6 +34,7 @@ import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.service.retrieval.SearchExpander;
 import com.personal.chatbot.service.retrieval.SubQuestionSearch;
 import com.personal.chatbot.support.ChatSettings;
+import com.personal.chatbot.support.TestObservations;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
@@ -194,7 +195,7 @@ class RagEvalTest {
                 new IndexManifest.Chunker(chunkSize, overlap, ProvenanceChunkTransformer.TRANSFORMER_VERSION), 16,
                 new ProvenanceChunkTransformer()).open();
         retrievalSettings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, 0, maxDocumentShare, 500);
-        retrieval = new RetrievalService(store, new RetrievalTraceStore(500), retrievalSettings, new SimpleMeterRegistry());
+        retrieval = new RetrievalService(store, new RetrievalTraceStore(500), retrievalSettings, TestObservations.retrieval());
 
         questionSet = questionSet("questions.json");
         documentIdsByKey = new LinkedHashMap<>();
@@ -260,7 +261,7 @@ class RagEvalTest {
                 Files.readString(Path.of("src/test/resources/eval/questions-conversation.json")), ConversationSet.class);
         var rewriter = new ConversationQueryRewriter(
                 new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO),
-                new GroundingInstructions(4, 3, 3, 4), 10, Duration.ofSeconds(20), new SimpleMeterRegistry());
+                new GroundingInstructions(4, 3, 3, 4), 10, Duration.ofSeconds(20), TestObservations.chat());
         var context = Mockito.mock(OperationContext.class,
                 Mockito.RETURNS_DEEP_STUBS);
         List<Map<String, Object>> outcomes = new ArrayList<>();
@@ -370,7 +371,7 @@ class RagEvalTest {
 
     private ExpansionSummary measureExpansion(int expandNeighbours) {
         var settings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, expandNeighbours, maxDocumentShare, 500);
-        RetrievalService service = new RetrievalService(store, new RetrievalTraceStore(500), settings, new SimpleMeterRegistry());
+        RetrievalService service = new RetrievalService(store, new RetrievalTraceStore(500), settings, TestObservations.retrieval());
         GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(EVIDENCE_CHAR_BUDGET, 0, AnswerLanguage.EN);
         int positives = 0;
         double recallHits = 0;
@@ -659,7 +660,7 @@ class RagEvalTest {
                 new GroundingInstructions(4, EXPANSION_QUERIES, 3, 4),
                 ChatSettings.of(ChatSettings.NO_EXPANSION, new ChatbotProperties.Decompose(true, 3, 4),
                         ChatSettings.NO_COMPARISON),
-                new SimpleMeterRegistry());
+                TestObservations.chat());
         OperationContext context = Mockito.mock(OperationContext.class, Mockito.RETURNS_DEEP_STUBS);
         var splitCall = context.ai().withLlm(ArgumentMatchers.any(LlmOptions.class))
                 .withPromptContributor(ArgumentMatchers.any()).creating(SubQuestions.class);

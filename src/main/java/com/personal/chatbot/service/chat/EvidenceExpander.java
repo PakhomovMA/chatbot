@@ -10,17 +10,16 @@ import com.personal.chatbot.models.agent.RewrittenQueries;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.models.retrieval.ExpansionStrategy;
 import com.personal.chatbot.models.retrieval.RetrievalResult;
+import com.personal.chatbot.observability.AiOperation;
+import com.personal.chatbot.observability.ChatObservations;
+import com.personal.chatbot.observability.Measured;
+import com.personal.chatbot.observability.RetrievalObservations;
 import com.personal.chatbot.service.retrieval.SearchExpander;
 import com.personal.chatbot.utils.Texts;
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
-import java.util.Locale;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -44,15 +43,18 @@ public class EvidenceExpander {
     private final GroundedAnswerPrompt prompt;
     private final GroundingInstructions instructions;
     private final ChatbotProperties.Chat settings;
-    private final MeterRegistry meterRegistry;
+    private final ChatObservations observations;
+    private final RetrievalObservations retrievalObservations;
 
     public EvidenceExpander(SearchExpander expander, GroundedAnswerPrompt prompt, GroundingInstructions instructions,
-                            ChatbotProperties.Chat settings, MeterRegistry meterRegistry) {
+                            ChatbotProperties.Chat settings, ChatObservations observations,
+                            RetrievalObservations retrievalObservations) {
         this.expander = expander;
         this.prompt = prompt;
         this.instructions = instructions;
         this.settings = settings;
-        this.meterRegistry = meterRegistry;
+        this.observations = observations;
+        this.retrievalObservations = retrievalObservations;
     }
 
     /**
@@ -74,10 +76,7 @@ public class EvidenceExpander {
         List<String> queries = queriesFor(strategy, question, context);
         long buildMs = (System.nanoTime() - started) / 1_000_000;
         RetrievalResult widened = expander.expand(question.retrievalQuery(), evidence.retrieval(), strategy, queries, buildMs);
-        Counter.builder("chatbot.retrieval.expansion")
-                .tag("strategy", strategy.name().toLowerCase(Locale.ROOT))
-                .tag("outcome", widened.evidenceSufficient() ? "sufficient" : "insufficient")
-                .register(meterRegistry).increment();
+        retrievalObservations.expansion(strategy, widened.evidenceSufficient());
         return new Evidence(question, widened);
     }
 
@@ -97,43 +96,54 @@ public class EvidenceExpander {
     }
 
     private List<String> rewrite(UserQuestion question, OperationContext context) {
-        RewrittenQueries rewritten = timed("expand-search-rewrite", () ->
-                runner(context).withPromptContributor(instructions.queryRewrite())
-                        .creating(RewrittenQueries.class)
-                        .fromPrompt(prompt.buildForExpansion(question.effectiveQuery())));
-        List<String> queries = rewritten.queriesOrEmpty().stream()
-                .filter(q -> q != null && !q.isBlank())
-                .map(String::strip)
-                .filter(q -> !q.equalsIgnoreCase(question.effectiveQuery().strip()))
-                .limit(settings.expandSearch().queries())
-                .toList();
-        log.debug("Rewrote [{}] into {}", question.messageId(), queries);
-        return queries;
+        return observed(AiOperation.EXPAND_SEARCH_REWRITE, question, () -> {
+            RewrittenQueries rewritten = runner(context).withPromptContributor(instructions.queryRewrite())
+                    .creating(RewrittenQueries.class)
+                    .fromPrompt(prompt.buildForExpansion(question.effectiveQuery()));
+            List<String> queries = rewritten.queriesOrEmpty().stream()
+                    .filter(q -> q != null && !q.isBlank())
+                    .map(String::strip)
+                    .filter(q -> !q.equalsIgnoreCase(question.effectiveQuery().strip()))
+                    .limit(settings.expandSearch().queries())
+                    .toList();
+            log.debug("Rewrote [{}] into {}", question.messageId(), queries);
+            return queries;
+        });
     }
 
     private List<String> hypothetical(UserQuestion question, OperationContext context) {
-        HypotheticalPassage passage = timed("expand-search-hyde", () ->
-                runner(context).withPromptContributor(instructions.hypotheticalPassage())
-                        .creating(HypotheticalPassage.class)
-                        .fromPrompt(prompt.buildForExpansion(question.effectiveQuery())));
-        if (passage.passage() == null || passage.passage().isBlank()) {
-            return List.of();
-        }
-        log.debug("Hypothetical passage for [{}]: {}", question.messageId(), Texts.singleLine(passage.passage(), 200));
-        return List.of(passage.passage());
+        return observed(AiOperation.EXPAND_SEARCH_HYDE, question, () -> {
+            HypotheticalPassage passage = runner(context).withPromptContributor(instructions.hypotheticalPassage())
+                    .creating(HypotheticalPassage.class)
+                    .fromPrompt(prompt.buildForExpansion(question.effectiveQuery()));
+            if (passage.passage() == null || passage.passage().isBlank()) {
+                return List.of();
+            }
+            log.debug("Hypothetical passage for [{}]: {}", question.messageId(), Texts.singleLine(passage.passage(), 200));
+            return List.of(passage.passage());
+        });
     }
 
     private PromptRunner runner(OperationContext context) {
         return context.ai().withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()));
     }
 
-    private <T> T timed(String operation, Supplier<T> call) {
-        long started = System.nanoTime();
-        try {
-            return call.get();
-        } finally {
-            Timer.builder("chatbot.llm").tag("operation", operation).register(meterRegistry)
-                    .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
+    /**
+     * The model call of a widening strategy, together with the validation of what it came back with.
+     * Its caller answers from the first pass when this fails, so a failure here is a fallback rather
+     * than a failed request — unless the request itself was abandoned, which is what actually ended
+     * the call then.
+     */
+    private <T> T observed(AiOperation operation, UserQuestion question, Supplier<T> call) {
+        try (Measured measured = observations.startAiOperation(operation)) {
+            try {
+                T result = call.get();
+                measured.succeeded();
+                return result;
+            } catch (Exception e) {
+                measured.recovered(e, question.cancellation().reason());
+                throw e;
+            }
         }
     }
 }

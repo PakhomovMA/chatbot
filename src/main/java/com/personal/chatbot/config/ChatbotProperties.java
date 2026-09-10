@@ -37,7 +37,8 @@ public record ChatbotProperties(
         @Valid @DefaultValue Ingestion ingestion,
         @Valid @DefaultValue Retrieval retrieval,
         @Valid @DefaultValue Chat chat,
-        @Valid @DefaultValue Sse sse
+        @Valid @DefaultValue Sse sse,
+        @Valid @DefaultValue Observability observability
 ) {
 
     /**
@@ -277,6 +278,24 @@ public record ChatbotProperties(
     public record Ollama(
             @NotBlank @DefaultValue("http://localhost:11434") String baseUrl,
             @NotBlank @DefaultValue("embeddinggemma:300m") String model
+    ) {
+    }
+
+    /**
+     * The application's own telemetry (docs/observability-plan.md, docs/observability/metric-catalog.json).
+     * Neither switch touches tracing, sampling or exporters: metric values are published whatever the
+     * trace pipeline is doing.
+     *
+     * @param legacyMetrics publish the pre-catalog timer names — {@code chatbot.chat},
+     *                      {@code chatbot.llm}, {@code chatbot.retrieval} — beside the canonical ones,
+     *                      with their old labels, population and boundaries. Kept until their
+     *                      consumers have moved; never summed with the canonical families.
+     * @param histograms    publish the bucket sets of the catalog for the timers that need a
+     *                      percentile. Off leaves count, sum and max, which cost the fewest series.
+     */
+    public record Observability(
+            @DefaultValue("true") boolean legacyMetrics,
+            @DefaultValue("true") boolean histograms
     ) {
     }
 }

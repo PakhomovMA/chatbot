@@ -6,14 +6,15 @@ import com.personal.chatbot.exceptions.ChatCancelledException;
 import com.personal.chatbot.models.agent.StandaloneQuery;
 import com.personal.chatbot.models.agent.UserQuestion;
 import com.personal.chatbot.models.chat.ConversationTurn;
-import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.Timer;
+import com.personal.chatbot.observability.AiOperation;
+import com.personal.chatbot.observability.ChatObservations;
+import com.personal.chatbot.observability.Measured;
+import com.personal.chatbot.observability.Outcome;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -35,15 +36,15 @@ public class ConversationQueryRewriter {
     private final GroundingInstructions instructions;
     private final int historyTurns;
     private final Duration timeout;
-    private final MeterRegistry meters;
+    private final ChatObservations observations;
 
     public ConversationQueryRewriter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
-                                     int historyTurns, Duration timeout, MeterRegistry meters) {
+                                     int historyTurns, Duration timeout, ChatObservations observations) {
         this.prompt = prompt;
         this.instructions = instructions;
         this.historyTurns = historyTurns;
         this.timeout = timeout;
-        this.meters = meters;
+        this.observations = observations;
     }
 
     /**
@@ -100,38 +101,44 @@ public class ConversationQueryRewriter {
             return question;
         }
         question.notifyStage(AnswerStages.REWRITING);
-        long started = System.nanoTime();
-        String outcome = "fallback";
-        try {
-            // Bounded, unlike the answer it prepares: this call only makes the search text better, and
-            // waiting for it longer than the platform default costs the user the answer itself. A
-            // question the model does not resolve in time is searched as it was asked, which is what
-            // happens on any other failure here. Embabel may still retry once around this bound.
-            StandaloneQuery result = context.ai()
-                    .withLlm(LlmOptions.withDefaultLlm().withTemperature(0.0).withTimeout(timeout))
-                    .withPromptContributor(instructions.conversationRewrite())
-                    .creating(StandaloneQuery.class)
-                    .fromPrompt(prompt.buildForConversationRewrite(question.question(), question.history()));
-            question.abortIfCancelled();
-            String query = result == null || result.query() == null ? "" : result.query().strip();
-            // Broken/verbose output must not replace a usable question, nor be truncated into a different intent.
-            if (query.isBlank() || query.length() > 1000 || query.codePoints().anyMatch(Character::isISOControl)) {
+        // Whatever the attempt ends in — including a cancellation, as it always has (metric catalog,
+        // chatbot.chat.query.rewrite) — the branch reports one decision about the search text.
+        ChatObservations.RewriteOutcome outcome = ChatObservations.RewriteOutcome.FALLBACK;
+        try (Measured operation = observations.startAiOperation(AiOperation.CONVERSATION_QUERY_REWRITE)) {
+            operation.legacyBegins();
+            try {
+                // Bounded, unlike the answer it prepares: this call only makes the search text better, and
+                // waiting for it longer than the platform default costs the user the answer itself. A
+                // question the model does not resolve in time is searched as it was asked, which is what
+                // happens on any other failure here. Embabel may still retry once around this bound.
+                StandaloneQuery result = context.ai()
+                        .withLlm(LlmOptions.withDefaultLlm().withTemperature(0.0).withTimeout(timeout))
+                        .withPromptContributor(instructions.conversationRewrite())
+                        .creating(StandaloneQuery.class)
+                        .fromPrompt(prompt.buildForConversationRewrite(question.question(), question.history()));
+                question.abortIfCancelled();
+                String query = result == null || result.query() == null ? "" : result.query().strip();
+                // Broken/verbose output must not replace a usable question, nor be truncated into a different intent.
+                if (query.isBlank() || query.length() > 1000 || query.codePoints().anyMatch(Character::isISOControl)) {
+                    operation.finished(Outcome.FALLBACK);
+                    return question;
+                }
+                outcome = query.equals(question.question())
+                        ? ChatObservations.RewriteOutcome.UNCHANGED : ChatObservations.RewriteOutcome.REWRITTEN;
+                operation.succeeded();
+                return question.withEffectiveQuery(query);
+            } catch (Exception e) {
+                operation.recovered(e, question.cancellation().reason());
+                if (ChatCancelledException.isCancellation(e)) {
+                    throw new ChatCancelledException(question.messageId(), "cancelled during query rewriting");
+                }
+                question.abortIfCancelled();
+                log.warn("Conversation query rewriting failed for [{}]; using original question: {}", question.messageId(), e.toString());
                 return question;
+            } finally {
+                observations.queryRewrite(outcome);
+                log.debug("Conversation query preparation for [{}]: {}", question.messageId(), outcome);
             }
-            outcome = query.equals(question.question()) ? "unchanged" : "rewritten";
-            return question.withEffectiveQuery(query);
-        } catch (Exception e) {
-            if (ChatCancelledException.isCancellation(e)) {
-                throw new ChatCancelledException(question.messageId(), "cancelled during query rewriting");
-            }
-            question.abortIfCancelled();
-            log.warn("Conversation query rewriting failed for [{}]; using original question: {}", question.messageId(), e.toString());
-            return question;
-        } finally {
-            Timer.builder("chatbot.llm").tag("operation", "conversation-query-rewrite").register(meters)
-                    .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
-            meters.counter("chatbot.chat.query.rewrite", "outcome", outcome).increment();
-            log.debug("Conversation query preparation for [{}]: {}", question.messageId(), outcome);
         }
     }
 }

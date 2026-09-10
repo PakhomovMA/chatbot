@@ -34,4 +34,9 @@ class ChatbotSettings {
     ChatbotProperties.Sse sseSettings(ChatbotProperties properties) {
         return properties.sse();
     }
+
+    @Bean
+    ChatbotProperties.Observability observabilitySettings(ChatbotProperties properties) {
+        return properties.observability();
+    }
 }

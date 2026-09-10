@@ -18,7 +18,6 @@ import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
 import com.personal.chatbot.service.retrieval.Retriever;
 import com.personal.chatbot.service.retrieval.SubQuestionSearch;
 import com.personal.chatbot.support.ChatSettings;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -40,6 +39,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import com.personal.chatbot.support.TestObservations;
 
 /** Phase 9d: when the {@code decomposeQuestion} branch fires, what it searches for, and what it does when the model does not help. */
 class QuestionDecomposerTest {
@@ -59,7 +59,7 @@ class QuestionDecomposerTest {
                 new ChatbotProperties.Decompose(enabled, 3, 4), ChatSettings.NO_COMPARISON);
         return new QuestionDecomposer(retriever, new SubQuestionSearch(new RetrievalTraceStore(20), RETRIEVAL),
                 new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO), new GroundingInstructions(4, 3, 3, 4), chat,
-                new SimpleMeterRegistry());
+                TestObservations.chat());
     }
 
     private void splitsInto(SubQuestions split) {
