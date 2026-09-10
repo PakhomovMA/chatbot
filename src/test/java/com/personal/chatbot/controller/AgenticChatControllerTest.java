@@ -1,6 +1,7 @@
 package com.personal.chatbot.controller;
 
 import com.embabel.agent.api.tool.Tool;
+import com.embabel.agent.core.support.InvalidLlmReturnFormatException;
 import com.embabel.agent.core.support.LlmInteraction;
 import com.embabel.chat.Message;
 import com.jayway.jsonpath.JsonPath;
@@ -125,12 +126,46 @@ class AgenticChatControllerTest extends AbstractChatbotIntegrationTest {
                         "knowledge_base_listSections", "knowledge_base_readSection");
     }
 
+    /**
+     * The failure this guards against was live: after an answer that listed the corpus, the model read
+     * its own listing in the history and answered the next question without touching a single tool.
+     */
     @Test
-    void agenticModeWithoutAnySearchYieldsInsufficientEvidence() throws Exception {
-        whenCreateObject(p -> p.contains("Question: Which port does it listen on?"), AgenticDraft.class)
-                .thenReturn(new AgenticDraft("I could not find the port.", List.of(), false, "the listening port"));
+    void aQuestionTheModelNeverSearchedForIsRetrievedDeterministicallyInstead() throws Exception {
+        String question = "How is the payment service restarted?";
+        whenCreateObject(p -> p.contains("Question: " + question), AgenticDraft.class)
+                .thenReturn(new AgenticDraft("From memory: you restart it somehow.", List.of(), true, null));
+        whenCreateObject(p -> p.contains("Question: " + question) && p.contains("Evidence passages:"),
+                GroundedAnswerDraft.class)
+                .thenReturn(new GroundedAnswerDraft("Run `systemctl restart payments` [1].", List.of(1), true, null));
+
         mockMvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"message\":\"Which port does it listen on?\",\"options\":{\"mode\":\"AGENTIC\"}}"))
+                        .content("{\"message\":\"" + question + "\",\"options\":{\"mode\":\"AGENTIC\",\"includeDiagnostics\":true}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.answer").value("Run `systemctl restart payments` [1]."))
+                .andExpect(jsonPath("$.citations", Matchers.hasSize(1)))
+                .andExpect(jsonPath("$.citations[0].documentId").value(documentId))
+                // The trace is the deterministic retrieval's own, so the diagnostics page shows real hits.
+                .andExpect(jsonPath("$.diagnostics.hits", Matchers.not(Matchers.empty())));
+    }
+
+    /**
+     * A search that came back empty is a finding, not an omission: the deterministic retrieval does not
+     * get a second go at it, and the unsupported answer is still refused (INV-03).
+     */
+    @Test
+    void searchingAndFindingNothingStaysInsufficientEvidence() throws Exception {
+        String question = "Which port does it listen on?";
+        whenCreateObject(p -> p.contains("Question: " + question), AgenticDraft.class)
+                .thenAnswer(invocation -> {
+                    // A threshold no chunk can clear: the tool reports an empty result, which is a search.
+                    String output = tool(invocation.getArgument(1), "knowledge_base_vectorSearch")
+                            .call("{\"query\":\"listening port\",\"topK\":3,\"threshold\":1.0}").toString();
+                    assertThat(output).doesNotContain("chunkId: ");
+                    return new AgenticDraft("I could not find the port.", List.of(), false, "the listening port");
+                });
+        mockMvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"message\":\"" + question + "\",\"options\":{\"mode\":\"AGENTIC\"}}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.grounding").value("INSUFFICIENT_EVIDENCE"))
                 .andExpect(jsonPath("$.citations", Matchers.empty()))
@@ -217,16 +252,47 @@ class AgenticChatControllerTest extends AbstractChatbotIntegrationTest {
                 .andExpect(jsonPath("$.citations", Matchers.hasSize(1)));
     }
 
+    /**
+     * The answer the model wrote past the corpus never reaches the reader: what the fallback retrieved
+     * is read on its own, and the speculative draft is deliberately not part of that prompt.
+     */
     @Test
     void aConfidentAnswerWithoutAnySearchIsNotPublished() throws Exception {
         String question = "Who owns this service?";
         whenCreateObject(p -> p.contains("Question: " + question), AgenticDraft.class)
                 .thenReturn(new AgenticDraft("An invented company.", List.of(), true, null));
+        whenCreateObject(p -> p.contains("Question: " + question) && p.contains("Evidence passages:")
+                        && !p.contains("An invented company."), GroundedAnswerDraft.class)
+                .thenReturn(new GroundedAnswerDraft("The runbook does not name an owner.", List.of(), false, "the owner"));
         mockMvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"message\":\"" + question + "\",\"options\":{\"mode\":\"AGENTIC\"}}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.grounding").value("INSUFFICIENT_EVIDENCE"))
                 .andExpect(jsonPath("$.answer").value(Matchers.not(Matchers.containsString("invented company"))));
+    }
+
+    /**
+     * A model that answers in prose where the schema asked for JSON used to end the request with a 500
+     * (docs/eval-log.md); the tool loop's own evidence is still there and the answer is written from it.
+     */
+    @Test
+    void aDraftThatDoesNotBindIsAnsweredFromTheEvidenceItAlreadyCollected() throws Exception {
+        String question = "How do operators restart payments?";
+        whenCreateObject(p -> p.contains("Question: " + question), AgenticDraft.class)
+                .thenAnswer(invocation -> {
+                    tool(invocation.getArgument(1), "knowledge_base_vectorSearch")
+                            .call("{\"query\":\"restart payment service\",\"topK\":3}");
+                    throw new InvalidLlmReturnFormatException("Run systemctl restart payments.", AgenticDraft.class,
+                            new IllegalStateException("no content to map"));
+                });
+        whenCreateObject(p -> p.contains("Question: " + question) && p.contains("Evidence passages:"),
+                GroundedAnswerDraft.class)
+                .thenReturn(new GroundedAnswerDraft("Run `systemctl restart payments` [1].", List.of(1), true, null));
+        mockMvc.perform(post("/api/chat").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"message\":\"" + question + "\",\"options\":{\"mode\":\"AGENTIC\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.answer").value("Run `systemctl restart payments` [1]."))
+                .andExpect(jsonPath("$.citations", Matchers.hasSize(1)));
     }
 
     /**

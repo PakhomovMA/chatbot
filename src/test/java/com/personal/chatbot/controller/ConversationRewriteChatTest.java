@@ -134,7 +134,13 @@ class ConversationRewriteChatTest extends AbstractChatbotIntegrationTest {
                 });
         ChatResponse response = chat.chat(request(id, ORIGINAL, AnswerMode.AGENTIC));
         assertThat(calls.get()).isEqualTo(1);
-        assertThat(response.grounding()).isEqualTo(Grounding.INSUFFICIENT_EVIDENCE);
-        assertThat(response.citations()).isEmpty();
+        // The invented reference cites nothing, and the imagined answer never reaches the reader. The
+        // request is not lost with it: a model that searched for nothing is retrieved for, and the
+        // answer is written again over passages the standalone query actually found.
+        assertThat(response.answer()).doesNotContain("Imagined fact", "invented");
+        assertThat(response.grounding()).isEqualTo(Grounding.GROUNDED);
+        assertThat(response.citations()).singleElement()
+                .satisfies(citation -> assertThat(citation.documentId()).isEqualTo(documentId));
+        assertThat(response.diagnostics().query()).isEqualTo(QUERY);
     }
 }

@@ -84,8 +84,8 @@ class ChatConfiguration {
                                         GroundingInstructions instructions, RetrievalTraceStore traces,
                                         ChatbotProperties.Chat chat, ChatbotProperties.Retrieval retrieval,
                                         MeterRegistry meterRegistry, QuestionDecomposer decomposer,
-                                        SectionCatalog catalog) {
+                                        SectionCatalog catalog, Retriever retriever) {
         return new AgenticResearcher(searchOperations, prompt, instructions, traces, chat, retrieval, meterRegistry,
-                decomposer, catalog);
+                decomposer, catalog, retriever);
     }
 }

@@ -25,8 +25,11 @@ import com.personal.chatbot.service.index.SectionCatalog;
 import com.personal.chatbot.service.parsing.ProvenanceChunkTransformer;
 import com.personal.chatbot.service.retrieval.EvidenceCollector;
 import com.personal.chatbot.service.retrieval.RetrievalTraceStore;
-import com.personal.chatbot.utils.CosineScores;
+import com.personal.chatbot.service.retrieval.Retriever;
+import com.personal.chatbot.utils.AnswerLanguages;
 import com.personal.chatbot.utils.CitationMarkers;
+import com.personal.chatbot.utils.CosineScores;
+import com.personal.chatbot.utils.Throwables;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.jspecify.annotations.Nullable;
@@ -47,6 +50,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * evidence the answer is verified against is exactly what the model saw (INV-02, INV-03).
  *
  * <p>Produces evidence and draft together, because the evidence only exists once the tool loop ends.
+ *
+ * <p>The model is free to decide how to search, but not whether to. A tool loop that ends without a
+ * single passage — a local model reading a long history often skips the tools and answers from it —
+ * is answered by the deterministic retrieval of {@link Retriever} instead, and the answer is written
+ * again over those passages. Nothing about verification changes: the citations are checked against
+ * the evidence that reached the prompt, whichever of the two produced it (INV-03).
  */
 public class AgenticResearcher {
 
@@ -67,11 +76,14 @@ public class AgenticResearcher {
     private final MeterRegistry meterRegistry;
     private final QuestionDecomposer decomposer;
     private final SectionCatalog catalog;
+    private final Retriever retriever;
 
     public AgenticResearcher(LockedSearchOperations searchOperations, GroundedAnswerPrompt prompt,
                              GroundingInstructions instructions, RetrievalTraceStore traces,
                              ChatbotProperties.Chat settings, ChatbotProperties.Retrieval retrievalSettings,
-                             MeterRegistry meterRegistry, QuestionDecomposer decomposer, SectionCatalog catalog) {
+                             MeterRegistry meterRegistry, QuestionDecomposer decomposer, SectionCatalog catalog,
+                             Retriever retriever) {
+        this.retriever = retriever;
         this.searchOperations = searchOperations;
         this.prompt = prompt;
         this.instructions = instructions;
@@ -129,16 +141,53 @@ public class AgenticResearcher {
                     .withPromptContributors(List.of(instructions.agenticResearch(), rag))
                     .creating(AgenticDraft.class)
                     .fromPrompt(prompt.buildForAgentic(question.question(), question.effectiveQuery(), question.history(), shownSeed));
+        } catch (InvalidLlmReturnFormatException e) {
+            // The same model that answers a deterministic prompt in prose does it here too
+            // (docs/eval-log.md), and here the prose cannot be recovered: it references chunk ids that
+            // only mean something next to the tool results. What survives is the evidence the tool loop
+            // already collected, so the draft is dropped and the answer is written again below over
+            // numbered passages — a failed binding is not a failed request.
+            log.info("Agentic draft for [{}] did not bind ({}); answering from the collected evidence instead",
+                    question.messageId(), Throwables.rootMessage(e));
+            meterRegistry.counter("chatbot.chat.agentic.draft", "outcome", "unparsable").increment();
+            draft = new AgenticDraft("", List.of(), true, null);
         } finally {
             Timer.builder("chatbot.llm").tag("operation", "research-agentic").register(meterRegistry)
                     .record(System.nanoTime() - researchStarted, TimeUnit.NANOSECONDS);
         }
         question.abortIfCancelled();
 
-        List<RetrievedChunk> seen = collector.chunks();
-        RetrievalResult trace = traceOf(question, collector, seen, seed, (System.nanoTime() - started) / 1_000_000);
-        traces.record(trace);
         GroundedAnswerDraft numbered = AgenticDraftMapper.toNumbered(draft, collector);
+        List<RetrievedChunk> seen = collector.chunks();
+        // An answer about the knowledge base itself rests on the table of contents, not on passages, so
+        // it has nothing to cite. It is published only when the model did nothing but read that catalogue:
+        // having searched and found nothing is still no licence to answer (INV-03).
+        boolean corpusOverview = seen.isEmpty() && scoped != null && scoped.onlyBrowsedCatalogue()
+                && numbered.evidenceSufficient() && numbered.answer() != null && !numbered.answer().isBlank();
+        // A model that never touched the knowledge base leaves nothing to verify against, and the guard
+        // below would throw the whole request away — reliably so on a follow-up question, where it reads
+        // its own earlier answer in the history and believes it already knows the corpus. Retrieval is
+        // not the model's privilege in this application, so the question is then retrieved the
+        // deterministic way (INV-01) and the answer written over those passages by the repair below.
+        // A search that came back empty is a finding and is left alone: it stays INSUFFICIENT_EVIDENCE.
+        boolean touchedNothing = scoped != null ? scoped.usedNothing() : collector.steps().isEmpty();
+        RetrievalResult fallback = null;
+        if (seen.isEmpty() && touchedNothing && !corpusOverview) {
+            question.notifyStage(AnswerStages.RETRIEVING);
+            question.abortIfCancelled();
+            fallback = retriever.search(question.retrievalQuery());
+            seen = fallback.hits();
+            meterRegistry.counter("chatbot.chat.agentic.fallback", "outcome", seen.isEmpty() ? "nothing" : "passages")
+                    .increment();
+            log.info("Agentic research for [{}] used no knowledge-base tool; deterministic retrieval found {} passages",
+                    question.messageId(), seen.size());
+        }
+        // The fallback result carries a trace of its own, recorded by the retrieval service.
+        RetrievalResult trace = fallback != null ? fallback
+                : traceOf(question, collector, seen, seed, (System.nanoTime() - started) / 1_000_000);
+        if (fallback == null) {
+            traces.record(trace);
+        }
         int passagesShown = seen.size();
         if (!seen.isEmpty() && numbered.citedEvidenceOrEmpty().isEmpty()) {
             // Do not publish an uncited tool-loop answer. Re-read the actual evidence in a bounded,
@@ -161,12 +210,14 @@ public class AgenticResearcher {
             question.abortIfCancelled();
             passagesShown = prompt.includedHits(seen);
         }
-        // An answer about the knowledge base itself rests on the table of contents, not on passages, so
-        // it has nothing to cite. It is published only when the model did nothing but read that catalogue:
-        // having searched and found nothing is still no licence to answer (INV-03).
-        boolean corpusOverview = seen.isEmpty() && scoped != null && scoped.onlyBrowsedCatalogue()
-                && numbered.evidenceSufficient() && numbered.answer() != null && !numbered.answer().isBlank();
-        if (!corpusOverview && numbered.evidenceSufficient() && !hasValidCitation(numbered, passagesShown)) {
+        if (seen.isEmpty() && !corpusOverview && numbered.evidenceSufficient()) {
+            // The model answered as if it had passages, and there are none — neither its own nor any the
+            // fallback found. Say that, instead of blaming the citations of an answer that never had
+            // anything to cite. A model that reported the gap itself keeps its own wording.
+            AnswerLanguage language = prompt.languageFor(question.question());
+            numbered = GroundedAnswerDraft.insufficient(AnswerLanguages.noEvidenceAnswer(language),
+                    AnswerLanguages.noEvidenceNote(language));
+        } else if (!corpusOverview && numbered.evidenceSufficient() && !hasValidCitation(numbered, passagesShown)) {
             String missing = prompt.languageFor(question.question()) == AnswerLanguage.RU
                     ? "Не удалось подтвердить ответ ссылками на найденные фрагменты."
                     : "The answer could not be supported with citations to the retrieved passages.";
@@ -175,9 +226,10 @@ public class AgenticResearcher {
         if (sink != null) {
             sink.delta(numbered.answer()); // the whole answer at once, with [n] markers like the deterministic stream
         }
-        log.info("Agentic research for [{}]: {} tool searches, {} seed passages, {} distinct chunks, tools={}, sufficient={}",
-                question.messageId(), collector.steps().size(), shownSeed.size(), seen.size(),
-                scoped != null ? scoped.toolsUsed() : "search only", numbered.evidenceSufficient());
+        log.info("Agentic research for [{}]: {} tool searches, {} seed passages, {} distinct chunks, tools={}, "
+                        + "sufficient={}{}", question.messageId(), collector.steps().size(), shownSeed.size(), seen.size(),
+                scoped != null ? scoped.toolsUsed() : "search only", numbered.evidenceSufficient(),
+                fallback != null ? ", retrieved deterministically" : "");
         return new AnswerAttempt(new Evidence(question, trace), numbered, passagesShown, corpusOverview);
     }
 

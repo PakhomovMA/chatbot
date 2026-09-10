@@ -126,6 +126,17 @@ public final class ScopedSearchOperations implements CoreSearchOperations, Resul
         }
     }
 
+    /**
+     * True when the model never touched the knowledge base at all — no search, no expansion, no
+     * catalogue, no section read. Distinct from a search that came back empty: there is no negative
+     * finding here, only an answer written past the corpus.
+     */
+    public boolean usedNothing() {
+        synchronized (lock) {
+            return used.isEmpty();
+        }
+    }
+
     /** What the model reached for, for diagnostics and eval. */
     public Set<ToolFamily> toolsUsed() {
         synchronized (lock) {
