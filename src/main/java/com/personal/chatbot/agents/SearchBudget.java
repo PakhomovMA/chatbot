@@ -152,6 +152,7 @@ public final class SearchBudget {
                 case Result.WithArtifact artifact ->
                         Result.Companion.withArtifact(note + "\n" + artifact.getContent(), artifact.getArtifact());
                 case Result.Error error -> error;
+                default -> throw new IllegalStateException("Unexpected value: " + result);
             };
         }
     }

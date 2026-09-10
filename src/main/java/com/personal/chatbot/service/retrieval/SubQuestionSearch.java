@@ -11,6 +11,7 @@ import org.slf4j.LoggerFactory;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -72,7 +73,7 @@ public class SubQuestionSearch {
         RetrievalResult merged = merge(results, subQuestions, whole, tookMs);
         traces.record(merged);
         log.info("Decomposed search [{}] into {} parts: {} hits (+{} new), sufficient {} -> {} in {} ms",
-                merged.traceId(), subQuestions.size(), merged.hits().size(), merged.decomposition().addedHits(),
+                merged.traceId(), subQuestions.size(), merged.hits().size(), Objects.requireNonNull(merged.decomposition()).addedHits(),
                 results.getFirst().evidenceSufficient(), merged.evidenceSufficient(), tookMs);
         return merged;
     }
