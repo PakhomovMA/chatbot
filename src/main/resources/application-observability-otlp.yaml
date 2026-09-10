@@ -1,0 +1,55 @@
+# `observability-otlp` profile (docs/observability.md, O05): the spans of a run are sent over OTLP/HTTP
+# to the local OpenTelemetry collector, which is the one component that knows about Langfuse — its
+# address, its credentials and its vocabulary (docs/observability-plan.md §7.1). The application holds
+# no project keys and names no backend.
+#
+# The endpoint below is the trace *signal* URL and ends in /v1/traces, because that is what an OTLP/HTTP
+# exporter posts to. The collector's own exporter is configured with the endpoint *without* that suffix
+# and appends it itself; putting the suffix on both is the mistake this split exists to make visible,
+# and the start refuses an endpoint that does not end in it.
+#
+# Content is not exported: only metadata, timings, counts, bounded outcomes and identifiers (§7.3).
+chatbot:
+  observability:
+    trace-export: otlp
+
+embabel:
+  agent:
+    platform:
+      observability:
+        enabled: true
+        tracing-enabled: true
+        metrics-enabled: true
+        capture-message-content: false
+        trace-http-details: false
+
+management:
+  opentelemetry:
+    enabled: true
+    # Every span of the process carries these, so the backend can tell one deployment from another
+    # without the application naming the backend.
+    resource-attributes:
+      deployment.environment.name: ${CHATBOT_ENVIRONMENT:local}
+      service.version: ${CHATBOT_RELEASE:dev}
+    tracing:
+      export:
+        otlp:
+          endpoint: ${CHATBOT_OTLP_ENDPOINT:http://localhost:4318/v1/traces}
+          transport: http
+          compression: gzip
+          # Bounded on purpose: the export runs on the batch worker, never on a request thread, and a
+          # collector that is not answering must not accumulate waiting exports (§8.3).
+          timeout: 10s
+          connect-timeout: 5s
+  tracing:
+    sampling:
+      # 1.0 for local debugging; a share is chosen after the volume of a real deployment is known (§8.3).
+      probability: ${CHATBOT_TRACE_SAMPLING:1.0}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+logging:
+  level:
+    com.embabel.agent.observability: INFO

@@ -144,7 +144,12 @@ management:
   endpoint:
     health:
       show-details: always
-  # Embabel tracing is wired but off by default; enable with SPRING_PROFILES_ACTIVE=observability.
+  # The other half of the tracing switch (docs/observability-plan.md §6): the Embabel flag below stops
+  # its own spans, this one stops Boot from building an OpenTelemetry SDK at all. Together they are
+  # what makes the default hermetic — no exporter, no batch processor, no trace pipeline to be up or
+  # down. SPRING_PROFILES_ACTIVE=observability (log) or observability-otlp (collector) turns both on.
+  opentelemetry:
+    enabled: false
 
 # One createObject() call wraps the whole tool loop in agentic mode (two model turns + searches); with a
 # local 14B model a long answer alone takes ~1 min, so the Embabel default (60 s, then 10 full retries)
@@ -158,6 +163,16 @@ embabel.agent.platform.llm-operations:
 embabel.agent.platform.observability:
   tracing-enabled: false
   metrics-enabled: true
+  # Stated in the base configuration, not only in a profile: the framework default is to capture
+  # message content, and the policy of docs/observability-plan.md §7.3 is that prompts, answers,
+  # passages, tool arguments and HTTP bodies do not leave the process by default.
+  capture-message-content: false
+  trace-http-details: false
+
+chatbot.observability:
+  # Where spans go, stated rather than inferred (docs/observability-plan.md §9, O05). Nowhere here;
+  # `observability` writes them to the log, `observability-otlp` sends them to the collector.
+  trace-export: none
 
 logging:
   pattern:

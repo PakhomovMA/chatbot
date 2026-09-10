@@ -47,6 +47,221 @@ services:
       retries: 10
     mem_limit: 512m
     cpus: 1.0
+
+  # ---- profile `llm`: the trace pipeline (docs/observability-plan.md §7, O05) -------------------
+  # The application sends OTLP to the collector and knows nothing else. The collector is the only
+  # component holding Langfuse credentials, and Langfuse's own stores stay inside the Compose network:
+  # only the collector's OTLP receiver and the Langfuse UI are published, on loopback.
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.160.0@sha256:799dc6cf12c96192af37b5bdba804da8c10b3bc563b43cb90c3f3c58d9572ad6
+    profiles: [llm]
+    restart: unless-stopped
+    command: [--config=/etc/otelcol/collector.yaml]
+    # Root because the persistent sending queue writes to a named volume, whose mount point Docker
+    # creates as root; the process listens on loopback-published ports only and reads its config
+    # read-only. Drop this once the queue directory can be owned by the image's own user.
+    user: "0:0"
+    environment:
+      LANGFUSE_OTEL_ENDPOINT: ${LANGFUSE_OTEL_ENDPOINT:-http://langfuse-web:3000/api/public/otel}
+      LANGFUSE_AUTH: ${LANGFUSE_AUTH:?Set LANGFUSE_AUTH in .env (base64 of publicKey:secretKey)}
+      LANGFUSE_ENVIRONMENT: ${LANGFUSE_ENVIRONMENT:-local}
+    ports:
+      # OTLP/HTTP for the application on the host, and the collector's own metrics for Prometheus.
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:13133:13133"
+    volumes:
+      - ./otel/collector.yaml:/etc/otelcol/collector.yaml:ro
+      - otel-queue:/var/lib/otelcol/storage
+    depends_on:
+      langfuse-web:
+        condition: service_healthy
+    # No healthcheck: the image has no shell and no HTTP client. The extension answers on
+    # http://127.0.0.1:13133 from the host, which is what the runbook checks.
+    # 320m was measured at 75% during a live run — exactly where memory_limiter starts refusing spans.
+    mem_limit: 512m
+    cpus: 1.0
+
+  langfuse-web:
+    image: docker.langfuse.com/langfuse/langfuse:4.33.0@sha256:1e2bb860753bb61978e68270d70f194b204dc15c4278c1bb95ce904bc4e60123
+    profiles: [llm]
+    restart: unless-stopped
+    ports: ["127.0.0.1:3000:3000"]
+    environment:
+      <<: &langfuse-env
+        DATABASE_URL: postgresql://langfuse:${LANGFUSE_POSTGRES_PASSWORD:?Set LANGFUSE_POSTGRES_PASSWORD in .env}@langfuse-postgres:5432/langfuse
+        SALT: ${LANGFUSE_SALT:?Set LANGFUSE_SALT in .env}
+        ENCRYPTION_KEY: ${LANGFUSE_ENCRYPTION_KEY:?Set LANGFUSE_ENCRYPTION_KEY in .env (openssl rand -hex 32)}
+        CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+        CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+        CLICKHOUSE_USER: langfuse
+        CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?Set LANGFUSE_CLICKHOUSE_PASSWORD in .env}
+        CLICKHOUSE_CLUSTER_ENABLED: "false"
+        REDIS_HOST: langfuse-redis
+        REDIS_PORT: "6379"
+        REDIS_AUTH: ${LANGFUSE_REDIS_PASSWORD:?Set LANGFUSE_REDIS_PASSWORD in .env}
+        LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+        LANGFUSE_S3_EVENT_UPLOAD_REGION: auto
+        LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: langfuse
+        LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD:?Set LANGFUSE_MINIO_PASSWORD in .env}
+        LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+        LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+        LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+        LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+        LANGFUSE_S3_MEDIA_UPLOAD_REGION: auto
+        LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: langfuse
+        LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_MINIO_PASSWORD}
+        LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+        LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+        LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+        NEXTAUTH_URL: http://localhost:3000
+        # A local development stack reports nothing to anyone.
+        TELEMETRY_ENABLED: "false"
+        LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?Set LANGFUSE_NEXTAUTH_SECRET in .env}
+      # The organisation, project and keys are created on first start, so the collector's credentials
+      # are the ones already in .env and the runbook needs no click-through to obtain them.
+      LANGFUSE_INIT_ORG_ID: chatbot
+      LANGFUSE_INIT_ORG_NAME: Chatbot
+      LANGFUSE_INIT_PROJECT_ID: chatbot
+      LANGFUSE_INIT_PROJECT_NAME: Chatbot
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:?Set LANGFUSE_PUBLIC_KEY in .env}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_SECRET_KEY:?Set LANGFUSE_SECRET_KEY in .env}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:?Set LANGFUSE_INIT_USER_EMAIL in .env}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-Local}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:?Set LANGFUSE_INIT_USER_PASSWORD in .env}
+      # Node sizes its heap from the container limit and lands under what the web service needs while
+      # it starts: measured on this stack, it died in a GC loop at ~500 MB of old space and restarted
+      # in a cycle. The heap is therefore stated, and the limit leaves room around it.
+      NODE_OPTIONS: --max-old-space-size=1024
+    depends_on: &langfuse-stores
+      langfuse-postgres:
+        condition: service_healthy
+      langfuse-clickhouse:
+        condition: service_healthy
+      langfuse-redis:
+        condition: service_healthy
+      langfuse-minio:
+        condition: service_healthy
+    healthcheck:
+      # Langfuse binds the container's own address, not loopback, so the probe asks for that address
+      # rather than 127.0.0.1 — which answers "connection refused" and keeps the service unhealthy
+      # forever, with nothing that depends on it ever starting.
+      test: [CMD-SHELL, 'wget -q --spider "http://$$(hostname -i):3000/api/public/health"']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    # The Node services and ClickHouse do not finish on SIGTERM inside Compose's 10 s default and were
+    # being killed on a normal `stop`; the data survives that, an orderly stop is still better.
+    stop_grace_period: 30s
+    mem_limit: 1400m
+    cpus: 2.0
+
+  langfuse-worker:
+    image: docker.langfuse.com/langfuse/langfuse-worker:4.33.0@sha256:bc245319e36c9c9f27d8725d04c42b92d641f524e0de27af596bf34a66d5a6d5
+    profiles: [llm]
+    restart: unless-stopped
+    environment:
+      <<: *langfuse-env
+      NODE_OPTIONS: --max-old-space-size=768
+    depends_on: *langfuse-stores
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q --spider "http://$$(hostname -i):3030/api/health"']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 90s
+    stop_grace_period: 30s
+    mem_limit: 1g
+    cpus: 2.0
+
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:25.12@sha256:8a790dd3468db22b1d4e7b18a176f378ff5ff6053b9c48dd4ea1fa71a24c5ba6
+    profiles: [llm]
+    restart: unless-stopped
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: langfuse
+      CLICKHOUSE_PASSWORD: ${LANGFUSE_CLICKHOUSE_PASSWORD:?Set LANGFUSE_CLICKHOUSE_PASSWORD in .env}
+    volumes:
+      - ./clickhouse/low-memory.xml:/etc/clickhouse-server/config.d/low-memory.xml:ro
+      - langfuse-clickhouse-data:/var/lib/clickhouse
+      - langfuse-clickhouse-logs:/var/log/clickhouse-server
+    healthcheck:
+      test: [CMD, wget, -q, --spider, 'http://127.0.0.1:8123/ping']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    stop_grace_period: 60s
+    mem_limit: 1200m
+    cpus: 2.0
+
+  langfuse-minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+    profiles: [llm]
+    restart: unless-stopped
+    entrypoint: sh
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" /data'
+    environment:
+      MINIO_ROOT_USER: langfuse
+      MINIO_ROOT_PASSWORD: ${LANGFUSE_MINIO_PASSWORD:?Set LANGFUSE_MINIO_PASSWORD in .env}
+    volumes:
+      - langfuse-minio-data:/data
+    healthcheck:
+      test: [CMD, mc, ready, local]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    mem_limit: 384m
+    cpus: 1.0
+
+  langfuse-redis:
+    image: redis:7.4.7@sha256:976ab0f0939b78c06d802bcd3bea44c5142ea9a756a57b861e08819817f768c8
+    profiles: [llm]
+    restart: unless-stopped
+    command: [--requirepass, "${LANGFUSE_REDIS_PASSWORD:?Set LANGFUSE_REDIS_PASSWORD in .env}", --maxmemory-policy, noeviction]
+    volumes:
+      - langfuse-redis-data:/data
+    healthcheck:
+      test: [CMD-SHELL, 'redis-cli --no-auth-warning -a "$$LANGFUSE_REDIS_PASSWORD" ping | grep -q PONG']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    environment:
+      LANGFUSE_REDIS_PASSWORD: ${LANGFUSE_REDIS_PASSWORD}
+    mem_limit: 192m
+    cpus: 0.5
+
+  langfuse-postgres:
+    image: postgres:17.7@sha256:2006493727bd5277eece187319af1ef82b4cf82cf4fc1ed00da0775b646ac2a4
+    profiles: [llm]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: ${LANGFUSE_POSTGRES_PASSWORD:?Set LANGFUSE_POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: langfuse
+      TZ: UTC
+      PGTZ: UTC
+    volumes:
+      - langfuse-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U langfuse -d langfuse]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 384m
+    cpus: 1.0
+
 volumes:
   prometheus-data:
   grafana-data:
+  otel-queue:
+  langfuse-postgres-data:
+  langfuse-clickhouse-data:
+  langfuse-clickhouse-logs:
+  langfuse-minio-data:
+  langfuse-redis-data:

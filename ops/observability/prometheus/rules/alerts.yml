@@ -43,3 +43,27 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: Prometheus blocks approach the configured 2 GB retention budget
+
+  # The trace pipeline (docs/observability-plan.md §8.3). The `llm` profile is optional, so nothing
+  # here alerts on the collector being absent: these fire on what a running collector reports about
+  # its own queue and receiver. Metric names are the ones the pinned 0.160.0 image actually exposes.
+  - name: chatbot-traces
+    rules:
+      - alert: TraceQueueFilling
+        expr: (otelcol_exporter_queue_size{job="otel-collector"} / clamp_min(otelcol_exporter_queue_capacity{job="otel-collector"}, 1)) > 0.8
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Collector export queue is above 80 percent of its capacity
+      - alert: TraceSpansRefused
+        expr: sum by (job, receiver) (rate(otelcol_receiver_refused_spans{job="otel-collector"}[5m])) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Collector is refusing spans, so telemetry is being dropped on the way in
+      - alert: TraceSpansFailed
+        expr: sum by (job, receiver) (rate(otelcol_receiver_failed_spans{job="otel-collector"}[5m])) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Collector failed to accept spans it received

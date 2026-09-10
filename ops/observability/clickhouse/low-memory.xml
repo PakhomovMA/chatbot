@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<!--
+  ClickHouse is the largest process in the `llm` profile and the one that decides whether the stack
+  fits on a laptop that is also running a local LLM. These settings keep it inside the container's own
+  limit instead of sizing itself from the whole machine (docs/observability-plan.md §8.2). They are a
+  local-development budget, not a tuning recommendation for a Langfuse deployment that has to ingest.
+-->
+<clickhouse>
+    <max_server_memory_usage_to_ram_ratio>0.7</max_server_memory_usage_to_ram_ratio>
+    <mark_cache_size>268435456</mark_cache_size>
+    <uncompressed_cache_size>0</uncompressed_cache_size>
+    <max_concurrent_queries>16</max_concurrent_queries>
+    <logger>
+        <level>warning</level>
+    </logger>
+</clickhouse>

@@ -45,6 +45,9 @@ public final class ObservabilityBaseline {
                 "--chatbot.data-dir=" + data, "--chatbot.index.dir=" + data.resolve("index"),
                 "--chatbot.embedding.onnx.model-dir=" + System.getProperty("user.home") + "/.chatbot/models/embeddinggemma-300m",
                 "--chatbot.chat.decompose.enabled=true",
+                // The probe installs a destination of its own, so the application installs none: the
+                // spans are recorded here instead of also being written to the log (O05 trace-export).
+                "--chatbot.observability.trace-export=none",
                 "--embabel.agent.platform.observability.capture-message-content=false",
                 "--embabel.agent.platform.observability.trace-http-details=false"));
         ConfigurableApplicationContext context = SpringApplication.run(ChatbotApplication.class, arguments.toArray(String[]::new));

@@ -3,7 +3,7 @@
 Что и где смотреть, когда RAG отвечает не так, как ожидалось, или медленно (docs/system-plan.md D14, Phase 8).
 
 Проверенный стек и ограничения текущих измерений: [O01 baseline](observability/o01/README.md). Контракт миграции: [metric catalog](observability/metric-catalog.json), порядок работ: [observability-plan.md](observability-plan.md).
-Canonical families chat, AI и одного retrieval pass введены в [O02](observability/o02/README.md); ingestion, embedding и SSE переходят на них в O03, полный runbook обновляется в O07.
+Canonical families введены в [O02](observability/o02/README.md) и достроены в [O03](observability/o03/README.md); Prometheus/Grafana — [O04](observability/o04/README.md), trace pipeline и Langfuse — [O05](observability/o05/README.md). Полный runbook обновляется в O07.
 
 ## Корреляция логов (MDC)
 
@@ -13,7 +13,7 @@ Canonical families chat, AI и одного retrieval pass введены в [O0
 | Ключ | Кто ставит | Где виден |
 |---|---|---|
 | `requestId` | `RequestIdFilter`: принимает заголовок `X-Request-Id` (буквы/цифры/`._:-`, до 64 символов) или генерирует UUID; всегда возвращает его в ответе | все логи HTTP-запроса, включая Embabel (`object added`, planning) и SSE |
-| `conversationId`, `messageId` | `ChatService` на время запуска агента | ретривал, действия агента, вызов LLM |
+| `conversationId`, `messageId` | `ChatService` на весь принятый run, включая ожидание lease (O05) | ожидание разговора, ретривал, действия агента, вызов LLM |
 | `documentId` | `IngestionService` на время обработки документа воркером | parse / chunk / index, ошибки ingestion |
 | `embabel.agent.run_id`, `embabel.agent.name`, `embabel.action.name` | Embabel (`MdcPropagationEventListener`) при включённом tracing | добавляются под профилем `observability` |
 
@@ -178,28 +178,103 @@ Alerts локальны, **Alertmanager и отправка уведомлени
   ingestion: документ, стадия, сообщение, время). В UI — жёлтый баннер на вкладке Knowledge Base.
 - Порог достаточности и его калибровка: `docs/eval-log.md`.
 
-## Трейсинг (профиль `observability`)
+## Трейсинг: режимы экспорта (O05)
+
+Куда идут спаны, задаёт **`chatbot.observability.trace-export`**, и только он. Экспортёр не появляется
+из-за отсутствия другого и не подменяется тихо: несовместимая конфигурация останавливает старт
+(`TraceExportCheck`), а не откатывается в логирование.
+
+| Режим | Профиль | Что происходит |
+|---|---|---|
+| `none` | по умолчанию, `metrics` | Ничего не покидает процесс. `management.opentelemetry.enabled=false` и `tracing-enabled=false` вместе означают: нет exporter, нет batch processor, нет SDK-провайдера |
+| `logging` | `observability` | Спаны печатаются `LoggingSpanExporter`; читается один прогон локально, без Docker |
+| `otlp` | `observability-otlp` | Спаны идут по OTLP/HTTP в локальный OpenTelemetry Collector, который и разговаривает с Langfuse |
+
+Метрики, health и diagnostics API работают одинаково во всех режимах.
 
 ```bash
+# Спаны в лог.
 SPRING_PROFILES_ACTIVE=observability ./gradlew bootRun
+
+# Спаны в Collector → Langfuse (нужен профиль Compose `llm`, см. ниже).
+SPRING_PROFILES_ACTIVE=observability-otlp,metrics ./gradlew bootRun
 ```
 
-Включает Embabel tracing (`embabel-agent-starter-observability`, Micrometer Tracing → OpenTelemetry SDK):
-спаны `agent`, `planning …`, действия, `llm <model>` / `llm.invocation`, `tool-loop`, `embeddings <model>`,
-RAG-операции и HTTP-запросы. По умолчанию они печатаются в лог через `LoggingSpanExporter`
-(`LoggingSpanExporterConfiguration`); содержимое сообщений не захватывается (`capture-message-content=false`).
+Спаны те же, что и раньше: `agent`, `planning …`, действия, `llm <model>` / `llm.invocation`,
+`tool-loop`, `embeddings <model>`, RAG-операции, HTTP и canonical `chatbot.*` измерения.
+Содержимое сообщений не захватывается: `capture-message-content=false` и `trace-http-details=false`
+заданы в **базовой** конфигурации, а не только в профиле.
 
-Чтобы отправлять спаны в Langfuse / Jaeger / Zipkin, объявите бин `SpanExporter` (например,
-`OtlpHttpSpanExporter`) под тем же профилем — Embabel подхватывает все `SpanExporter`-бины, а логирующий
-объявлен как `@ConditionalOnMissingBean`. Ключи `embabel.agent.platform.observability.trace-*` выключают
-отдельные группы спанов; `management.tracing.sampling.probability` управляет выборкой.
+Владельцы pipeline не менялись (проверено в [O01](observability/o01/README.md) и тестом
+`TraceExportTest`): `SdkTracerProvider` и `OpenTelemetry` — Embabel, `BatchSpanProcessor` и `Sampler` —
+Boot, exporter — `TraceExportConfiguration`. Второго SDK не создаётся; старт падает, если провайдеров
+или batch processor-ов оказалось больше одного.
 
-Без профиля `tracing-enabled=false` выключает Embabel tracing, но само по себе не доказывает отсутствие
-Spring Boot / Spring AI spans или overhead. Для полного отключения нужно согласовать Boot OTel support и
-Embabel; актуальные owners/conditions и shutdown проверены в [O01](observability/o01/README.md).
+- **Sampling:** `management.tracing.sampling.probability` (0 и 1 проверены на живом провайдере).
+- **Endpoint приложения** — полный signal URL и обязан заканчиваться на `/v1/traces`
+  (`CHATBOT_OTLP_ENDPOINT`, по умолчанию `http://localhost:4318/v1/traces`). Endpoint **Collector-а**
+  задаётся без этого суффикса — exporter добавляет его сам. Старт отклоняет base URL там, где нужен
+  signal URL.
+- **Shutdown:** один ограниченный flush после остановки прикладной работы и до уничтожения SDK
+  (`chatbot.observability.flush-timeout`, по умолчанию 5s). Недоступный Collector не удлиняет остановку.
+- **Атрибуты исполнения:** каждый спан получает `session.id` (= conversationId), `chatbot.request.id`,
+  `chatbot.message.id`, `chatbot.document.id` из MDC — только идентификаторы, ничего из содержимого.
+  Там, куда контекст ещё не доходит (SSE worker), их нет — это известный разрыв, он закрывается в O06.
 
 С O04 `micrometer-registry-prometheus` входит в production runtime без version override.
 Для отдельного management listener и dashboards используйте профиль `metrics`, описанный выше.
+
+## Langfuse и Collector (профиль Compose `llm`)
+
+Приложение знает только локальный OTLP-адрес. Про Langfuse — его адрес, ключи проекта и словарь
+типов — знает **только Collector** ([`ops/observability/otel/collector.yaml`](../ops/observability/otel/collector.yaml)).
+Ключи проекта в приложение не попадают.
+
+```bash
+# Один раз: заполнить секреты профиля `llm` в игнорируемом .env (см. .env.example).
+cp -n ops/observability/.env.example ops/observability/.env
+
+docker compose -f ops/observability/compose.yaml --profile llm config --quiet
+docker compose -f ops/observability/compose.yaml --profile llm up -d --wait
+curl -s http://127.0.0.1:13133/          # health Collector-а
+open http://127.0.0.1:3000               # Langfuse; логин из .env
+
+SPRING_PROFILES_ACTIVE=observability-otlp,metrics ./gradlew bootRun
+
+# Синтетический trace через Collector в Langfuse, с проверкой дерева и токенов:
+uv run scripts/verify_traces.py --output /tmp/o05-traces.json
+
+# Остановить, сохранив данные:
+docker compose -f ops/observability/compose.yaml --profile llm stop
+```
+
+`scripts/dev-observability.sh` поднимает и то и другое, если задать `CHATBOT_DEV_TRACES=1`.
+
+Состав профиля (все образы закреплены digest-ом и имеют `linux/arm64`): Langfuse **4.33.0** web и
+worker, ClickHouse **25.12**, PostgreSQL **17.7**, Redis **7.4.7**, MinIO **RELEASE.2025-09-07**,
+OpenTelemetry Collector contrib **0.160.0**. На host публикуются только Langfuse UI **3000**,
+OTLP receiver **4318** и health Collector-а **13133** — все на loopback. Базы, Redis и object storage
+портов на host не имеют. Организация, проект и API-ключи Langfuse создаются при первом старте из `.env`,
+поэтому копировать ключи из UI не требуется.
+
+- Langfuse-специфичное отображение целиком находится в `transform/langfuse`:
+  `gen_ai.operation.name=chat` → `generation`, `embabel.event.type` → `agent` / `tool` / `chain` /
+  `embedding`, имена `chatbot.retrieval.*` → `retriever`, остальное → `span`.
+- **Токены считаются один раз.** Embabel-обёртка `llm.invocation` повторяет usage вызова Spring AI;
+  Collector снимает `gen_ai.usage.*` со всех спанов, кроме generation и embedding, и всегда удаляет
+  `total_tokens` — суммируются только input и output.
+- `session.id` → `langfuse.session.id`, `deployment.environment.name` → `langfuse.environment`,
+  `service.version` → `langfuse.release`, идентификаторы приложения → `langfuse.trace.metadata.*`.
+  Обогащаются **все** спаны исполнения, не только root: этого требует модель фильтрации Langfuse.
+- Заголовок `x-langfuse-ingestion-version: 4` обязателен: без него данные появляются с задержкой до
+  10 минут.
+- Очередь экспорта ограничена (1000, 2 consumer-а) и переживает рестарт Collector-а через
+  `file_storage`. Это не защищает буфер SDK внутри приложения и не даёт exactly-once.
+- Dashboard **Traces** показывает счётчики самого Collector-а; alerts `TraceQueueFilling`,
+  `TraceSpansRefused`, `TraceSpansFailed` работают, пока профиль запущен. Отсутствие профиля не
+  считается инцидентом: приложение, метрики и dashboards от него не зависят.
+- Grafana не хранит traces; перехода от гистограммы к trace здесь нет — для него нужен Tempo или
+  настроенная ссылка в Langfuse, это **O07**.
 
 ## Типичные симптомы
 

@@ -14,6 +14,7 @@ import org.springframework.validation.annotation.Validated;
 import com.personal.chatbot.models.chat.AnswerLanguage;
 import com.personal.chatbot.models.chat.AnswerMode;
 import com.personal.chatbot.models.retrieval.ExpansionStrategy;
+import com.personal.chatbot.observability.TraceExport;
 import org.springframework.util.unit.DataSize;
 
 import java.nio.file.Path;
@@ -283,8 +284,8 @@ public record ChatbotProperties(
 
     /**
      * The application's own telemetry (docs/observability-plan.md, docs/observability/metric-catalog.json).
-     * Neither switch touches tracing, sampling or exporters: metric values are published whatever the
-     * trace pipeline is doing.
+     * The first two switches do not touch tracing, sampling or exporters: metric values are published
+     * whatever the trace pipeline is doing.
      *
      * @param legacyMetrics publish the pre-catalog timer names — {@code chatbot.chat},
      *                      {@code chatbot.llm}, {@code chatbot.retrieval} — beside the canonical ones,
@@ -292,10 +293,18 @@ public record ChatbotProperties(
      *                      consumers have moved; never summed with the canonical families.
      * @param histograms    publish the bucket sets of the catalog for the timers that need a
      *                      percentile. Off leaves count, sum and max, which cost the fewest series.
+     * @param traceExport   where the spans go. Stated rather than inferred: a mode that cannot be
+     *                      satisfied fails the start instead of falling back to another destination
+     *                      (docs/observability-plan.md §9, O05).
+     * @param flushTimeout  how long the shutdown waits for what is already recorded to be sent, after
+     *                      the application's own work has stopped and before the SDK is destroyed.
+     *                      Bounded on purpose: an unreachable collector may not hold the shutdown.
      */
     public record Observability(
             @DefaultValue("true") boolean legacyMetrics,
-            @DefaultValue("true") boolean histograms
+            @DefaultValue("true") boolean histograms,
+            @DefaultValue("none") TraceExport traceExport,
+            @DefaultValue("5s") Duration flushTimeout
     ) {
     }
 }

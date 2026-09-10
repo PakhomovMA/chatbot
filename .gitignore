@@ -43,3 +43,6 @@ ops/observability/.env
 
 ### macOS ###
 .DS_Store
+
+# Python bytecode from the one-off verification scripts in scripts/
+__pycache__/

@@ -46,6 +46,9 @@ def main():
         return result['data']
     targets = prom('targets')['activeTargets']
     assert any(t['labels']['job'] == 'chatbot' and t['health'] == 'up' for t in targets), targets
+    # The `llm` profile is optional (O05): its dashboard is validated when the collector is scraped and
+    # reported as skipped when it is not, rather than failing a metrics-only stack.
+    collector = any(t['labels']['job'] == 'otel-collector' and t['health'] == 'up' for t in targets)
     datasource = request(args.grafana, '/api/datasources/uid/chatbot-prometheus/health', headers=headers)
     assert datasource['status'] == 'OK', datasource
     # Gauges/counters may legitimately be zero. Timers only exist after their boundary was exercised.
@@ -53,8 +56,12 @@ def main():
     report = {'time': time.time(), 'targets': [{'url': t['scrapeUrl'], 'health': t['health'], 'lastError': t['lastError']} for t in targets],
               'datasource': datasource, 'dashboards': [], 'queries': []}
     missing = []
+    report['skipped'] = []
     for file in sorted((ROOT / 'ops/observability/grafana/dashboards').glob('*.json')):
         expected = json.loads(file.read_text())
+        if 'otelcol_' in file.read_text() and not collector:
+            report['skipped'].append({'dashboard': expected['uid'], 'reason': 'otel-collector target is not up'})
+            continue
         actual = request(args.grafana, '/api/dashboards/uid/' + expected['uid'], headers=headers)
         assert actual['meta']['provisioned'] and actual['dashboard']['title'] == expected['title'], actual['meta']
         assert actual['dashboard']['panels'] == expected['panels'], file

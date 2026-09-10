@@ -103,8 +103,12 @@ public class ChatService {
         ChatRequest.Options options = request.optionsOrDefault();
         AnswerMode mode = options.mode() != null ? options.mode() : defaultMode;
         // The run is measured from here, whatever it ends in; the wait below is measured inside it, so
-        // that queueing behind the previous question is never read as time spent in the model.
-        try (ChatRun observed = observations.startRun(sink != null, mode)) {
+        // that queueing behind the previous question is never read as time spent in the model. The
+        // conversation and the message are named for the whole of it, not only around the agent: the
+        // lease wait belongs to this exchange too, in the log and on its span (docs/observability-plan.md §7.2).
+        try (RequestContext.Scope _ = RequestContext.with(RequestContext.CONVERSATION_ID, conversationId);
+             RequestContext.Scope _ = RequestContext.with(RequestContext.MESSAGE_ID, messageId);
+             ChatRun observed = observations.startRun(sink != null, mode)) {
             try {
                 // Nobody is waiting: stop before queueing behind whatever else this conversation is doing.
                 cancellation.abortIfCancelled(messageId);
@@ -135,11 +139,7 @@ public class ChatService {
 
         UserQuestion input = new UserQuestion(conversationId, messageId, question, history, options.topK(),
                 options.documentIds(), mode, sink, cancellation);
-        GroundedAnswer answer;
-        try (RequestContext.Scope _ = RequestContext.with(RequestContext.CONVERSATION_ID, conversationId);
-             RequestContext.Scope _ = RequestContext.with(RequestContext.MESSAGE_ID, messageId)) {
-            answer = AgentInvocation.create(agentPlatform, GroundedAnswer.class).invoke(input);
-        }
+        GroundedAnswer answer = AgentInvocation.create(agentPlatform, GroundedAnswer.class).invoke(input);
 
         // Where the v1 diagnostics stop counting, before everything below them.
         observed.agentFinished();

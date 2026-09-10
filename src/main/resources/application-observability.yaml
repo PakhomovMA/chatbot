@@ -1,6 +1,14 @@
-# `observability` profile (docs/observability.md): Embabel spans (agent, action, LLM call, tool loop,
-# embedding, RAG) are exported to the log via LoggingSpanExporter. Swap in an OTLP exporter bean to ship
-# them to Langfuse / Jaeger / Zipkin. Message content is NOT captured by default (may contain PII).
+# `observability` profile (docs/observability.md): the debugging mode. Embabel's spans — agent, action,
+# LLM call, tool loop, embedding, RAG — are written to the log by LoggingSpanExporter, so one run can be
+# read locally with no collector, no Docker and nothing to be reachable.
+#
+# Nothing leaves the process here. To send the same spans to Langfuse through the collector, use the
+# `observability-otlp` profile instead of adding an exporter to this one: the destination is chosen by
+# chatbot.observability.trace-export, and a profile that names two of them fails the start.
+chatbot:
+  observability:
+    trace-export: logging
+
 embabel:
   agent:
     platform:
@@ -11,6 +19,8 @@ embabel:
         capture-message-content: false
 
 management:
+  opentelemetry:
+    enabled: true
   tracing:
     sampling:
       probability: 1.0

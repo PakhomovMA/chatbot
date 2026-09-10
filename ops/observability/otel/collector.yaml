@@ -1,0 +1,120 @@
+# The one component that knows about Langfuse (docs/observability-plan.md §7.1): its address, its
+# project keys and its vocabulary. The application sends plain OTLP and names no backend, so a second
+# destination, a redaction rule or a different Langfuse project is a change here and nowhere else.
+#
+# The pipeline is memory_limiter -> mapping -> batch, and the exporter's queue and retries are bounded
+# (§8.3). What cannot be sent is dropped and counted, never buffered without limit.
+
+receivers:
+  # HTTP only. Langfuse takes OTLP over HTTP, and one transport is one thing to verify.
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # First in the pipeline on purpose: it refuses new data before the process runs out of memory,
+  # rather than after.
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+
+  # The Langfuse adapter. Everything vendor-specific about the trace tree is these statements.
+  transform/langfuse:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          # What each span is, in Langfuse's own vocabulary. The discriminators are the attributes the
+          # spans already carry (docs/observability/o01/baseline/classification-fixtures.json): Spring
+          # AI marks the model call, Embabel marks its own structure, and the application's canonical
+          # measurements are named after the operation they measure.
+          - set(attributes["langfuse.observation.type"], "generation") where attributes["gen_ai.operation.name"] == "chat"
+          - set(attributes["langfuse.observation.type"], "embedding") where attributes["embabel.event.type"] == "embedding"
+          - set(attributes["langfuse.observation.type"], "agent") where attributes["embabel.event.type"] == "agent_process"
+          - set(attributes["langfuse.observation.type"], "tool") where attributes["embabel.event.type"] == "tool_call"
+          - set(attributes["langfuse.observation.type"], "chain") where attributes["embabel.event.type"] == "action"
+          - set(attributes["langfuse.observation.type"], "chain") where IsMatch(attributes["embabel.event.type"], "^tool_loop")
+          - set(attributes["langfuse.observation.type"], "retriever") where IsMatch(name, "^chatbot\\.retrieval")
+          # Everything else is a plain span, said rather than left to a default.
+          - set(attributes["langfuse.observation.type"], "span") where attributes["langfuse.observation.type"] == nil
+
+          # Tokens are counted once. Embabel's LLM wrapper repeats the usage of the Spring AI call it
+          # wraps, and a structural span that also reports usage doubles the tokens of the trace
+          # (docs/observability-plan.md §5.1). The generation keeps them; the embedding keeps its own.
+          - delete_key(attributes, "gen_ai.usage.input_tokens") where attributes["langfuse.observation.type"] != "generation" and attributes["langfuse.observation.type"] != "embedding"
+          - delete_key(attributes, "gen_ai.usage.output_tokens") where attributes["langfuse.observation.type"] != "generation" and attributes["langfuse.observation.type"] != "embedding"
+          # Input and output are summed; a total beside them is the same tokens a second time
+          # (docs/observability-plan.md §5.1), so it is dropped everywhere rather than only there.
+          - delete_key(attributes, "gen_ai.usage.total_tokens")
+
+          # The session, the environment and the release on every span of the execution, not only on
+          # its root: that is what the backend filters and groups by (§7.2).
+          - set(attributes["langfuse.session.id"], attributes["session.id"]) where attributes["session.id"] != nil
+          - set(attributes["langfuse.environment"], resource.attributes["deployment.environment.name"]) where resource.attributes["deployment.environment.name"] != nil
+          - set(attributes["langfuse.environment"], "${env:LANGFUSE_ENVIRONMENT}") where attributes["langfuse.environment"] == nil
+          - set(attributes["langfuse.release"], resource.attributes["service.version"]) where resource.attributes["service.version"] != nil
+
+          # The identifiers that lead back to the application's own diagnostics. Allowlisted, and
+          # identifiers only — no question, answer, passage, tool argument or file name (§7.3).
+          - set(attributes["langfuse.trace.metadata.requestId"], attributes["chatbot.request.id"]) where attributes["chatbot.request.id"] != nil
+          - set(attributes["langfuse.trace.metadata.messageId"], attributes["chatbot.message.id"]) where attributes["chatbot.message.id"] != nil
+          - set(attributes["langfuse.trace.metadata.documentId"], attributes["chatbot.document.id"]) where attributes["chatbot.document.id"] != nil
+
+  batch:
+    timeout: 2s
+    send_batch_size: 512
+    send_batch_max_size: 1024
+
+exporters:
+  otlp_http/langfuse:
+    # The collector's own endpoint, without a signal suffix: the exporter appends /v1/traces itself.
+    # The application's exporter is configured with the full signal URL instead. Putting the suffix on
+    # both is what produces /v1/traces/v1/traces and a 404 that looks like an auth problem.
+    endpoint: ${env:LANGFUSE_OTEL_ENDPOINT}
+    encoding: proto
+    headers:
+      Authorization: Basic ${env:LANGFUSE_AUTH}
+      # Without it Langfuse 4 accepts the spans but shows them on the old ingestion path, where they
+      # can take up to ten minutes to appear.
+      x-langfuse-ingestion-version: "4"
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      # Bounded: an outage that lasts longer than this drops spans and says so, rather than growing.
+      max_elapsed_time: 5m
+    sending_queue:
+      enabled: true
+      num_consumers: 2
+      queue_size: 1000
+      # What the collector has accepted survives its own restart. It does not protect the spans still
+      # in the application's batch processor, and it is not delivery exactly once (§8.3).
+      storage: file_storage/queue
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+  file_storage/queue:
+    directory: /var/lib/otelcol/storage
+    create_directory: true
+    timeout: 1s
+
+service:
+  extensions: [health_check, file_storage/queue]
+  telemetry:
+    metrics:
+      # Queue size, refused and dropped spans, failed exports: Prometheus scrapes them here, so the
+      # export pipeline is observable on the same dashboard as everything else.
+      readers:
+        - pull:
+            exporter:
+              prometheus:
+                host: 0.0.0.0
+                port: 8888
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/langfuse, batch]
+      exporters: [otlp_http/langfuse]

@@ -4,11 +4,22 @@
 #   scripts/dev-observability.sh up     — start everything (default)
 #   scripts/dev-observability.sh down   — stop app and monitoring stack, keep data
 #   scripts/dev-observability.sh logs   — tail the app log
+#
+# CHATBOT_DEV_TRACES=1 adds the `llm` profile — the OpenTelemetry collector and Langfuse — and runs the
+# application with `observability-otlp` beside `metrics`, so its spans go to the collector. It is a
+# noticeably heavier stack (ClickHouse, PostgreSQL, Redis, object storage); without it the application
+# exports no traces at all, which is the supported default.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-COMPOSE="docker compose -f ops/observability/compose.yaml --profile metrics"
+if [[ ${CHATBOT_DEV_TRACES:-0} == 1 ]]; then
+  COMPOSE="docker compose -f ops/observability/compose.yaml --profile metrics --profile llm"
+  PROFILES="metrics,observability-otlp"
+else
+  COMPOSE="docker compose -f ops/observability/compose.yaml --profile metrics"
+  PROFILES="metrics"
+fi
 APP_LOG="${CHATBOT_DEV_LOG:-/tmp/chatbot-app.log}"
 APP_PID_FILE=/tmp/chatbot-app.pid
 MGMT_URL="http://127.0.0.1:8081/actuator/health"
@@ -29,6 +40,11 @@ wait_for_mgmt_health() {
 }
 
 up() {
+  TRACE_URLS=""
+  if [[ ${CHATBOT_DEV_TRACES:-0} == 1 ]]; then
+    TRACE_URLS="  Langfuse:       http://127.0.0.1:3000   (login from ops/observability/.env)
+  Collector:      http://127.0.0.1:13133  (health), OTLP on 127.0.0.1:4318"
+  fi
   if [[ ! -f ops/observability/.env ]]; then
     cp -n ops/observability/.env.example ops/observability/.env
     echo "Created ops/observability/.env from example — set your GRAFANA_ADMIN_PASSWORD there."
@@ -46,8 +62,8 @@ up() {
   if app_running; then
     echo "App already running (pid $(cat "$APP_PID_FILE"))."
   else
-    echo "Starting chatbot with profile 'metrics' (log: $APP_LOG)..."
-    SPRING_PROFILES_ACTIVE=metrics nohup ./gradlew bootRun >"$APP_LOG" 2>&1 &
+    echo "Starting chatbot with profiles '$PROFILES' (log: $APP_LOG)..."
+    SPRING_PROFILES_ACTIVE="$PROFILES" nohup ./gradlew bootRun >"$APP_LOG" 2>&1 &
     echo $! >"$APP_PID_FILE"
   fi
 
@@ -64,7 +80,7 @@ Everything is up:
   Grafana:        http://127.0.0.1:3001   (login from ops/observability/.env)
   Prometheus:     http://127.0.0.1:9090/targets  (job "chatbot" should be UP)
   App metrics:    $MGMT_URL
-
+${TRACE_URLS}
 Stop with: scripts/dev-observability.sh down
 Tail logs: scripts/dev-observability.sh logs
 EOF

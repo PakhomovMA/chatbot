@@ -35,10 +35,12 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'io.micrometer:micrometer-registry-prometheus'
-    // Tracing of agent/action/LLM/tool/RAG spans (Embabel) with an OTLP-ready OpenTelemetry SDK; only
-    // exported under the "observability" profile (see LoggingSpanExporterConfiguration).
+    // Tracing of agent/action/LLM/tool/RAG spans (Embabel) on one OpenTelemetry SDK. Where the spans
+    // go is chosen by chatbot.observability.trace-export and by nothing else (TraceExportConfiguration):
+    // nowhere by default, the log under "observability", the collector under "observability-otlp".
     implementation 'com.embabel.agent:embabel-agent-starter-observability'
     implementation 'io.opentelemetry:opentelemetry-exporter-logging'
+    implementation 'io.opentelemetry:opentelemetry-exporter-otlp'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
 
     // Embabel: platform, Ollama models, Lucene RAG store, Tika parsing.
