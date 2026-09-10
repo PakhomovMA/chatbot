@@ -7,3 +7,5 @@
 /docs/observability/o01/baseline/prometheus.txt -whitespace
 /docs/observability/o01/baseline/provider/*.prometheus.txt -whitespace
 /docs/observability/o01/baseline/sse.sse -whitespace
+/docs/observability/o04/evidence/** -text
+/docs/observability/o04/evidence/scrape.txt -whitespace

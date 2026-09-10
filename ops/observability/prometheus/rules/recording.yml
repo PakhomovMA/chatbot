@@ -1,0 +1,17 @@
+groups:
+  - name: chatbot-recording
+    rules:
+      - record: chatbot:chat_completed:rate5m
+        expr: sum by (job, instance, mode, answer_mode, outcome) (rate(chatbot_chat_request_seconds_count{job="chatbot"}[5m]))
+      - record: chatbot:chat_completed:increase5m
+        expr: sum by (job, instance) (increase(chatbot_chat_request_seconds_count{job="chatbot"}[5m]))
+      - record: chatbot:chat_error_ratio:rate5m
+        expr: (sum by (job, instance) (rate(chatbot_chat_request_seconds_count{job="chatbot",outcome=~"error|timeout"}[5m])) or on (job, instance) (0 * sum by (job, instance) (rate(chatbot_chat_request_seconds_count{job="chatbot"}[5m])))) / clamp_min(sum by (job, instance) (rate(chatbot_chat_request_seconds_count{job="chatbot"}[5m])), 0.000001)
+      - record: chatbot:chat_latency:p50_5m
+        expr: histogram_quantile(0.50, sum by (job, instance, le, mode, answer_mode) (rate(chatbot_chat_request_seconds_bucket{job="chatbot"}[5m])))
+      - record: chatbot:chat_latency:p95_5m
+        expr: histogram_quantile(0.95, sum by (job, instance, le, mode, answer_mode) (rate(chatbot_chat_request_seconds_bucket{job="chatbot"}[5m])))
+      - record: chatbot:ingestion_completed:rate5m
+        expr: sum by (job, instance, outcome) (rate(chatbot_ingestion_processing_seconds_count{job="chatbot"}[5m]))
+      - record: chatbot:provider_tokens:rate5m
+        expr: sum by (job, instance, gen_ai_request_model, gen_ai_token_type) (rate(gen_ai_client_token_usage_total{job="chatbot",gen_ai_token_type=~"input|output"}[5m]))

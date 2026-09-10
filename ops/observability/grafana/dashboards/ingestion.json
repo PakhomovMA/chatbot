@@ -1,0 +1,443 @@
+{
+  "uid": "chatbot-ingestion",
+  "title": "Chatbot / Ingestion",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "tags": [
+    "chatbot",
+    "O04"
+  ],
+  "timezone": "browser",
+  "refresh": "15s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Queued and active",
+      "type": "timeseries",
+      "description": "Queue includes waiting rebuild commands; active is a document currently processing.",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "chatbot_ingestion_queue{job=\"chatbot\"}",
+          "legendFormat": "__auto",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "chatbot_ingestion_active{job=\"chatbot\"}",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Oldest waiting document",
+      "type": "timeseries",
+      "description": "Longest still-open queue wait (including rerun); does not measure a rebuild command.",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "chatbot_ingestion_queue_wait_active_seconds_max{job=\"chatbot\"}",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Processing completions / s",
+      "type": "timeseries",
+      "description": "All terminal outcomes; progressing backlog differs from a stalled queue.",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "chatbot:ingestion_completed:rate5m",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Processing p95",
+      "type": "timeseries",
+      "description": "Claim through terminal outcome, including cleanup.",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le,outcome) (rate(chatbot_ingestion_processing_seconds_bucket{job=\"chatbot\"}[5m])))",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Stage failures / s",
+      "type": "timeseries",
+      "description": "Real failures only; excludes cancellation and supersession.",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (stage) (rate(chatbot_ingestion_failures_total{job=\"chatbot\"}[5m]))",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Index writable and maintenance",
+      "type": "timeseries",
+      "description": "Rebuild maintenance suppresses index unavailable alert.",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "chatbot_index_writable{job=\"chatbot\"}",
+          "legendFormat": "__auto",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "chatbot_index_maintenance{job=\"chatbot\"}",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "title": "Documents by status",
+      "type": "timeseries",
+      "description": "Background snapshot refreshed every 5 seconds.",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "chatbot_documents{job=\"chatbot\"}",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "Index chunks and documents",
+      "type": "timeseries",
+      "description": "Background counts; no index lock on the scrape thread.",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "chatbot_index_chunks{job=\"chatbot\"}",
+          "legendFormat": "__auto",
+          "range": true
+        },
+        {
+          "refId": "B",
+          "expr": "chatbot_index_documents{job=\"chatbot\"}",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "Snapshot age",
+      "type": "timeseries",
+      "description": "Increasing age means counts are stale.",
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "chatbot_metrics_snapshot_age_seconds{job=\"chatbot\"}",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Embedding failures / s",
+      "type": "timeseries",
+      "description": "Accepted batch failures.",
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (mode) (rate(chatbot_embedding_failures_total{job=\"chatbot\"}[5m]))",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ]
+}

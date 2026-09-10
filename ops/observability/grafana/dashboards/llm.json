@@ -1,0 +1,321 @@
+{
+  "uid": "chatbot-llm",
+  "title": "Chatbot / Llm",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": false,
+  "tags": [
+    "chatbot",
+    "O04"
+  ],
+  "timezone": "browser",
+  "refresh": "15s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "AI operation p95",
+      "type": "timeseries",
+      "description": "Application workflow duration; may include retries/tools.",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le,operation,outcome) (rate(chatbot_ai_operation_seconds_bucket{job=\"chatbot\"}[5m])))",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Provider generation p95",
+      "type": "timeseries",
+      "description": "Spring AI model observation; sync HTTP retries remain inside one observation.",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le,gen_ai_request_model) (rate(gen_ai_client_operation_seconds_bucket{job=\"chatbot\"}[5m])))",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Provider generations / s",
+      "type": "timeseries",
+      "description": "One model turn, not one HTTP attempt. No retry counter is invented.",
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (gen_ai_request_model,error) (rate(gen_ai_client_operation_seconds_count{job=\"chatbot\"}[5m]))",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Input and output tokens / s",
+      "type": "timeseries",
+      "description": "Input + output only. Excludes total and Embabel aggregate; missing usage is unknown, not zero.",
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "chatbot:provider_tokens:rate5m",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Fallback operations / s",
+      "type": "timeseries",
+      "description": "Recovered application operations; not HTTP retry attempts.",
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (operation) (rate(chatbot_ai_operation_seconds_count{job=\"chatbot\",outcome=\"fallback\"}[5m])) or vector(0)",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "First answer delta \u2014 O06",
+      "type": "text",
+      "description": "Only streams with a nonempty answer delta; agentic final-only streams add no fake zero.",
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "First-delta instrumentation belongs to checkpoint **O06**. O04 does not publish a fabricated latency.\n\nOnly a nonempty answer delta will start this distribution; status, heartbeat and final-only agentic streams will not create a zero sample."
+      }
+    },
+    {
+      "id": 7,
+      "title": "Model operation in flight",
+      "type": "timeseries",
+      "description": "Active timer labels reflect observation start, response model may be none.",
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "gen_ai_client_operation_active_seconds_count{job=\"chatbot\"}",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "SSE overflows / s",
+      "type": "timeseries",
+      "description": "Bounded sender queue overflows.",
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (stream) (rate(chatbot_sse_overflows_total{job=\"chatbot\"}[5m]))",
+          "legendFormat": "__auto",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ]
+}

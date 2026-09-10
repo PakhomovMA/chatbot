@@ -2,7 +2,7 @@
   "version": 1,
   "status": "accepted-for-O02-O07",
   "applicationSeriesLimit": 5000,
-  "conservativeApplicationSeries": 3635,
+  "conservativeApplicationSeries": 3637,
   "budgetFormula": "Для Timer без buckets: 3 terminal + 3 active series; с buckets: N finite + Inf + count/sum/max + 3 active. Summary: count/sum/max. Gauge/Counter: 1. Декартово произведение enum values, включая несовместимые пары. Framework/JVM/HTTP отдельно.",
   "outcomes": [
     "success",
@@ -709,7 +709,7 @@
       "compatibility": "preserved",
       "maxLabelCombinations": 1,
       "maxSeries": 1,
-      "notes": ""
+      "notes": "O04: фоновый immutable snapshot каждые 5 секунд; age публикуется отдельно. Scrape не сканирует registry и не берёт index lock."
     },
     {
       "name": "chatbot.index.documents",
@@ -722,7 +722,7 @@
       "compatibility": "preserved",
       "maxLabelCombinations": 1,
       "maxSeries": 1,
-      "notes": ""
+      "notes": "O04: фоновый immutable snapshot каждые 5 секунд; age публикуется отдельно. Scrape не сканирует registry и не берёт index lock."
     },
     {
       "name": "chatbot.index.writable",
@@ -810,7 +810,7 @@
       "compatibility": "preserved",
       "maxLabelCombinations": 7,
       "maxSeries": 7,
-      "notes": ""
+      "notes": "O04: фоновый immutable snapshot каждые 5 секунд; age публикуется отдельно. Scrape не сканирует registry и не берёт index lock."
     },
     {
       "name": "chatbot.chat",
@@ -882,6 +882,30 @@
       "maxLabelCombinations": 3,
       "maxSeries": 18,
       "notes": ""
+    },
+    {
+      "name": "chatbot.index.maintenance",
+      "type": "gauge",
+      "unit": "boolean",
+      "labels": {},
+      "boundary": "1 только во время IndexState.REBUILDING; чтение volatile state, без index lock.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "new-O04",
+      "maxLabelCombinations": 1,
+      "maxSeries": 1
+    },
+    {
+      "name": "chatbot.metrics.snapshot.age",
+      "type": "gauge",
+      "unit": "seconds",
+      "labels": {},
+      "boundary": "Возраст последнего успешного фонового snapshot index/document counts; До первого refresh отсчитывается от создания snapshot reader. Обновление раз в 5 секунд, scrape не захватывает index lock.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "new-O04",
+      "maxLabelCombinations": 1,
+      "maxSeries": 1
     }
   ],
   "framework": [
@@ -928,5 +952,12 @@
       ],
       "boundary": "Start до stop активной model observation; labels на start, поэтому response model = none; не latency histogram."
     }
-  ]
+  ],
+  "commonLabels": {
+    "application": [
+      "chatbot"
+    ]
+  },
+  "commonLabelsNote": "O04 metrics profile добавляет константу application=chatbot; множитель cardinality = 1. job/instance назначает Prometheus.",
+  "providerHistogramNote": "O04 включает chat buckets у gen_ai.client.operation; provider series учитываются отдельно от лимита 5000 application series."
 }

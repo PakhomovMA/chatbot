@@ -69,6 +69,104 @@ Embabel (`embabel.agent.platform.observability.metrics-enabled=true`, включ
 
 Пример: `curl 'localhost:8080/actuator/metrics/chatbot.chat?tag=grounding:grounded'`.
 
+## Prometheus и Grafana (O04)
+
+Профиль `metrics` включает отдельный management listener **127.0.0.1:8081** с двумя endpoints:
+`/actuator/prometheus` и `/actuator/health`. Health возвращает общий статус без details/components.
+Основной API остаётся на **127.0.0.1:8080**; diagnostics API на management-порту недоступен.
+Без профиля приложение и метрики продолжают работать без Docker. Профиль `observability`
+отдельно включает logging traces; для сочетания используйте `observability,metrics` в таком порядке.
+
+```bash
+# Из корня репозитория. Ollama и ONNX нужны приложению, но не monitoring stack.
+SPRING_PROFILES_ACTIVE=metrics ./gradlew bootRun
+
+# В другом терминале: скопировать только при первоначальной настройке.
+cp -n ops/observability/.env.example ops/observability/.env
+# Заменить GRAFANA_ADMIN_PASSWORD в .env; файл игнорируется Git.
+docker compose -f ops/observability/compose.yaml --profile metrics config --quiet
+docker compose -f ops/observability/compose.yaml --profile metrics up -d --wait
+curl http://127.0.0.1:8081/actuator/health
+```
+
+- [Grafana](http://127.0.0.1:3001): пользователь и пароль из `.env`, папка **Chatbot**,
+  dashboards **Overview / RAG / Ingestion / LLM**. Datasource и JSON загружаются provisioning-ом;
+  ручной импорт не требуется, изменения в UI не сохраняются поверх файлов.
+- [Prometheus targets](http://127.0.0.1:9090/targets): job `chatbot` должен быть `UP`.
+  Контейнер обращается к `host.docker.internal:8081`, а не к своему `localhost`.
+  Docker Desktop на macOS проверен с loopback bind; Linux host-gateway сам по себе не делает
+  host loopback доступным. Для Linux нужна отдельно ограниченная management network/address.
+- `CHATBOT_MANAGEMENT_PORT` / `CHATBOT_MANAGEMENT_ADDRESS` читает **приложение**, Compose `.env`
+  его не настраивает. При смене порта обновить также `prometheus/prometheus.yml`.
+  Не переносить адрес на `0.0.0.0` без настройки доступа к management network.
+- При `metrics` health details скрыты. Локальный UI состояния базы остаётся на основном API:
+  `/api/knowledge-base/status`. Для подробного Actuator health используйте обычный локальный профиль.
+
+```bash
+# Проверка синтаксиса и unit tests recording/alert rules на закреплённой версии Prometheus.
+docker compose -f ops/observability/compose.yaml --profile metrics run --rm --no-deps \
+  --entrypoint promtool prometheus check config /etc/prometheus/prometheus.yml
+docker compose -f ops/observability/compose.yaml --profile metrics run --rm --no-deps \
+  -w /etc/prometheus --entrypoint promtool prometheus test rules rules.test.yml
+# После representative sync/SSE/agentic/decomposition traffic:
+uv run scripts/verify_metrics.py --output /tmp/chatbot-metrics-validation.json
+
+# Остановить monitoring, сохранив данные; приложение продолжит работать.
+docker compose -f ops/observability/compose.yaml --profile metrics stop
+# Возобновить с теми же данными и provisioning.
+docker compose -f ops/observability/compose.yaml --profile metrics up -d --wait
+# Удалить контейнеры и сеть, сохранив named volumes:
+docker compose -f ops/observability/compose.yaml --profile metrics down
+```
+
+Compose project — `chatbot-observability`; отдельные named volumes `prometheus-data` и `grafana-data`
+не связаны с `~/.chatbot`. `down -v` не является штатной остановкой. Retention Prometheus: **14 дней
+и 2 GB** (срабатывает первое ограничение; WAL/head сверх block budget требуют свободного места).
+Порты UI опубликованы только на loopback: Grafana **3001**, Prometheus **9090**.
+Оба контейнера ограничены 512 MiB / 1 CPU; это проверенные стартовые лимиты для локального smoke,
+не capacity promise под production load. [Результаты измерения и gates](observability/o04/README.md).
+
+### Как читать dashboards
+
+Canonical `chatbot_chat_request_seconds_count` содержит все завершённые принятые runs. Ошибки и
+таймауты входят в error numerator, отмены видны отдельно и остаются в denominator. Успешный
+`INSUFFICIENT_EVIDENCE` не является ошибкой. Legacy `chatbot_chat_seconds_*`, `chatbot_llm_seconds_*`
+и `chatbot_retrieval_seconds_*` в dashboards/rules не используются.
+
+Buckets — явные classic SLO границы из [catalog](observability/metric-catalog.json), время в секундах.
+p50/p95 сохраняют `le`, `mode`, `answer_mode`; это начальные границы для калибровки, не обещанные SLO.
+`rate(...[5m])` требует хотя бы двух scrapes. После нового запуска или без операций в окне percentile
+может быть пустым/NaN: это отсутствие population, не нулевая latency. Multi-pass timer появляется
+только при expansion/decomposition (decomposition по умолчанию выключен).
+
+Provider — `gen_ai_client_operation_seconds_*`, usage — `gen_ai_client_token_usage_total`.
+Считаются только **input + output**, без `total` и без `embabel_llm_tokens_total`. Один Spring AI
+sync observation может содержать HTTP retries; доступного отдельного attempt/retry counter нет.
+AI operation — логический workflow, поэтому его нельзя складывать с provider duration.
+Цена локальной Ollama не выдумывается. First-delta measurement и завершение SSE lifecycle — **O06**;
+на dashboard пока пояснение, без запроса к отсутствующей метрике. Trace links, Collector/exporter
+alerts появятся вместе с соответствующей инфраструктурой O05/O06.
+
+Очередь использует `chatbot_ingestion_queue_wait_active_seconds_max` для старейшего **документного**
+ожидания, включая rerun; rebuild command в этот возраст не входит. Progress — все terminal processing
+outcomes; failed processing тоже означает движение очереди. Alert требует backlog без progress,
+возраст >10 минут и ещё 5 минут `for`; большая движущаяся очередь сама по себе не тревожит.
+Index unavailable подавляется при `chatbot_index_maintenance=1` (rebuild).
+
+Сканирование registry и чтение index counts выполняются один раз в 5 секунд фоновым потоком.
+Scrape читает immutable snapshot; до первого refresh counts = NaN, при сбое остаётся предыдущий
+snapshot. `chatbot_metrics_snapshot_age_seconds` показывает его возраст (до первого refresh — время
+с запуска reader); alert замечает остановку обновлений. Остальные gauges читают короткое in-memory
+состояние. Configured model allowlist сворачивает неожиданные имена в `unknown`; caps ограничивают
+provider response models, application operation names и HTTP URIs. Budget — **3637** консервативных
+application series при лимите **5000**, включая ещё не реализованные семейства catalog;
+JVM/HTTP/Embabel/provider учитываются отдельно. Prometheus sample limit — 12000 на scrape.
+
+Alerts локальны, **Alertmanager и отправка уведомлений не настроены**. Error ratio >10% требует
+не менее 20 завершений за 5 минут и `for: 5m`. Storage alert следит за TSDB blocks возле 2 GB,
+а не за свободным местом всей Docker VM; свободное место проверять через Docker Desktop / `docker system df`.
+Пороги — гипотезы для дальнейшей калибровки. Backup/restore volumes и outage trace pipeline — gate O07.
+
 ## Retrieval-диагностика
 
 - `POST /api/retrieval/search` — прогон ретривала без LLM: hits с cosine, BM25 и fused score, provenance, timings,
@@ -100,9 +198,8 @@ RAG-операции и HTTP-запросы. По умолчанию они пе
 Spring Boot / Spring AI spans или overhead. Для полного отключения нужно согласовать Boot OTel support и
 Embabel; актуальные owners/conditions и shutdown проверены в [O01](observability/o01/README.md).
 
-`prometheus` в списке endpoints ещё не означает доступный scrape: production runtime пока не содержит
-`micrometer-registry-prometheus`. В O01 registry подключён только в отдельном baseline/test classpath;
-включение для приложения — O04.
+С O04 `micrometer-registry-prometheus` входит в production runtime без version override.
+Для отдельного management listener и dashboards используйте профиль `metrics`, описанный выше.
 
 ## Типичные симптомы
 

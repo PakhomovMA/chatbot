@@ -184,8 +184,9 @@ alone does not establish a developer. See `docs/agentic-decomposition-fix.md` fo
 | `GET /api/diagnostics/retrieval?limit=` / `GET /api/diagnostics/retrieval/{traceId}` | Recent retrieval traces (bounded ring buffer) |
 
 The **Retrieval** tab of the UI (`/playground`) runs the same search interactively. Health components
-(`embedding`, `luceneIndex`, `ollama`), `chatbot.*` and `embabel.*` metrics, log correlation via `X-Request-Id`
-and the optional `observability` profile (Embabel spans exported to the log) are described in
+(`embedding`, `luceneIndex`, `ollama`), `chatbot.*` and `embabel.*` metrics, log correlation via `X-Request-Id`,
+the optional `observability` profile (Embabel spans exported to the log), and the `metrics` profile
+(separate management listener on 8081, provisioned Prometheus/Grafana stack) are described in
 [`docs/observability.md`](docs/observability.md).
 
 Retrieval is deterministic: vector k-NN and BM25 candidates are fused with reciprocal rank fusion

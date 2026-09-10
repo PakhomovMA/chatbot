@@ -1,0 +1,45 @@
+groups:
+  - name: chatbot-alerts
+    rules:
+      - alert: ChatbotScrapeDown
+        expr: up{job="chatbot"} == 0
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: Chatbot management endpoint is unreachable
+      - alert: ChatbotErrors
+        expr: (chatbot:chat_error_ratio:rate5m > 0.1) and on (job, instance) (chatbot:chat_completed:increase5m >= 20)
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Sustained chat error or timeout ratio above 10 percent
+      - alert: ChatbotIngestionStalled
+        expr: (chatbot_ingestion_queue{job="chatbot"} > 0) and on (job, instance) (chatbot_ingestion_queue_wait_active_seconds_max{job="chatbot"} > 600) and on (job, instance) ((sum by (job, instance) (increase(chatbot_ingestion_processing_seconds_count{job="chatbot"}[10m])) or on (job, instance) (0 * chatbot_ingestion_queue{job="chatbot"})) == 0) and on (job, instance) (chatbot_index_writable{job="chatbot"} == 1)
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Ingestion has queued work without a completion for ten minutes
+      - alert: ChatbotIndexUnavailable
+        expr: (chatbot_index_writable{job="chatbot"} == 0) and on (job, instance) (chatbot_index_maintenance{job="chatbot"} == 0)
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Index is unavailable outside a rebuild
+      - alert: ChatbotMetricSnapshotStale
+        expr: chatbot_metrics_snapshot_age_seconds{job="chatbot"} > 60
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: Index and registry metric snapshot has stopped refreshing
+      - alert: ChatbotSeriesBudget
+        expr: count by (job, instance) ({__name__=~"chatbot_.*",job="chatbot"}) > 5000
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: Application series exceed the 5000 series budget
+      - alert: PrometheusStorageBudget
+        expr: prometheus_tsdb_storage_blocks_bytes{job="prometheus"} > 1800000000
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: Prometheus blocks approach the configured 2 GB retention budget

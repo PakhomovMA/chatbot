@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.distribution.DistributionStatisticConfig;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * What holds the application's meters to docs/observability/metric-catalog.json: the label keys they
@@ -30,6 +31,7 @@ public final class MeterSchema {
             Map.entry("chatbot.chat.request", CHAT_SECONDS),
             Map.entry("chatbot.chat.wait", CHAT_SECONDS),
             Map.entry("chatbot.ai.operation", CHAT_SECONDS),
+            Map.entry("gen_ai.client.operation", CHAT_SECONDS),
             Map.entry("chatbot.sse.first.delta", CHAT_SECONDS),
             Map.entry("chatbot.ingestion.processing", CHAT_SECONDS),
             Map.entry("chatbot.ingestion.queue.wait", CHAT_SECONDS),
@@ -41,6 +43,28 @@ public final class MeterSchema {
             Map.entry("chatbot.sse.send", SSE_SECONDS));
 
     private MeterSchema() {
+    }
+
+    /** Configured model names only; response metadata must not create unbounded series. */
+    public static MeterFilter models(Set<String> models) {
+        return new MeterFilter() {
+            @Override
+            public Meter.Id map(Meter.Id id) {
+                if (!id.getName().startsWith("chatbot.") && !id.getName().startsWith("gen_ai.")) {
+                    return id;
+                }
+                return id.replaceTags(id.getTags().stream().map(tag -> {
+                    if (Set.of("model", "gen_ai.request.model", "gen_ai.response.model").contains(tag.getKey())
+                            && !models.contains(tag.getValue()) && !"none".equals(tag.getValue())) {
+                        return Tag.of(tag.getKey(), "unknown");
+                    }
+                    if ("error".equals(tag.getKey()) && !"none".equals(tag.getValue())) {
+                        return Tag.of("error", "error");
+                    }
+                    return tag;
+                }).toList());
+            }
+        };
     }
 
     /**

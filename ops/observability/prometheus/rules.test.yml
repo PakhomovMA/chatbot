@@ -1,0 +1,251 @@
+{
+  "fuzzy_compare": true,
+  "rule_files": [
+    "rules/recording.yml",
+    "rules/alerts.yml"
+  ],
+  "evaluation_interval": "1m",
+  "tests": [
+    {
+      "name": "terminal population includes failures and cancellations; tokens are not doubled",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "chatbot_chat_request_seconds_count{job=\"chatbot\",instance=\"app\",outcome=\"success\",mode=\"sync\",answer_mode=\"deterministic\"}",
+          "values": "0+6x20"
+        },
+        {
+          "series": "chatbot_chat_request_seconds_count{job=\"chatbot\",instance=\"app\",outcome=\"error\",mode=\"sync\",answer_mode=\"deterministic\"}",
+          "values": "0+2x20"
+        },
+        {
+          "series": "chatbot_chat_request_seconds_count{job=\"chatbot\",instance=\"app\",outcome=\"timeout\",mode=\"sync\",answer_mode=\"deterministic\"}",
+          "values": "0+1x20"
+        },
+        {
+          "series": "chatbot_chat_request_seconds_count{job=\"chatbot\",instance=\"app\",outcome=\"cancelled\",mode=\"sync\",answer_mode=\"deterministic\"}",
+          "values": "0+1x20"
+        },
+        {
+          "series": "gen_ai_client_token_usage_total{job=\"chatbot\",instance=\"app\",gen_ai_request_model=\"local\",gen_ai_token_type=\"input\"}",
+          "values": "0+7x20"
+        },
+        {
+          "series": "gen_ai_client_token_usage_total{job=\"chatbot\",instance=\"app\",gen_ai_request_model=\"local\",gen_ai_token_type=\"output\"}",
+          "values": "0+3x20"
+        },
+        {
+          "series": "gen_ai_client_token_usage_total{job=\"chatbot\",instance=\"app\",gen_ai_request_model=\"local\",gen_ai_token_type=\"total\"}",
+          "values": "0+10x20"
+        }
+      ],
+      "promql_expr_test": [
+        {
+          "expr": "sum(chatbot:chat_completed:increase5m)",
+          "eval_time": "10m",
+          "exp_samples": [
+            {
+              "labels": "{}",
+              "value": 50
+            }
+          ]
+        },
+        {
+          "expr": "sum(chatbot:chat_error_ratio:rate5m)",
+          "eval_time": "10m",
+          "exp_samples": [
+            {
+              "labels": "{}",
+              "value": 0.3
+            }
+          ]
+        },
+        {
+          "expr": "sum(chatbot:provider_tokens:rate5m)",
+          "eval_time": "10m",
+          "exp_samples": [
+            {
+              "labels": "{}",
+              "value": 0.16666666666666666
+            }
+          ]
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "10m",
+          "alertname": "ChatbotErrors",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "chatbot",
+                "instance": "app",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Sustained chat error or timeout ratio above 10 percent"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "low traffic does not page",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "chatbot_chat_request_seconds_count{job=\"chatbot\",instance=\"app\",outcome=\"error\"}",
+          "values": "0+1x20"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "10m",
+          "alertname": "ChatbotErrors",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "successful runs have a real zero error ratio",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "chatbot_chat_request_seconds_count{job=\"chatbot\",instance=\"app\",outcome=\"success\"}",
+          "values": "0+10x20"
+        }
+      ],
+      "promql_expr_test": [
+        {
+          "expr": "sum(chatbot:chat_error_ratio:rate5m)",
+          "eval_time": "10m",
+          "exp_samples": [
+            {
+              "labels": "{}",
+              "value": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "backlog before first completion stalls",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "chatbot_ingestion_queue{job=\"chatbot\",instance=\"app\"}",
+          "values": "5+0x30"
+        },
+        {
+          "series": "chatbot_ingestion_queue_wait_active_seconds_max{job=\"chatbot\",instance=\"app\"}",
+          "values": "700+0x30"
+        },
+        {
+          "series": "chatbot_index_writable{job=\"chatbot\",instance=\"app\"}",
+          "values": "1+0x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "20m",
+          "alertname": "ChatbotIngestionStalled",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "chatbot",
+                "instance": "app",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Ingestion has queued work without a completion for ten minutes"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "backlog with progress",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "chatbot_ingestion_queue{job=\"chatbot\",instance=\"app\"}",
+          "values": "5+0x30"
+        },
+        {
+          "series": "chatbot_ingestion_queue_wait_active_seconds_max{job=\"chatbot\",instance=\"app\"}",
+          "values": "700+0x30"
+        },
+        {
+          "series": "chatbot_index_writable{job=\"chatbot\",instance=\"app\"}",
+          "values": "1+0x30"
+        },
+        {
+          "series": "chatbot_ingestion_processing_seconds_count{job=\"chatbot\",instance=\"app\",outcome=\"success\"}",
+          "values": "0+1x30"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "20m",
+          "alertname": "ChatbotIngestionStalled",
+          "exp_alerts": []
+        }
+      ]
+    },
+    {
+      "name": "index maintenance=0",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "chatbot_index_writable{job=\"chatbot\",instance=\"app\"}",
+          "values": "0+0x20"
+        },
+        {
+          "series": "chatbot_index_maintenance{job=\"chatbot\",instance=\"app\"}",
+          "values": "0+0x20"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "10m",
+          "alertname": "ChatbotIndexUnavailable",
+          "exp_alerts": [
+            {
+              "exp_labels": {
+                "job": "chatbot",
+                "instance": "app",
+                "severity": "warning"
+              },
+              "exp_annotations": {
+                "summary": "Index is unavailable outside a rebuild"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "index maintenance=1",
+      "interval": "1m",
+      "input_series": [
+        {
+          "series": "chatbot_index_writable{job=\"chatbot\",instance=\"app\"}",
+          "values": "0+0x20"
+        },
+        {
+          "series": "chatbot_index_maintenance{job=\"chatbot\",instance=\"app\"}",
+          "values": "1+0x20"
+        }
+      ],
+      "alert_rule_test": [
+        {
+          "eval_time": "10m",
+          "alertname": "ChatbotIndexUnavailable",
+          "exp_alerts": []
+        }
+      ]
+    }
+  ]
+}

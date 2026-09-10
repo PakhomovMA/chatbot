@@ -1,0 +1,21 @@
+# Local Docker Desktop can reach host loopback through host.docker.internal.
+# Keep this address unless an explicitly isolated management network needs another bind.
+management:
+  server:
+    port: ${CHATBOT_MANAGEMENT_PORT:8081}
+    address: ${CHATBOT_MANAGEMENT_ADDRESS:127.0.0.1}
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+  metrics:
+    tags:
+      application: chatbot
+
+chatbot:
+  observability:
+    histograms: true
