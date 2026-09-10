@@ -40,3 +40,6 @@ out/
 
 # Local observability credentials
 ops/observability/.env
+
+### macOS ###
+.DS_Store
