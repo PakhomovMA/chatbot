@@ -1,10 +1,11 @@
 # chatbot
 
-Local-first RAG / knowledge assistant: Spring Boot 4.1.1 + Embabel 1.5.1 + Ollama (`qwen3:14b`) +
-EmbeddingGemma (in-process ONNX) + Lucene via `embabel-agent-rag-lucene`, Vue 3 UI later.
+Local-first RAG / knowledge assistant: Spring Boot 4.1.1 + Embabel 1.5.1 + Ollama (`gemma4:12b`) +
+EmbeddingGemma (in-process ONNX) + Lucene via `embabel-agent-rag-lucene`, Vue 3 UI.
 Key decision: retrieval, parsing, chunking, embedding and indexing are deterministic Spring services;
 Embabel only orchestrates LLM actions on top of them. `docs/system-plan.md` is the authoritative plan;
-work proceeds phase by phase (Phase 0 done).
+its phases 0–9d are done. Observability hardening is tracked in `docs/observability-plan.md`
+(checkpoints O01–O07 done; O08 awaits an API decision).
 
 ## Boundaries
 
@@ -34,7 +35,7 @@ Never:
 
 ## Setup
 
-- Runtime needs Ollama on `localhost:11434` with `qwen3:14b` and the EmbeddingGemma ONNX files under
+- Runtime needs Ollama on `localhost:11434` with `gemma4:12b` and the EmbeddingGemma ONNX files under
   `~/.chatbot/models/embeddinggemma-300m/` (see README). Tests need neither.
 - `./gradlew build` also builds `frontend/` with the local `npm` (Node 20+); `-PskipFrontend` skips it.
   Frontend code: Vue 3 SFCs with `<script setup lang="ts">`, Pinia stores, DTO types in `src/api/types.ts`
@@ -50,7 +51,7 @@ Never:
 - `./gradlew clean build` — the default gate; must pass without Ollama or model files.
 - `./gradlew test -PincludeTags=model` / `=e2e` / `=eval` — tiers needing model files / Ollama / eval set.
   Tag such tests with `@Tag("model")` etc.; untagged tests must stay hermetic.
-- `./gradlew bootRun` — expect the log line listing discovered Ollama models incl. `qwen3:14b`,
+- `./gradlew bootRun` — expect the log line listing discovered Ollama models incl. `gemma4:12b`,
   then `curl 127.0.0.1:8080/actuator/health`.
 
 ## Conventions
@@ -62,7 +63,7 @@ Never:
   `org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc`.
 - Spring tests that boot the context extend `EmbabelMockitoIntegrationTest` with `@ActiveProfiles("hermetic")`;
   the `hermetic` profile disables Ollama discovery and mocks `LlmOperations`. Never name a Spring profile `test`: Embabel disables `@Agent` auto-registration under it.
-- Ollama models are addressed by their raw name (`qwen3:14b`), e.g. `embabel.models.default-llm`.
+- Ollama models are addressed by their raw name (`gemma4:12b`), e.g. `embabel.models.default-llm`.
 - Docs (`docs/*.md`) in Russian with English terms; code, comments, commit messages in English.
 - Prefer capability descriptions over class names in docs; name a class only when it is architecturally significant.
 
