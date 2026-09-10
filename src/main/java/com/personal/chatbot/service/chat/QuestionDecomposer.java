@@ -149,7 +149,6 @@ public class QuestionDecomposer {
     private @Nullable List<String> partsOf(UserQuestion question, OperationContext context) {
         question.notifyStage(AnswerStages.DECOMPOSING);
         try (Measured operation = observations.startAiOperation(AiOperation.DECOMPOSE_QUESTION)) {
-            operation.legacyBegins();
             try {
                 SubQuestions split = context.ai()
                         .withLlm(LlmOptions.withDefaultLlm().withTemperature(0.0))

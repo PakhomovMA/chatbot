@@ -10,13 +10,13 @@ import io.micrometer.observation.ObservationRegistry;
  * What a capability facade needs to publish measurements, assembled once
  * (docs/observability-plan.md §3.1): the Observation registry that turns a boundary into a timer and
  * a span, the meter registry for the counters and distributions that are events rather than
- * boundaries, the monotonic clock and the adapter for the legacy names.
+ * boundaries, and the monotonic clock.
  *
  * <p>Services depend on a facade, never on this: no {@code MeterRegistry}, {@code Timer.builder} or
  * {@code Tracer} in {@code service}, {@code agents} or {@code models}.
  */
 public record Observations(ObservationRegistry observationRegistry, MeterRegistry meterRegistry,
-                           MonotonicClock clock, LegacyMetrics legacyMetrics) {
+                           MonotonicClock clock) {
 
     /**
      * Everything wired around a meter registry of its own, with the standard meter handler, the same
@@ -27,7 +27,7 @@ public record Observations(ObservationRegistry observationRegistry, MeterRegistr
         meters.config().meterFilter(MeterSchema.labels());
         ObservationRegistry observations = ObservationRegistry.create();
         observations.observationConfig().observationHandler(new DefaultMeterObservationHandler(meters));
-        return new Observations(observations, meters, clock, new LegacyMetrics(meters));
+        return new Observations(observations, meters, clock);
     }
 
     public static Observations standalone(MeterRegistry meters) {
@@ -41,7 +41,7 @@ public record Observations(ObservationRegistry observationRegistry, MeterRegistr
      *               running right now carries them too
      */
     Measured start(MeasuredOperation operation, String... labels) {
-        return new Measured(observationRegistry, clock, legacyMetrics, operation, labels);
+        return new Measured(observationRegistry, clock, operation, labels);
     }
 
     /** A counter of the canonical schema, registered here rather than on a hot path. */

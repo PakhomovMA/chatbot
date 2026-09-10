@@ -284,13 +284,9 @@ public record ChatbotProperties(
 
     /**
      * The application's own telemetry (docs/observability-plan.md, docs/observability/metric-catalog.json).
-     * The first two switches do not touch tracing, sampling or exporters: metric values are published
+     * The histograms switch does not touch tracing, sampling or exporters: metric values are published
      * whatever the trace pipeline is doing.
      *
-     * @param legacyMetrics publish the pre-catalog timer names — {@code chatbot.chat},
-     *                      {@code chatbot.llm}, {@code chatbot.retrieval} — beside the canonical ones,
-     *                      with their old labels, population and boundaries. Kept until their
-     *                      consumers have moved; never summed with the canonical families.
      * @param histograms    publish the bucket sets of the catalog for the timers that need a
      *                      percentile. Off leaves count, sum and max, which cost the fewest series.
      * @param traceExport   where the spans go. Stated rather than inferred: a mode that cannot be
@@ -301,7 +297,6 @@ public record ChatbotProperties(
      *                      Bounded on purpose: an unreachable collector may not hold the shutdown.
      */
     public record Observability(
-            @DefaultValue("true") boolean legacyMetrics,
             @DefaultValue("true") boolean histograms,
             @DefaultValue("none") TraceExport traceExport,
             @DefaultValue("5s") Duration flushTimeout

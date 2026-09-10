@@ -76,7 +76,7 @@ class TracePipelineTest {
                     com.embabel.agent.autoconfigure.observability.OpenTelemetrySdkAutoConfiguration.class))
             .withUserConfiguration(TraceExportConfiguration.class, RecordingDestination.class)
             .withBean(ChatbotProperties.Observability.class,
-                    () -> new ChatbotProperties.Observability(true, true, TraceExport.NONE, Duration.ofSeconds(5)))
+                    () -> new ChatbotProperties.Observability(true, TraceExport.NONE, Duration.ofSeconds(5)))
             .withPropertyValues("chatbot.observability.trace-export=none",
                     "management.opentelemetry.resource-attributes.service.version=o06-test",
                     "management.opentelemetry.resource-attributes.deployment.environment.name=verification");

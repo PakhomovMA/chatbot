@@ -13,8 +13,7 @@ import java.util.List;
 
 /**
  * The one place the application's own telemetry is wired (docs/observability-plan.md §3.1): the
- * capability facades, the compatibility adapter for the legacy names, and the schema policy of
- * {@link MeterSchema}.
+ * capability facades and the schema policy of {@link MeterSchema}.
  *
  * <p>Nothing here decides whether tracing, sampling or an exporter is on. Metric values are published
  * whatever the trace pipeline is doing (§5.3), and a facade works the same with none of it configured.
@@ -28,14 +27,9 @@ public class ObservabilityConfiguration {
     }
 
     @Bean
-    LegacyMetrics legacyMetrics(MeterRegistry meterRegistry, ChatbotProperties.Observability settings) {
-        return settings.legacyMetrics() ? new LegacyMetrics(meterRegistry) : LegacyMetrics.DISABLED;
-    }
-
-    @Bean
     Observations observations(ObservationRegistry observationRegistry, MeterRegistry meterRegistry,
-                              MonotonicClock clock, LegacyMetrics legacyMetrics) {
-        return new Observations(observationRegistry, meterRegistry, clock, legacyMetrics);
+                              MonotonicClock clock) {
+        return new Observations(observationRegistry, meterRegistry, clock);
     }
 
     @Bean

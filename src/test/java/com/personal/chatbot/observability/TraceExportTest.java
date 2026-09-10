@@ -47,7 +47,7 @@ class TraceExportTest {
     private ApplicationContextRunner with(TraceExport mode, String... properties) {
         return context
                 .withBean(ChatbotProperties.Observability.class,
-                        () -> new ChatbotProperties.Observability(true, true, mode, Duration.ofSeconds(5)))
+                        () -> new ChatbotProperties.Observability(true, mode, Duration.ofSeconds(5)))
                 .withPropertyValues(properties)
                 .withPropertyValues("chatbot.observability.trace-export=" + mode.name().toLowerCase());
     }

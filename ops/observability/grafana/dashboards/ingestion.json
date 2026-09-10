@@ -8,6 +8,19 @@
     "chatbot",
     "O04"
   ],
+  "links": [
+    {
+      "type": "dashboard",
+      "title": "Chatbot dashboards",
+      "tags": [
+        "chatbot"
+      ],
+      "asDropdown": true,
+      "keepTime": true,
+      "includeVars": true,
+      "icon": "external link"
+    }
+  ],
   "timezone": "browser",
   "refresh": "15s",
   "time": {

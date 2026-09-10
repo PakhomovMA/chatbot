@@ -20,8 +20,8 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * One measured execution boundary (docs/observability-plan.md §3.1): it starts a Micrometer
- * {@link Observation}, carries the labels of the canonical schema, ends exactly once with an
- * {@link Outcome} and feeds the compatibility adapter of the legacy timers.
+ * {@link Observation}, carries the labels of the canonical schema and ends exactly once with an
+ * {@link Outcome}.
  *
  * <p>The Observation is what publishes the measurement: the standard handlers turn it into a timer
  * and, where tracing is on, into a span. Nothing here records a second timer for the same boundary
@@ -53,11 +53,9 @@ public final class Measured implements AutoCloseable {
     private final Observation observation;
     private final Observation.@Nullable Scope scope;
     private final MonotonicClock clock;
-    private final LegacyMetrics legacy;
     private final long startedNanos;
     private final AtomicReference<Outcome> outcome = new AtomicReference<>();
     private final AtomicBoolean closed = new AtomicBoolean();
-    private volatile long legacyFromNanos;
     private volatile long legacyUntilNanos = Long.MIN_VALUE;
 
     /**
@@ -65,11 +63,10 @@ public final class Measured implements AutoCloseable {
      *               the standard handler tags the "active" long-task timer with what the context
      *               carries at start, and a label written later would leave it reading {@code none}.
      */
-    Measured(ObservationRegistry registry, MonotonicClock clock, LegacyMetrics legacy, MeasuredOperation operation,
+    Measured(ObservationRegistry registry, MonotonicClock clock, MeasuredOperation operation,
              String... labels) {
         this.operation = operation;
         this.clock = clock;
-        this.legacy = legacy;
         this.context = new Context(operation);
         for (int i = 0; i + 1 < labels.length; i += 2) {
             context.label(labels[i], labels[i + 1]);
@@ -77,7 +74,6 @@ public final class Measured implements AutoCloseable {
         this.observation = Observation.createNotStarted(operation.metricName(), () -> context, registry)
                 .observationConvention(CONVENTION);
         this.startedNanos = clock.nanoTime();
-        this.legacyFromNanos = startedNanos;
         this.observation.start();
         // A boundary whose two ends are on different threads opens no scope: a scope belongs to the
         // thread that opened it, and closing somebody else's would corrupt theirs (§7.2).
@@ -154,23 +150,18 @@ public final class Measured implements AutoCloseable {
     }
 
     /**
-     * Opens the narrower window the compatibility adapter records for this boundary, where the legacy
-     * timer measured less than the canonical one does (docs/observability/metric-catalog.json,
-     * {@code chatbot.llm}). Without it the adapter records the canonical window.
+     * Closes the narrower window the v1 API diagnostics report for this boundary, where they stop
+     * counting before the boundary does (docs/observability-plan.md §4.3). Without it the window
+     * ends where the canonical one does.
      */
-    public void legacyBegins() {
-        legacyFromNanos = clock.nanoTime();
-    }
-
-    /** Closes that window; without it, it ends where the canonical one does. */
     public void legacyEnds() {
         legacyUntilNanos = clock.nanoTime();
     }
 
-    /** The legacy window so far, for the diagnostics that still report it (§4.3). */
+    /** The v1 diagnostics window so far, for the API projection that still reports it (§4.3). */
     public Duration legacyElapsed() {
         long until = legacyUntilNanos != Long.MIN_VALUE ? legacyUntilNanos : clock.nanoTime();
-        return Duration.ofNanos(Math.max(0, until - legacyFromNanos));
+        return Duration.ofNanos(Math.max(0, until - startedNanos));
     }
 
     public boolean isFinished() {
@@ -200,12 +191,6 @@ public final class Measured implements AutoCloseable {
             }
         } finally {
             observation.stop();
-        }
-        try {
-            legacy.record(operation, context.labels(), ended, legacyElapsed());
-        } catch (RuntimeException e) {
-            // The adapter is scaffolding for the consumers of the old names; it may not cost a request.
-            log.warn("Legacy metric of {} was not recorded: {}", operation.metricName(), e.toString());
         }
     }
 

@@ -3,7 +3,7 @@
 Что и где смотреть, когда RAG отвечает не так, как ожидалось, или медленно (docs/system-plan.md D14, Phase 8).
 
 Проверенный стек и ограничения текущих измерений: [O01 baseline](observability/o01/README.md). Контракт миграции: [metric catalog](observability/metric-catalog.json), порядок работ: [observability-plan.md](observability-plan.md).
-Canonical families введены в [O02](observability/o02/README.md) и достроены в [O03](observability/o03/README.md); Prometheus/Grafana — [O04](observability/o04/README.md), trace pipeline и Langfuse — [O05](observability/o05/README.md), async correlation и content policy — [O06](observability/o06/README.md). Полный runbook обновляется в O07.
+Canonical families введены в [O02](observability/o02/README.md) и достроены в [O03](observability/o03/README.md); Prometheus/Grafana — [O04](observability/o04/README.md), trace pipeline и Langfuse — [O05](observability/o05/README.md), async correlation и content policy — [O06](observability/o06/README.md), эксплуатационная проверка и завершение миграции — [O07](observability/o07/README.md).
 
 ## Корреляция логов (MDC)
 
@@ -41,13 +41,10 @@ Overall-статус агрегируется Spring: OUT_OF_SERVICE/DOWN люб
 | `chatbot.retrieval.search` | timer | `mode`, `outcome` | один deterministic pass, включая lock, query embedding и postprocessing |
 | `chatbot.chat.active` | gauge | — | принятые runs, которые ещё не завершились |
 | `chatbot.chat.rejected` | counter | `reason` (stopping / capacity) | отказ до принятия run; не входит в знаменатель принятых |
-| `chatbot.chat` | timer | `grounding`, `mode` (sync/stream), `answerMode` (deterministic/agentic) | **legacy**: только успешные runs, до завершения agent invocation |
-| `chatbot.llm` | timer | `operation` | **legacy**: прежние границы try/finally; для `research-agentic` только tool loop |
 | `chatbot.chat.query.rewrite` | counter | `outcome` (rewritten / unchanged / fallback) | результат попытки восстановления вопроса; вопросы без попытки не учитываются |
 | `chatbot.retrieval.expansion` | counter | `strategy`, `outcome` (sufficient / insufficient) | сработавшее расширение поиска (Phase 9a) |
 | `chatbot.chat.decomposition` | counter | `outcome` (split / single / failed) | разбор многосоставного вопроса (Phase 9d); вопросы без попытки не учитываются |
 | `chatbot.chat.comparison` | counter | `outcome` (conflict / agreement / none / failed) | сравнение источников перед ответом (Phase 9d) |
-| `chatbot.retrieval` | timer | `mode` | **legacy**: только успешные passes, clock read после записи trace |
 | `chatbot.retrieval.hits` | summary | — | hits на запрос |
 | `chatbot.embedding` | timer | `mode` (query/document), `provider`, `model` | один батч эмбеддинга |
 | `chatbot.embedding.texts` | counter | `provider` | текстов заэмбеждено |
@@ -58,10 +55,10 @@ Overall-статус агрегируется Spring: OUT_OF_SERVICE/DOWN люб
 | `chatbot.documents` | gauge | `status` | документы в реестре по статусу |
 | `chatbot.conversations`, `chatbot.retrieval.traces` | gauge | — | память диалогов, буфер трейсов |
 
-Три метрики, помеченные **legacy**, публикует отключаемый compatibility adapter (`chatbot.observability.legacy-metrics=false`).
-Они измеряют другие границы и другую population, чем canonical families рядом с ними, и складывать их нельзя.
-Buckets для percentile включены у canonical timers, `chatbot.embedding` и `chatbot.sse.send`
-(`chatbot.observability.histograms=false` их снимает).
+Legacy-семейства `chatbot.chat`, `chatbot.llm` и `chatbot.retrieval` (другие границы и population) удалены в O07
+вместе с compatibility adapter: все потребители уже читали canonical families. Соответствие старых имён
+canonical — в [O02](observability/o02/README.md). Buckets для percentile включены у canonical timers,
+`chatbot.embedding` и `chatbot.sse.send` (`chatbot.observability.histograms=false` их снимает).
 
 Embabel (`embabel.agent.platform.observability.metrics-enabled=true`, включено всегда): `embabel.agent.duration`,
 `embabel.agent.active`, `embabel.agent.errors.total`, `embabel.llm.duration`, `embabel.llm.requests.total`,
@@ -130,8 +127,9 @@ Compose project — `chatbot-observability`; отдельные named volumes `p
 
 Canonical `chatbot_chat_request_seconds_count` содержит все завершённые принятые runs. Ошибки и
 таймауты входят в error numerator, отмены видны отдельно и остаются в denominator. Успешный
-`INSUFFICIENT_EVIDENCE` не является ошибкой. Legacy `chatbot_chat_seconds_*`, `chatbot_llm_seconds_*`
-и `chatbot_retrieval_seconds_*` в dashboards/rules не используются.
+`INSUFFICIENT_EVIDENCE` не является ошибкой. Legacy-семейства `chatbot_chat_seconds_*`,
+`chatbot_llm_seconds_*` и `chatbot_retrieval_seconds_*` удалены в O07; dashboards/rules всегда
+использовали только canonical.
 
 Buckets — явные classic SLO границы из [catalog](observability/metric-catalog.json), время в секундах.
 p50/p95 сохраняют `le`, `mode`, `answer_mode`; это начальные границы для калибровки, не обещанные SLO.
@@ -145,7 +143,8 @@ sync observation может содержать HTTP retries; доступног�
 AI operation — логический workflow, поэтому его нельзя складывать с provider duration.
 Цена локальной Ollama не выдумывается. С **O06** `chatbot.sse.first.delta{answer.mode}` измеряет первую
 непустую delta, принятую в очередь; `chatbot.sse.completed{answer.mode,outcome}` считает один terminal
-event. Dashboard links и Collector/exporter alerts доводятся в O07.
+event. С **O07** у всех dashboards есть dropdown-навигация по папке Chatbot (tag `chatbot`), а у Traces —
+ссылка на Langfuse UI; alerts trace pipeline дополнены `TraceExporterDrops` (drops после исчерпания retry).
 
 Очередь использует `chatbot_ingestion_queue_wait_active_seconds_max` для старейшего **документного**
 ожидания, включая rerun; rebuild command в этот возраст не входит. Progress — все terminal processing
@@ -165,7 +164,8 @@ JVM/HTTP/Embabel/provider учитываются отдельно. Prometheus sa
 Alerts локальны, **Alertmanager и отправка уведомлений не настроены**. Error ratio >10% требует
 не менее 20 завершений за 5 минут и `for: 5m`. Storage alert следит за TSDB blocks возле 2 GB,
 а не за свободным местом всей Docker VM; свободное место проверять через Docker Desktop / `docker system df`.
-Пороги — гипотезы для дальнейшей калибровки. Backup/restore volumes и outage trace pipeline — gate O07.
+Пороги — гипотезы для дальнейшей калибровки. Backup/restore и outage-поведение trace pipeline проверены
+в O07 — см. «Сбои trace pipeline» и «Backup/restore volumes» ниже.
 
 ## Retrieval-диагностика
 
@@ -272,10 +272,60 @@ OTLP receiver **4318** и health Collector-а **13133** — все на loopback
 - Очередь экспорта ограничена (1000, 2 consumer-а) и переживает рестарт Collector-а через
   `file_storage`. Это не защищает буфер SDK внутри приложения и не даёт exactly-once.
 - Dashboard **Traces** показывает счётчики самого Collector-а; alerts `TraceQueueFilling`,
-  `TraceSpansRefused`, `TraceSpansFailed` работают, пока профиль запущен. Отсутствие профиля не
-  считается инцидентом: приложение, метрики и dashboards от него не зависят.
-- Grafana не хранит traces; перехода от гистограммы к trace здесь нет — для него нужен Tempo или
-  настроенная ссылка в Langfuse, это **O07**.
+  `TraceSpansRefused`, `TraceSpansFailed` и `TraceExporterDrops` (O07: drops после исчерпания
+  bounded retry) работают, пока профиль запущен. Отсутствие профиля не считается инцидентом:
+  приложение, метрики и dashboards от него не зависят.
+- Grafana не хранит traces. С O07 у dashboard **Traces** есть ссылка на Langfuse UI; поиск конкретного
+  trace идёт по `traceId` из structured log или diagnostics. Tempo сознательно не включён: общий trace UI
+  в Grafana не нужен, пока Langfuse покрывает разбор выполнения.
+
+### Сбои trace pipeline (проверено в O07)
+
+Воспроизводимый сценарий: `uv run scripts/verify_outage.py --output ... --application-log ...`
+([evidence](observability/o07/evidence/outage.json)). Ключевые факты:
+
+- **Collector недоступен.** Запросы приложения не блокируются: спаны остаются в bounded-очереди
+  BatchSpanProcessor SDK (2048), излишек SDK отбрасывает с записью в лог. После старта Collector-а
+  приём восстанавливается без рестарта приложения. Остановка приложения при недоступном Collector
+  ограничена flush-timeout (измерено: SIGTERM → exit за 8.95 s, не отправленное отбрасывается с логом).
+- **Ответ Langfuse 401 или 500 — постоянная ошибка.** Collector 0.160 повторяет только 429/502/503/504;
+  401 (ключи) и 500 отбрасывают партию сразу, счётчик `otelcol_exporter_send_failed_spans`, alert
+  `TraceSpansFailed`/`TraceExporterDrops`. 429/503/504 и таймауты уходят в bounded retry (1s→30s,
+  не более 5 минут), затем drop.
+- **Медленный backend** паркует queue consumer-ов; backpressure виден как рост `otelcol_exporter_queue_size`
+  (alert `TraceQueueFilling` с 80%).
+- **Переполнение очереди** (1000 batches): receiver по-прежнему отвечает 200 (`wait_for_result=false`),
+  отброшенное при enqueue считается `otelcol_exporter_enqueue_failed_spans` → `TraceExporterDrops`.
+  Принятое в очередь переживает рестарт Collector-а (`file_storage`, проверено доставкой после stop/start).
+- Приложение про Langfuse не знает: отказ backend никогда не доходит до request path, кроме
+  косвенного backpressure через заполненную очередь Collector-а.
+
+### Backup/restore volumes (проверено в O07)
+
+Все 8 named volumes проекта (`prometheus-data`, `grafana-data`, `otel-queue`, `langfuse-postgres-data`,
+`langfuse-clickhouse-data`, `langfuse-clickhouse-logs`, `langfuse-minio-data`, `langfuse-redis-data`)
+копируются файловым tar-способом и восстанавливаются в отдельный Compose project
+(`chatbot-observability-restore`, порты переопределены). Воспроизводимый drill:
+`uv run scripts/verify_restore.py --output ...` — backup, restore, проверка исторических данных
+Prometheus, sqlite Grafana, API Langfuse и очереди Collector-а, затем `down -v` **только** restore-проекта
+([evidence](observability/o07/evidence/restore.json)).
+
+Измеренный disk budget локального стека (drill 2026-09-11): **≈592 MiB суммарно** (153 MiB в tar.gz) —
+Grafana 181 MiB (sqlite + provisioning/plugins state), ClickHouse data 169 MiB, ClickHouse logs 133 MiB,
+PostgreSQL 68 MiB, MinIO 36 MiB, Prometheus 4.6 MiB, очередь Collector-а 1.1 MiB, Redis 0.07 MiB.
+Рост ограничен retention Prometheus (14d/2GB) и TTL-политиками Langfuse/ClickHouse;
+ClickHouse logs быстро растут и не ротируются Compose-ом — долгоживущему развёртыванию нужна
+отдельная ротация.
+
+Ограничения single-node: backup делается tar-ом из volume — живой ClickHouse мержит и удаляет parts
+под читающим tar (наблюдалось «No such file or directory»), поэтому drill останавливает source-стек на
+время backup и проверки (несколько минут простоя monitoring, на приложение не влияет) и сверяет
+manifest каждого volume (пути, размеры, sha256 первых 4 KiB файлов ≤1 MiB) после restore.
+Redis восстанавливает только persisted dump — потеря in-flight очереди Langfuse допустима.
+Внутри tar сохраняются numeric uid/gid (ClickHouse 101:101) — на rootless Docker проверять ownership
+после restore. Langfuse-web на восстановленных данных может становиться healthy 2–3 минуты (Prisma +
+ClickHouse init) — не принимать за зависание. Это локальный single-node стек: без репликации, без
+Alertmanager, без внешнего хранилища — его отказ не влияет на приложение.
 
 ## Типичные симптомы
 
@@ -283,7 +333,7 @@ OTLP receiver **4318** и health Collector-а **13133** — все на loopback
 |---|---|
 | Ответы `INSUFFICIENT_EVIDENCE` на вопросы, которые есть в базе | Playground: есть ли hit и его cosine против `sufficient-cosine`; `luceneIndex` health (`EMPTY`? `INCOMPATIBLE`?); `chatbot.documents{status=ready}` |
 | Документ завис в `UPLOADED` | `chatbot.ingestion.queue`, health `luceneIndex` (при `INCOMPATIBLE` воркер паркует документы), `recentFailures` |
-| Медленные ответы | `chatbot.llm` vs `chatbot.retrieval` с учётом legacy-границ; время до первой дельты также включает retrieval и подготовку; `embabel.llm.tokens.total{direction=input}` показывает размер промпта |
+| Медленные ответы | `chatbot.ai.operation` vs `chatbot.retrieval.search` (логическая AI-операция включает prompt, tools и восстановление — не складывать с provider duration); время до первой дельты также включает retrieval и подготовку; `embabel.llm.tokens.total{direction=input}` показывает размер промпта |
 | Ollama недоступен | health `ollama` (DOWN/OUT_OF_SERVICE с причиной) |
 | Странные цитаты | `GET /api/diagnostics/retrieval/{traceId}` по `retrievalTraceId` ответа: какие чанки видела модель |
 

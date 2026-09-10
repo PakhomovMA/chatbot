@@ -77,7 +77,6 @@ public class SourceComparator {
         question.notifyStage(AnswerStages.COMPARING);
         ChatObservations.ComparisonOutcome outcome = ChatObservations.ComparisonOutcome.FAILED;
         try (Measured operation = observations.startAiOperation(AiOperation.COMPARE_SOURCES)) {
-            operation.legacyBegins();
             try {
                 SourceComparison drafted = context.ai()
                         .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()))

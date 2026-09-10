@@ -105,7 +105,6 @@ public class ConversationQueryRewriter {
         // chatbot.chat.query.rewrite) — the branch reports one decision about the search text.
         ChatObservations.RewriteOutcome outcome = ChatObservations.RewriteOutcome.FALLBACK;
         try (Measured operation = observations.startAiOperation(AiOperation.CONVERSATION_QUERY_REWRITE)) {
-            operation.legacyBegins();
             try {
                 // Bounded, unlike the answer it prepares: this call only makes the search text better, and
                 // waiting for it longer than the platform default costs the user the answer itself. A

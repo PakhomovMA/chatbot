@@ -40,6 +40,9 @@ public final class TelemetrySanitizer {
                     + "|https?://[^\\s/@]+:[^\\s/@]+@");
     private final ContentPolicy policy;
     private final List<String> redactions;
+    // Resource attributes are process constants; sanitizing them once avoids repeating the work
+    // for every exported span.
+    private volatile Resource safeResource;
 
     public TelemetrySanitizer(ContentPolicy policy, List<String> redactions) {
         this.policy = policy;
@@ -85,7 +88,7 @@ public final class TelemetrySanitizer {
                         attributes(event.getAttributes(), false))).toList();
         List<LinkData> links = source.getLinks().stream().limit(16)
                 .map(link -> LinkData.create(link.getSpanContext(), attributes(link.getAttributes(), false))).toList();
-        Resource resource = Resource.create(attributes(source.getResource().getAttributes(), false));
+        Resource resource = safeResource(source.getResource());
         String name = safeName(source.getName());
         return new DelegatingSpanData(source) {
             @Override
@@ -140,10 +143,22 @@ public final class TelemetrySanitizer {
         };
     }
 
+    private Resource safeResource(Resource source) {
+        Resource cached = safeResource;
+        if (cached != null) return cached;
+        Resource created = Resource.create(attributes(source.getAttributes(), false));
+        safeResource = created;
+        return created;
+    }
+
+    // Precompiled: String.matches would compile this on every span.
+    private static final Pattern SAFE_NAME = Pattern.compile(
+            "chatbot\\.[a-z.]+|(?:agent|action|chat|tool|embedding|embeddings|llm|llm.invocation|planning|goal|http) [A-Za-z0-9_.:/ -]{1,100}|(?:tool-loop|tool-loop-completed|COMPLETED|knowledge_base_(?:vectorSearch|textSearch|broadenChunk|zoomOut|listSections|readSection))|(?:GET|POST|PUT|DELETE|PATCH) /[A-Za-z0-9/{}._-]*");
+
     private String safeName(String name) {
         // Framework names contain configured action/model identifiers, never prompts. Unknown dynamic
         // names remain in the tree under a neutral name rather than becoming an unreviewed content path.
-        if (name.matches("chatbot\\.[a-z.]+|(?:agent|action|chat|tool|embedding|embeddings|llm|llm.invocation|planning|goal|http) [A-Za-z0-9_.:/ -]{1,100}|(?:tool-loop|tool-loop-completed|COMPLETED|knowledge_base_(?:vectorSearch|textSearch|broadenChunk|zoomOut|listSections|readSection))|(?:GET|POST|PUT|DELETE|PATCH) /[A-Za-z0-9/{}._-]*")) {
+        if (SAFE_NAME.matcher(name).matches()) {
             return text(name);
         }
         return "operation";

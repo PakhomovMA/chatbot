@@ -25,8 +25,7 @@ public final class MeterSchema {
     private static final double[] SSE_SECONDS = {0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5};
 
     /**
-     * Which timer gets which buckets. The legacy names are deliberately absent: they keep the shape
-     * they had, and a percentile over a population of successful runs alone would mislead anyway.
+     * Which timer gets which buckets. A timer not listed here keeps count, sum and max only.
      */
     private static final Map<String, double[]> HISTOGRAMS = Map.ofEntries(
             Map.entry("chatbot.chat.request", CHAT_SECONDS),

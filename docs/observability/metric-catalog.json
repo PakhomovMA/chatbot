@@ -69,7 +69,7 @@
     "path",
     "exception.message"
   ],
-  "compatibilityPeriod": "Legacy names публикуются отключаемым adapter в O02/O03 и сохраняются минимум до завершения O07 и одного полного цикла миграции всех потребителей. Удаление отдельным checkpoint после проверки потребителей; v1 JSON сохраняется до согласованного O08. Не суммировать legacy/canonical.",
+  "compatibilityPeriod": "Legacy adapter (chatbot.chat, chatbot.llm, chatbot.retrieval) удалён в O07 после завершённого цикла миграции всех потребителей: dashboards, recording rules и alerts читают только canonical families. v1 JSON projection (ChatTimings/tookMs) сохраняется до согласованного O08. Историческое соответствие имён — в observability/o02/README.md.",
   "metrics": [
     {
       "name": "chatbot.chat.request",
@@ -156,7 +156,7 @@
       "compatibility": "canonical",
       "maxLabelCombinations": 45,
       "maxSeries": 675,
-      "notes": "research-agentic canonical шире прежнего chatbot.llm{operation=research-agentic}; legacy adapter сохраняет отдельные start/stop около createObject.",
+      "notes": "research-agentic canonical шире прежнего chatbot.llm{operation=research-agentic} (legacy adapter удалён в O07; историческое окно — observability/o02/README.md).",
       "operationBoundaries": {
         "draft-answer": "Перед настройкой runner и подготовкой prompt до готового GroundedAnswerDraft, включая binding/prose recovery и synthetic delta. Empty evidence не AI operation.",
         "draft-answer-stream": "Перед настройкой runner и подготовкой prompt до завершения stream aggregation и GroundedAnswerDraft либо terminal error/cancel; не до возврата Flux.",
@@ -811,77 +811,6 @@
       "maxLabelCombinations": 7,
       "maxSeries": 7,
       "notes": "O04: фоновый immutable snapshot каждые 5 секунд; age публикуется отдельно. Scrape не сканирует registry и не берёт index lock."
-    },
-    {
-      "name": "chatbot.chat",
-      "type": "timer",
-      "unit": "seconds",
-      "labels": {
-        "grounding": [
-          "grounded",
-          "partial",
-          "insufficient_evidence"
-        ],
-        "mode": [
-          "sync",
-          "stream"
-        ],
-        "answerMode": [
-          "deterministic",
-          "agentic"
-        ]
-      },
-      "boundary": "Только успешный run; от run entry до конца agent invocation, включает conversation wait, исключает последующие diagnostics/history/SSE sends. Запись после cancellation check/history.",
-      "owner": "application",
-      "histogram": null,
-      "compatibility": "legacy",
-      "maxLabelCombinations": 12,
-      "maxSeries": 72,
-      "notes": ""
-    },
-    {
-      "name": "chatbot.llm",
-      "type": "timer",
-      "unit": "seconds",
-      "labels": {
-        "operation": [
-          "draft-answer",
-          "draft-answer-stream",
-          "conversation-query-rewrite",
-          "expand-search-rewrite",
-          "expand-search-hyde",
-          "decompose-question",
-          "compare-sources",
-          "research-agentic",
-          "repair-agentic-answer"
-        ]
-      },
-      "boundary": "Прежние try/finally прикладных AI operations; research-agentic только createObject tool loop, repair отдельно. Не provider latency.",
-      "owner": "application",
-      "histogram": null,
-      "compatibility": "legacy",
-      "maxLabelCombinations": 9,
-      "maxSeries": 54,
-      "notes": ""
-    },
-    {
-      "name": "chatbot.retrieval",
-      "type": "timer",
-      "unit": "seconds",
-      "labels": {
-        "mode": [
-          "vector",
-          "text",
-          "hybrid"
-        ]
-      },
-      "boundary": "Только успешный search entry до после trace store record; отличие от JSON total: поздний clock read.",
-      "owner": "application",
-      "histogram": null,
-      "compatibility": "legacy",
-      "maxLabelCombinations": 3,
-      "maxSeries": 18,
-      "notes": ""
     },
     {
       "name": "chatbot.index.maintenance",

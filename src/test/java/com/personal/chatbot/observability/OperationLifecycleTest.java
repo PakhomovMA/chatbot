@@ -8,7 +8,6 @@ import com.personal.chatbot.models.retrieval.RetrievalMode;
 import com.personal.chatbot.support.TestObservations;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Timer;
-import io.micrometer.core.instrument.search.MeterNotFoundException;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 
@@ -17,7 +16,6 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * O02 gate: the boundaries, outcomes and terminal records of the canonical measurements
@@ -56,11 +54,6 @@ class OperationLifecycleTest {
         assertThat(meters.get("chatbot.chat.wait").tag("outcome", "success").timer().totalTime(
                 TimeUnit.MILLISECONDS)).isEqualTo(300);
 
-        // The legacy timer keeps the boundary it had: up to the end of the agent invocation, and only
-        // for a run that answered. It is a different measurement, not a second copy of the one above.
-        assertThat(meters.get("chatbot.chat").tags("grounding", "grounded", "mode", "sync",
-                        "answerMode", "deterministic").timer()
-                .totalTime(TimeUnit.MILLISECONDS)).isEqualTo(1000);
         assertThat(timings).isEqualTo(new ChatTimings(200, 800, 1000));
     }
 
@@ -77,8 +70,6 @@ class OperationLifecycleTest {
         assertThat(meters.get("chatbot.chat.request").tag("outcome", "cancelled").timer().count()).isEqualTo(1);
         assertThat(meters.get("chatbot.chat.request").tag("outcome", "timeout").timer().count()).isEqualTo(1);
         assertThat(meters.get("chatbot.chat.request").tag("grounding", "none").timers()).hasSize(2);
-        // Neither is a successful run, so the legacy timer never saw them at all.
-        assertThatThrownBy(() -> meters.get("chatbot.chat").timer()).isInstanceOf(MeterNotFoundException.class);
     }
 
     @Test
@@ -107,25 +98,6 @@ class OperationLifecycleTest {
         // A best-effort branch of a request nobody is waiting for ended in that, not in a fallback.
         assertThat(meters.get("chatbot.ai.operation").tags("operation", "research-agentic", "outcome", "cancelled")
                 .timer().count()).isEqualTo(1);
-        // The legacy timer recorded whatever the operation ended in, as its try/finally always did.
-        assertThat(meters.find("chatbot.llm").timers().stream().mapToLong(Timer::count).sum()).isEqualTo(4);
-    }
-
-    @Test
-    void theAgenticLegacyTimerKeepsTheToolLoopWindowInsideTheWiderOperation() {
-        try (Measured research = observed.chatObservations().startAiOperation(AiOperation.RESEARCH_AGENTIC)) {
-            observed.advance(Duration.ofMillis(500)); // seed decomposition, before the tool loop
-            research.legacyBegins();
-            observed.advance(Duration.ofMillis(2000)); // the tool loop the old timer measured
-            research.legacyEnds();
-            observed.advance(Duration.ofMillis(300)); // mapping, fallback retrieval and the repair
-            research.succeeded();
-        }
-
-        assertThat(meters.get("chatbot.ai.operation").tags("operation", "research-agentic", "outcome", "success")
-                .timer().totalTime(TimeUnit.MILLISECONDS)).isEqualTo(2800);
-        assertThat(meters.get("chatbot.llm").tag("operation", "research-agentic").timer()
-                .totalTime(TimeUnit.MILLISECONDS)).isEqualTo(2000);
     }
 
     @Test
@@ -144,7 +116,6 @@ class OperationLifecycleTest {
                 .tags("operation", "conversation-query-rewrite", "outcome", "fallback").timer().count()).isEqualTo(1);
         assertThat(meters.get("chatbot.chat.request").tag("outcome", "success").timer().count()).isEqualTo(1);
         assertThat(meters.get("chatbot.chat.query.rewrite").tag("outcome", "fallback").counter().count()).isEqualTo(1);
-        assertThat(meters.get("chatbot.chat").timer().count()).isEqualTo(1);
     }
 
     @Test
@@ -164,9 +135,6 @@ class OperationLifecycleTest {
         assertThat(meters.get("chatbot.retrieval.search").tags("mode", "vector", "outcome", "error").timer()
                 .count()).isEqualTo(1);
         assertThat(meters.get("chatbot.retrieval.hits").summary().count()).isEqualTo(1);
-        // The legacy timer counted the passes that came back with something, and only those.
-        assertThat(meters.get("chatbot.retrieval").tag("mode", "hybrid").timer().count()).isEqualTo(1);
-        assertThat(meters.find("chatbot.retrieval").tag("mode", "vector").timer()).isNull();
     }
 
     @Test
@@ -210,24 +178,6 @@ class OperationLifecycleTest {
         }
         assertThat(meters.get("chatbot.ai.operation.active").tag("operation", "research-agentic")
                 .longTaskTimer().activeTasks()).isZero();
-    }
-
-    @Test
-    void theLegacyNamesCanBeSwitchedOff() {
-        SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        Observations plumbing = Observations.standalone(registry);
-        ChatObservations chat = new ChatObservations(new Observations(plumbing.observationRegistry(), registry,
-                plumbing.clock(), LegacyMetrics.DISABLED));
-        try (ChatRun run = chat.startRun(false, AnswerMode.DETERMINISTIC)) {
-            run.succeeded(Grounding.GROUNDED);
-        }
-        try (Measured drafted = chat.startAiOperation(AiOperation.DRAFT_ANSWER)) {
-            drafted.succeeded();
-        }
-
-        assertThat(registry.get("chatbot.chat.request").timer().count()).isEqualTo(1);
-        assertThat(registry.find("chatbot.chat").timer()).isNull();
-        assertThat(registry.find("chatbot.llm").timer()).isNull();
     }
 
     @Test

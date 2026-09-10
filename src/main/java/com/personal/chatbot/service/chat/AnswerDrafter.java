@@ -61,7 +61,6 @@ public class AnswerDrafter {
                         .withLlm(LlmOptions.withDefaultLlm().withTemperature(settings.temperature()));
                 String userPrompt = prompt.build(question.question(), question.history(), evidence.hits(),
                         evidence.comparison());
-                operation.legacyBegins(); // where chatbot.llm has always started: after the prompt is built
                 AnswerStreamSink sink = question.stream();
                 if (sink != null && runner.supportsStreaming()) {
                     operation.operation(AiOperation.DRAFT_ANSWER_STREAM);

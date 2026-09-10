@@ -4,6 +4,27 @@
   "tags": [
     "chatbot"
   ],
+  "links": [
+    {
+      "type": "dashboard",
+      "title": "Chatbot dashboards",
+      "tags": [
+        "chatbot"
+      ],
+      "asDropdown": true,
+      "keepTime": true,
+      "includeVars": true,
+      "icon": "external link"
+    },
+    {
+      "type": "link",
+      "title": "Open Langfuse",
+      "url": "http://127.0.0.1:3000",
+      "targetBlank": true,
+      "icon": "external link",
+      "tooltip": "Trace lookup by traceId happens in Langfuse. Metrics carry no traceId, so a panel cannot deep-link into a trace; Grafana has no trace store here because Tempo is deliberately not enabled."
+    }
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,

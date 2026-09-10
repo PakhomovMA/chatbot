@@ -67,3 +67,12 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: Collector failed to accept spans it received
+      # No `for`: the collector SDK emits these counters only once the first span is lost, and a
+      # one-time drop keeps increase[5m] positive for exactly five minutes, so a hold-down could
+      # outlast the signal itself. Drops after the bounded retry (max_elapsed_time 5m) and enqueue
+      # failures are events, and each of them means telemetry is gone for good.
+      - alert: TraceExporterDrops
+        expr: sum by (job, exporter) (increase(otelcol_exporter_send_failed_spans{job="otel-collector"}[5m]) or increase(otelcol_exporter_enqueue_failed_spans{job="otel-collector"}[5m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: Collector is dropping spans it could not deliver after bounded retries

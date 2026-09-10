@@ -15,7 +15,7 @@ correlation and optional tracing.
 |---|---|
 | JDK 25 | e.g. `brew install openjdk@25` (Gradle toolchain resolves it) |
 | Node.js 20+ with npm | builds the Vue frontend during `./gradlew build` (skip with `-PskipFrontend`) |
-| Ollama ≥ 0.11 running on `http://localhost:11434` | `ollama pull qwen3:14b` (LLM). `embeddinggemma:300m` is optional (fallback embedding provider, Phase 1) |
+| Ollama ≥ 0.11 running on `http://localhost:11434` | `ollama pull gemma4:12b` (default LLM). `embeddinggemma:300m` is optional (fallback embedding provider, Phase 1) |
 | EmbeddingGemma ONNX files | Required with the default provider: `model.onnx`, `model.onnx_data` (fp32, 1.2 GB) and `tokenizer.json` from [onnx-community/embeddinggemma-300m-ONNX](https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX) under `~/.chatbot/models/embeddinggemma-300m/` (see below) |
 
 Everything is stored under `~/.chatbot` (`chatbot.data-dir`): Lucene index, document registry, uploaded originals, model files.
@@ -54,7 +54,7 @@ cd frontend && npm run dev                      # http://localhost:5173, proxies
 ```
 
 The app binds to `127.0.0.1:8080` only. On startup Embabel logs the Ollama models it discovered
-(`qwen3:14b` must be among them; it is the `embabel.models.default-llm`).
+(`gemma4:12b` must be among them; it is the `embabel.models.default-llm`).
 
 Health: `curl http://127.0.0.1:8080/actuator/health`
 
@@ -185,8 +185,9 @@ alone does not establish a developer. See `docs/agentic-decomposition-fix.md` fo
 
 The **Retrieval** tab of the UI (`/playground`) runs the same search interactively. Health components
 (`embedding`, `luceneIndex`, `ollama`), `chatbot.*` and `embabel.*` metrics, log correlation via `X-Request-Id`,
-the optional `observability` profile (Embabel spans exported to the log), and the `metrics` profile
-(separate management listener on 8081, provisioned Prometheus/Grafana stack) are described in
+the optional `observability` profile (Embabel spans exported to the log), the `metrics` profile
+(separate management listener on 8081, provisioned Prometheus/Grafana stack) and the `observability-otlp`
+profile (traces via local OpenTelemetry Collector to Langfuse, compose profile `llm`) are described in
 [`docs/observability.md`](docs/observability.md).
 
 Retrieval is deterministic: vector k-NN and BM25 candidates are fused with reciprocal rank fusion
@@ -217,7 +218,7 @@ Chunk ids are `<documentId>:<version>:<sequence>`; chunk text carries `Document:
 | Property | Default | Meaning |
 |---|---|---|
 | `chatbot.data-dir` | `~/.chatbot` | Root for all persistent local state |
-| `embabel.models.default-llm` | `qwen3:14b` | Ollama model used by agents |
+| `embabel.models.default-llm` | `gemma4:12b` | Ollama model used by agents |
 | `embabel.agent.platform.models.ollama.base-url` | `http://localhost:11434` | Ollama endpoint |
 | `server.address` | `127.0.0.1` | Loopback-only binding |
 | `chatbot.embedding.provider` | `onnx` | `onnx` (in-process EmbeddingGemma) or `ollama` (fallback) |

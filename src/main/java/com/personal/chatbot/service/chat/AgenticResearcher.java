@@ -98,8 +98,7 @@ public class AgenticResearcher {
 
     /**
      * The whole branch is one AI operation: the seed decomposition, the tool loop, the mapping and the
-     * repair below are its parts, not operations of the request in their own right. The narrower window
-     * the legacy {@code chatbot.llm} timer measured — the tool loop alone — is marked inside it.
+     * repair below are its parts, not operations of the request in their own right.
      */
     public AnswerAttempt research(UserQuestion question, OperationContext context) {
         try (Measured research = observations.startAiOperation(AiOperation.RESEARCH_AGENTIC)) {
@@ -149,7 +148,6 @@ public class AgenticResearcher {
         }
         AgenticDraft draft;
         question.abortIfCancelled();
-        research.legacyBegins();
         // The searches the model may run are a budget, not a line in the prompt: the instructions name
         // the same number, and this is what holds the model to it.
         SearchBudget budget = new SearchBudget(settings.agenticMaxSearches(), question.messageId(), observations);
@@ -172,9 +170,6 @@ public class AgenticResearcher {
                     question.messageId(), Throwables.rootMessage(e));
             observations.agenticDraftUnparsable();
             draft = new AgenticDraft("", List.of(), true, null);
-        } finally {
-            // The legacy timer stopped here, before the mapping, the fallback and the repair below.
-            research.legacyEnds();
         }
         question.abortIfCancelled();
 

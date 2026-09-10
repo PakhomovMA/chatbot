@@ -36,7 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * O02 gate, in the running application: a real request through the controller, the agent and
  * deterministic retrieval publishes the canonical measurements of
- * docs/observability/metric-catalog.json, and the legacy names beside them.
+ * docs/observability/metric-catalog.json.
  *
  * <p>Tracing is off in this profile and the sampling probability is set to zero here on purpose:
  * metrics and the diagnostics of the response must not depend on a trace pipeline, a sampler or an
@@ -77,14 +77,13 @@ class CanonicalMetricsTest extends AbstractChatbotIntegrationTest {
     }
 
     @Test
-    void anAnsweredRunPublishesEveryCanonicalBoundaryAndTheLegacyNamesBesideThem() throws Exception {
+    void anAnsweredRunPublishesEveryCanonicalBoundary() throws Exception {
         String question = "How do I restart the payment service?";
         whenCreateObject(p -> p.contains("Question: " + question), GroundedAnswerDraft.class)
                 .thenReturn(new GroundedAnswerDraft("Run `systemctl restart payments` [1].", List.of(1), true, null));
         long runs = count("chatbot.chat.request", "outcome", "success");
         long drafts = count("chatbot.ai.operation", "operation", "draft-answer");
         long passes = count("chatbot.retrieval.search", "outcome", "success");
-        long legacyRuns = count("chatbot.chat", "mode", "sync");
 
         ask(question).andExpect(status().isOk()).andExpect(jsonPath("$.grounding").value("GROUNDED"));
 
@@ -93,10 +92,6 @@ class CanonicalMetricsTest extends AbstractChatbotIntegrationTest {
         assertThat(count("chatbot.ai.operation", "operation", "draft-answer")).isEqualTo(drafts + 1);
         assertThat(count("chatbot.retrieval.search", "outcome", "success")).isEqualTo(passes + 1);
         assertThat(meters.get("chatbot.retrieval.hits").summary().count()).isPositive();
-        // The same run, under the names the old dashboards read; a different population, never a sum.
-        assertThat(count("chatbot.chat", "mode", "sync")).isEqualTo(legacyRuns + 1);
-        assertThat(count("chatbot.llm", "operation", "draft-answer")).isEqualTo(drafts + 1);
-        assertThat(count("chatbot.retrieval", "mode", "hybrid")).isPositive();
 
         // The catalog's label set, and nothing the standard handler added on top of it.
         assertThat(meters.get("chatbot.chat.request").tag("outcome", "success").timer().getId().getTags())
@@ -128,21 +123,16 @@ class CanonicalMetricsTest extends AbstractChatbotIntegrationTest {
     }
 
     @Test
-    void aFailedRunEndsInAnErrorAndStaysOutOfTheLegacyTimer() throws Exception {
+    void aFailedRunEndsInAnError() throws Exception {
         String question = "How is the service stopped?";
         whenCreateObject(p -> p.contains("Question: " + question), GroundedAnswerDraft.class)
                 .thenThrow(new IllegalStateException("the model is unreachable"));
-        long legacySuccesses = count("chatbot.chat", "mode", "sync");
         long errors = count("chatbot.chat.request", "outcome", "error");
-        long attempts = count("chatbot.llm", "operation", "draft-answer");
 
         ask(question).andExpect(status().is5xxServerError());
 
         assertThat(count("chatbot.chat.request", "outcome", "error")).isEqualTo(errors + 1);
         assertThat(count("chatbot.ai.operation", "operation", "draft-answer", "outcome", "error")).isPositive();
-        // The legacy chat timer only ever saw runs that answered; the legacy AI timer saw every attempt.
-        assertThat(count("chatbot.chat", "mode", "sync")).isEqualTo(legacySuccesses);
-        assertThat(count("chatbot.llm", "operation", "draft-answer")).isGreaterThan(attempts);
         assertThat(meters.get("chatbot.chat.active").gauge().value()).isZero();
     }
 
