@@ -22,3 +22,11 @@ server:
   port: 0
 embabel.agent.platform.observability:
   tracing-enabled: false
+
+# An action that throws is retried by the platform (ActionQos: 5 attempts, 10 s backoff × 5, capped at
+# 60 s), which is what a flaky model deserves and a mock never does: a stub that throws throws again on
+# every attempt, so the only thing the retries add is three minutes of sleeping. One attempt per action
+# keeps a test that asserts a failure — a truncated JSON reply, an unreachable model — as fast as one
+# that asserts an answer.
+embabel.agent.platform.action-qos.default:
+  max-attempts: 1
