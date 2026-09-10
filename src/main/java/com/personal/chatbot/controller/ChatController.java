@@ -19,6 +19,7 @@ import com.personal.chatbot.service.sse.SseConnection;
 import com.personal.chatbot.service.sse.SseConnections;
 import jakarta.validation.Valid;
 import org.jspecify.annotations.Nullable;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -75,7 +76,7 @@ public class ChatController implements ActiveWork {
     private final Set<ChatCancellation> running = ConcurrentHashMap.newKeySet();
     private boolean stopping;
 
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     public ChatController(ChatService chatService, SseConnections connections, ChatbotProperties.Chat settings,
                           ChatObservations observations) {
         this(chatService, connections, settings, observations,
@@ -152,7 +153,7 @@ public class ChatController implements ActiveWork {
                 try {
                     chatService.stream(request, event -> {
                         boolean queued = opened.send(event.type(), null, event);
-                        if (queued && event instanceof ChatStreamEvent.Delta delta && !delta.text().isEmpty()) {
+                        if (queued && event instanceof ChatStreamEvent.Delta(String text) && !text.isEmpty()) {
                             stream.delta();
                         }
                         if (queued && event instanceof ChatStreamEvent.Final) stream.finished(Outcome.SUCCESS);

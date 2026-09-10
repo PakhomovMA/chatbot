@@ -1,6 +1,7 @@
 package com.personal.chatbot.observability;
 
 import io.opentelemetry.sdk.trace.export.SpanExporter;
+import org.jspecify.annotations.NonNull;
 import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
@@ -21,7 +22,7 @@ class ContentPolicyConfiguration {
                 .orElse(List.of());
         TelemetrySanitizer sanitizer = new TelemetrySanitizer(policy, redactions);
         return new BeanPostProcessor() {
-            @Override public Object postProcessAfterInitialization(Object bean, String name) {
+            @Override public Object postProcessAfterInitialization(@NonNull Object bean, @NonNull String name) {
                 if (bean instanceof com.embabel.agent.observability.ObservabilityProperties properties) {
                     properties.setCaptureMessageContent(policy == ContentPolicy.REDACTED_CONTENT);
                     properties.setTraceHttpDetails(false);

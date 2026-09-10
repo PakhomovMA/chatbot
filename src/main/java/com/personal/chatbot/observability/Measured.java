@@ -5,6 +5,7 @@ import io.micrometer.common.KeyValues;
 import io.micrometer.observation.Observation;
 import io.micrometer.observation.ObservationConvention;
 import io.micrometer.observation.ObservationRegistry;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -236,12 +237,12 @@ public final class Measured implements AutoCloseable {
     private static final class Convention implements ObservationConvention<Context> {
 
         @Override
-        public boolean supportsContext(Observation.Context context) {
+        public boolean supportsContext(Observation.@NonNull Context context) {
             return context instanceof Context;
         }
 
         @Override
-        public KeyValues getLowCardinalityKeyValues(Context context) {
+        public @NonNull KeyValues getLowCardinalityKeyValues(Context context) {
             List<KeyValue> values = new ArrayList<>();
             for (String key : context.operation.labelKeys()) {
                 values.add(KeyValue.of(key, context.labels.getOrDefault(key, MeasuredOperation.Labels.NONE)));

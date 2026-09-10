@@ -6,6 +6,7 @@ import io.opentelemetry.context.Context;
 import io.opentelemetry.sdk.trace.ReadWriteSpan;
 import io.opentelemetry.sdk.trace.ReadableSpan;
 import io.opentelemetry.sdk.trace.SpanProcessor;
+import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.MDC;
 
@@ -57,12 +58,13 @@ final class ExecutionAttributes implements SpanProcessor {
                 value = inherited(parent, key.getValue());
             }
             if (value != null && !value.isBlank()) {
-                span.setAttribute(key.getValue(), value.length() > MAX_LENGTH ? value.substring(0, MAX_LENGTH) : value);
+                String attribute = value.length() > MAX_LENGTH ? value.substring(0, MAX_LENGTH) : value;
+                span.setAttribute(key.getValue(), attribute);
                 // The HTTP observation starts before the controller knows the conversation/message.
                 // Enrich its still-open local parent when the chat boundary first learns them.
                 if (parent instanceof ReadWriteSpan writable && !parent.hasEnded()
                         && parent.getAttribute(key.getValue()) == null) {
-                    writable.setAttribute(key.getValue(), value.length() > MAX_LENGTH ? value.substring(0, MAX_LENGTH) : value);
+                    writable.setAttribute(key.getValue(), attribute);
                 }
             }
         }
@@ -78,7 +80,7 @@ final class ExecutionAttributes implements SpanProcessor {
     }
 
     @Override
-    public void onEnd(ReadableSpan span) {
+    public void onEnd(@NonNull ReadableSpan span) {
         // Nothing: this processor enriches, it does not export.
     }
 

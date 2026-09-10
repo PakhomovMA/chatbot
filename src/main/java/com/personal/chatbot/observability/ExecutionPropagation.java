@@ -4,6 +4,7 @@ import io.micrometer.context.ContextRegistry;
 import io.micrometer.context.ThreadLocalAccessor;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import org.jspecify.annotations.NonNull;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -12,15 +13,15 @@ import java.util.Map;
 @Component
 final class ExecutionPropagation {
     private final ThreadLocalAccessor<Map<String, String>> metadata = new ThreadLocalAccessor<>() {
-        public Object key() { return "chatbot.execution.metadata"; }
+        public @NonNull Object key() { return "chatbot.execution.metadata"; }
         public Map<String, String> getValue() { return ExecutionContext.metadata(); }
-        public void setValue(Map<String, String> value) { ExecutionContext.restore(value); }
+        public void setValue(@NonNull Map<String, String> value) { ExecutionContext.restore(value); }
         public void setValue() { ExecutionContext.restore(Map.of()); }
     };
     private final ThreadLocalAccessor<ExecutionDiagnostics> diagnostics = new ThreadLocalAccessor<>() {
-        public Object key() { return "chatbot.execution.diagnostics"; }
+        public @NonNull Object key() { return "chatbot.execution.diagnostics"; }
         public ExecutionDiagnostics getValue() { return ExecutionDiagnostics.current(); }
-        public void setValue(ExecutionDiagnostics value) { ExecutionDiagnostics.restore(value); }
+        public void setValue(@NonNull ExecutionDiagnostics value) { ExecutionDiagnostics.restore(value); }
         public void setValue() { ExecutionDiagnostics.restore(null); }
     };
 

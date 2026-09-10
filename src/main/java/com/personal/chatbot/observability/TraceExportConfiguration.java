@@ -1,13 +1,17 @@
 package com.personal.chatbot.observability;
 
 import com.personal.chatbot.config.ChatbotProperties;
+import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.exporter.logging.LoggingSpanExporter;
+import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.SpanProcessor;
 import io.opentelemetry.sdk.trace.export.SpanExporter;
 import org.springframework.beans.factory.ListableBeanFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.bind.Bindable;
+import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -32,17 +36,17 @@ class TraceExportConfiguration {
 
     /** Embabel's conditional default resource otherwise wins before Boot applies resource attributes. */
     @Bean
-    io.opentelemetry.sdk.resources.Resource executionResource(Environment environment) {
-        var attributes = io.opentelemetry.api.common.Attributes.builder()
+    Resource executionResource(Environment environment) {
+        var attributes = Attributes.builder()
                 .put("service.name", environment.getProperty("spring.application.name", "chatbot"))
                 .put("deployment.environment.name", environment.getProperty("CHATBOT_ENVIRONMENT", "local"))
                 .put("service.version", environment.getProperty("CHATBOT_RELEASE", "dev"));
-        org.springframework.boot.context.properties.bind.Binder.get(environment)
+        Binder.get(environment)
                 .bind("management.opentelemetry.resource-attributes",
-                        org.springframework.boot.context.properties.bind.Bindable.mapOf(String.class, String.class))
+                        Bindable.mapOf(String.class, String.class))
                 .orElse(java.util.Map.of()).forEach(attributes::put);
-        return io.opentelemetry.sdk.resources.Resource.getDefault()
-                .merge(io.opentelemetry.sdk.resources.Resource.create(attributes.build()));
+        return Resource.getDefault()
+                .merge(Resource.create(attributes.build()));
     }
 
     /**

@@ -4,6 +4,7 @@ import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.config.MeterFilter;
 import io.micrometer.core.instrument.distribution.DistributionStatisticConfig;
+import org.jspecify.annotations.NonNull;
 
 import java.util.List;
 import java.util.Map;
@@ -49,7 +50,7 @@ public final class MeterSchema {
     public static MeterFilter models(Set<String> models) {
         return new MeterFilter() {
             @Override
-            public Meter.Id map(Meter.Id id) {
+            public Meter.@NonNull Id map(Meter.@NonNull Id id) {
                 if (!id.getName().startsWith("chatbot.") && !id.getName().startsWith("gen_ai.")) {
                     return id;
                 }
@@ -77,7 +78,7 @@ public final class MeterSchema {
     public static MeterFilter labels() {
         return new MeterFilter() {
             @Override
-            public Meter.Id map(Meter.Id id) {
+            public Meter.@NonNull Id map(Meter.@NonNull Id id) {
                 if (!id.getName().startsWith("chatbot.") || id.getTag("error") == null) {
                     return id;
                 }
@@ -95,7 +96,7 @@ public final class MeterSchema {
     public static MeterFilter histograms(boolean enabled) {
         return new MeterFilter() {
             @Override
-            public DistributionStatisticConfig configure(Meter.Id id, DistributionStatisticConfig config) {
+            public DistributionStatisticConfig configure(Meter.@NonNull Id id, @NonNull DistributionStatisticConfig config) {
                 double[] seconds = enabled ? HISTOGRAMS.get(id.getName()) : null;
                 if (seconds == null || id.getType() != Meter.Type.TIMER) {
                     return config;

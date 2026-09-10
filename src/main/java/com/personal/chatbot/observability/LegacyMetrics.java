@@ -6,6 +6,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.time.Duration;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -68,7 +69,7 @@ public final class LegacyMetrics {
 
     private void record(String name, Duration elapsed, String... tags) {
         timers.computeIfAbsent(name + '/' + String.join("/", tags),
-                        _ -> Timer.builder(name).tags(tags).register(meters))
+                        _ -> Timer.builder(name).tags(tags).register(Objects.requireNonNull(meters)))
                 .record(elapsed);
     }
 

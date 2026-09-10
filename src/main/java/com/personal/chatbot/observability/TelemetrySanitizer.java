@@ -1,8 +1,8 @@
 package com.personal.chatbot.observability;
 
-import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributeType;
 import io.opentelemetry.api.common.Attributes;
+import io.opentelemetry.sdk.common.InstrumentationScopeInfo;
 import io.opentelemetry.sdk.trace.data.DelegatingSpanData;
 import io.opentelemetry.sdk.trace.data.EventData;
 import io.opentelemetry.sdk.trace.data.LinkData;
@@ -14,7 +14,9 @@ import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-/** Last boundary before every exporter, including logging. No span is dropped: ancestry survives. */
+/**
+ * Last boundary before every exporter, including logging. No span is dropped: ancestry survives.
+ */
 public final class TelemetrySanitizer {
     public static final int MAX_TEXT = 2048;
     public static final int MAX_ATTRIBUTES = 48;
@@ -31,11 +33,11 @@ public final class TelemetrySanitizer {
             "input.value", "output.value", "tool.arguments", "tool.result");
     private static final Pattern SECRETS = Pattern.compile(
             "(?i)(?:bearer|basic)\\s+[A-Za-z0-9+/=._-]+"
-            + "|(?:[\\\"']?(?:password|passwd|secret|api[_-]?key|access[_-]?token|authorization)[\\\"']?\\s*[:=]\\s*)(?:[\\\"][^\\\"]*[\\\"]|[^\\s,;}]+)"
-            + "|(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]+"
-            + "|eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+"
-            + "|[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}"
-            + "|https?://[^\\s/@]+:[^\\s/@]+@");
+                    + "|[\"']?(?:password|passwd|secret|api[_-]?key|access[_-]?token|authorization)[\"']?\\s*[:=]\\s*(?:\"[^\"]*\"|[^\\s,;}]+)"
+                    + "|(?:sk-|ghp_|github_pat_)[A-Za-z0-9_-]+"
+                    + "|eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+"
+                    + "|[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,}"
+                    + "|https?://[^\\s/@]+:[^\\s/@]+@");
     private final ContentPolicy policy;
     private final List<String> redactions;
 
@@ -86,28 +88,62 @@ public final class TelemetrySanitizer {
         Resource resource = Resource.create(attributes(source.getResource().getAttributes(), false));
         String name = safeName(source.getName());
         return new DelegatingSpanData(source) {
-            @Override public io.opentelemetry.sdk.common.InstrumentationScopeInfo getInstrumentationScopeInfo() {
-                return io.opentelemetry.sdk.common.InstrumentationScopeInfo.create("chatbot.telemetry");
+            @Override
+            public InstrumentationScopeInfo getInstrumentationScopeInfo() {
+                return InstrumentationScopeInfo.create("chatbot.telemetry");
             }
-            @Override public io.opentelemetry.sdk.common.InstrumentationLibraryInfo getInstrumentationLibraryInfo() {
-                return io.opentelemetry.sdk.common.InstrumentationLibraryInfo.create("chatbot.telemetry", null);
+
+            @Override
+            public String getName() {
+                return name;
             }
-            @Override public String getName() { return name; }
-            @Override public Attributes getAttributes() { return safe; }
-            @Override public Resource getResource() { return resource; }
-            @Override public List<EventData> getEvents() { return events; }
-            @Override public List<LinkData> getLinks() { return links; }
-            @Override public StatusData getStatus() { return StatusData.create(source.getStatus().getStatusCode(), ""); }
-            @Override public int getTotalAttributeCount() { return safe.size(); }
-            @Override public int getTotalRecordedEvents() { return events.size(); }
-            @Override public int getTotalRecordedLinks() { return links.size(); }
+
+            @Override
+            public Attributes getAttributes() {
+                return safe;
+            }
+
+            @Override
+            public Resource getResource() {
+                return resource;
+            }
+
+            @Override
+            public List<EventData> getEvents() {
+                return events;
+            }
+
+            @Override
+            public List<LinkData> getLinks() {
+                return links;
+            }
+
+            @Override
+            public StatusData getStatus() {
+                return StatusData.create(source.getStatus().getStatusCode(), "");
+            }
+
+            @Override
+            public int getTotalAttributeCount() {
+                return safe.size();
+            }
+
+            @Override
+            public int getTotalRecordedEvents() {
+                return events.size();
+            }
+
+            @Override
+            public int getTotalRecordedLinks() {
+                return links.size();
+            }
         };
     }
 
     private String safeName(String name) {
         // Framework names contain configured action/model identifiers, never prompts. Unknown dynamic
         // names remain in the tree under a neutral name rather than becoming an unreviewed content path.
-        if (name.matches("(?:chatbot\\.[a-z.]+|(?:agent|action|chat|tool|embedding|embeddings|llm|llm.invocation|planning|goal|http) [A-Za-z0-9_.:/ -]{1,100}|(?:tool-loop|tool-loop-completed|COMPLETED|knowledge_base_(?:vectorSearch|textSearch|broadenChunk|zoomOut|listSections|readSection))|(?:GET|POST|PUT|DELETE|PATCH) /[A-Za-z0-9/{}._-]*)")) {
+        if (name.matches("chatbot\\.[a-z.]+|(?:agent|action|chat|tool|embedding|embeddings|llm|llm.invocation|planning|goal|http) [A-Za-z0-9_.:/ -]{1,100}|(?:tool-loop|tool-loop-completed|COMPLETED|knowledge_base_(?:vectorSearch|textSearch|broadenChunk|zoomOut|listSections|readSection))|(?:GET|POST|PUT|DELETE|PATCH) /[A-Za-z0-9/{}._-]*")) {
             return text(name);
         }
         return "operation";

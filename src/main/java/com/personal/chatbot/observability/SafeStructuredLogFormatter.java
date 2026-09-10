@@ -1,6 +1,7 @@
 package com.personal.chatbot.observability;
 
 import ch.qos.logback.classic.spi.ILoggingEvent;
+import org.jspecify.annotations.NonNull;
 import org.springframework.boot.logging.structured.StructuredLogFormatter;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -10,7 +11,7 @@ import java.util.LinkedHashMap;
 public final class SafeStructuredLogFormatter implements StructuredLogFormatter<ILoggingEvent> {
     private final JsonMapper json = JsonMapper.builder().build();
 
-    @Override public String format(ILoggingEvent event) {
+    @Override public @NonNull String format(ILoggingEvent event) {
         var fields = new LinkedHashMap<String, Object>();
         fields.put("timestamp", event.getInstant().toString());
         fields.put("level", event.getLevel().toString());
