@@ -5,7 +5,8 @@ EmbeddingGemma (in-process ONNX) + Lucene via `embabel-agent-rag-lucene`, Vue 3 
 Key decision: retrieval, parsing, chunking, embedding and indexing are deterministic Spring services;
 Embabel only orchestrates LLM actions on top of them. `docs/system-plan.md` is the authoritative plan;
 its phases 0–9d are done. Observability hardening is tracked in `docs/observability-plan.md`
-(checkpoints O01–O07 done; O08 awaits an API decision).
+(checkpoints O01–O07 done; O08 awaits an API decision). Result caching is tracked in
+`docs/cache-plan.md` (K01–K02 done: KB revision, pipeline fingerprint, answer cache).
 
 ## Boundaries
 
@@ -20,7 +21,7 @@ Always:
 Ask first:
 - Changing versions of Embabel, Spring AI, Lucene, onnxruntime or DJL — they are pinned to what
   Embabel 1.5.1 is built against; a mismatch breaks at runtime, not at compile time.
-- Changing an architectural invariant (INV-01..11) or a public `/api` contract from the plan.
+- Changing an architectural invariant (INV-01..12) or a public `/api` contract from the plan.
 - Deleting or rewriting anything under `~/.chatbot` (user's index, registry, uploaded originals, models).
 
 Never:
@@ -29,6 +30,8 @@ Never:
 - Add `embabel-agent-starter-onnx` — it downloads MiniLM and is incompatible with EmbeddingGemma;
   the project has its own `EmbeddingService`.
 - Add an external vector database — Lucene provides BM25 + kNN; the plan forbids it without a concrete need.
+- Put an answer into a cache outside the stale-put guard: it is stored only if the KB revision taken at
+  lookup still holds after verification and the cancellation check (INV-12, `docs/cache-plan.md` §3.1).
 - Use `@EnableAgents` — deprecated for removal in 1.5.1; auto-configuration wires the platform.
 - Edit `chatbot-plan-prompt-ru.md` (original task statement) or anything in `build/`.
 - Commit model files or `~/.chatbot` contents.

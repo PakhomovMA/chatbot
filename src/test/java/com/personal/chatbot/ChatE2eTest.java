@@ -82,6 +82,8 @@ class ChatE2eTest {
         // Both Phase 9d branches ship off (docs/eval-log.md); the tests below are what exercises them.
         registry.add("chatbot.chat.decompose.enabled", () -> "true");
         registry.add("chatbot.chat.compare-sources.enabled", () -> "true");
+        // Every answer here is computed: one served from the cache would hide the run under test.
+        registry.add("chatbot.cache.answer.enabled", () -> "false");
         registry.add("server.port", () -> "0");
     }
 

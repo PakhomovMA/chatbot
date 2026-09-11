@@ -29,4 +29,15 @@ class RetrievalTraceStoreTest {
         assertThat(store.find("1")).isEmpty();
         assertThat(store.find("2")).isPresent();
     }
+
+    /** An answer served from the cache records its retrieval again (docs/cache-plan.md §3.4). */
+    @Test
+    void aResultRecordedAgainMovesToTheFrontInsteadOfAppearingTwice() {
+        RetrievalTraceStore store = new RetrievalTraceStore(3);
+        store.record(result("1"));
+        store.record(result("2"));
+        store.record(result("1"));
+
+        assertThat(store.recent(10)).extracting(RetrievalResult::traceId).containsExactly("1", "2");
+    }
 }

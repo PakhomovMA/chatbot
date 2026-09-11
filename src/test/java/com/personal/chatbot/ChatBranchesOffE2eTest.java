@@ -65,6 +65,7 @@ class ChatBranchesOffE2eTest {
         registry.add("embabel.models.default-llm", ChatE2eTest::llm);
         registry.add("chatbot.chat.decompose.enabled", () -> "false");
         registry.add("chatbot.chat.compare-sources.enabled", () -> "false");
+        registry.add("chatbot.cache.answer.enabled", () -> "false");
         registry.add("server.port", () -> "0");
     }
 

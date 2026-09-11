@@ -12,6 +12,7 @@ Cannot delete superseded blob {}: {}
 Cannot list versions of document {}: {}
 Cannot write hash cache {}: {}
 Chat [{}] {} in {} ms ({} citations, retrieval {} ms{})
+Chat [{}] {} served from the answer cache in {} ms ({} citations, age {} s, revision {})
 Chatbot data directory: {}
 Client of the {} stream went away: {}
 Compared {} sources for [{}]: {}

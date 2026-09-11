@@ -33,10 +33,14 @@ public class RetrievalTraceStore {
      * short: by the time an answer is written, a busy period may already have pushed its own trace
      * out of it, so the run that needs the trace for its response holds on to it itself
      * (docs/observability-plan.md §4.2). Nothing here depends on that having happened.
+     *
+     * <p>A result recorded again — an answer served from the cache brings its retrieval back
+     * (docs/cache-plan.md §3.4) — moves to the front instead of being listed twice.
      */
     public void record(RetrievalResult result) {
         ExecutionDiagnostics.collect(result);
         synchronized (traces) {
+            traces.removeIf(trace -> trace.traceId().equals(result.traceId()));
             traces.addFirst(result);
             while (traces.size() > capacity) {
                 traces.removeLast();

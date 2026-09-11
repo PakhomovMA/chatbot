@@ -92,6 +92,18 @@ public final class ChatRun implements AutoCloseable {
         return new ChatTimings(retrievalMs, Math.max(0, totalMs - retrievalMs), totalMs);
     }
 
+    /**
+     * The run was answered from a cache layer (docs/cache-plan.md §3.4). Nothing was retrieved and no model
+     * was called, and the v1 timings, which cannot say "not measured", say so with zeros rather than
+     * report the whole run as model time. Marks the boundary {@link #agentFinished} marks, and names the
+     * layer on the run's span: a hit and a miss are told apart there, not by a label of the run's timer.
+     */
+    public ChatTimings servedFromCache(CacheObservations.Layer layer) {
+        request.legacyEnds();
+        io.opentelemetry.api.trace.Span.current().setAttribute("chatbot.cache.layer", layer.name().toLowerCase(Locale.ROOT));
+        return new ChatTimings(0, 0, request.legacyElapsed().toMillis());
+    }
+
     /** The run answered; {@code grounding} is how well the answer is backed by evidence. */
     public void succeeded(Grounding grounding) {
         request.label(MeasuredOperation.Labels.GROUNDING, grounding.name().toLowerCase(Locale.ROOT));

@@ -864,3 +864,37 @@ max: это погрешность оценки percentile (3 значащих �
   `decomposition() == null` — `decompose-question` дважды закончился `fallback`.
 - `aQuestionThatComparesTwoDocumentsKeepsBothSidesInTheAnswer`: ответ GROUNDED с двумя цитатами, но без
   `deploy.sh` / `--rollback` / `previous image tag`, которых требует ассерт.
+
+## 2026-09-11 — Answer cache: повтор golden-вопроса (K02)
+
+Gate K02 на реальном стеке: `./gradlew test -PincludeTags=e2e -Pe2e.llm=gemma4:12b --tests '*AnswerCacheE2eTest'`.
+Answer cache включён, в индексе один документ eval-корпуса (`payments-runbook`), режим ответа — default
+из `application.yaml` (agentic). Вопрос «How do I restart the payments service?» задан трижды в новых
+разговорах: sync, sync, SSE. Перед прогоном модель не была загружена в Ollama. Цены — из
+`build/reports/stage-costs/AnswerCacheE2eTest.json` и из часов теста.
+
+| Запрос | Откуда ответ | Часы теста | `chatbot.chat.request` | Вызовы модели |
+|---|---|---:|---:|---:|
+| первый, sync | agent: `research-agentic` 136.3 s, внутри него `repair-agentic-answer` 27.3 s | 136.4 s | 136.4 s | 2 |
+| повтор, sync | answer cache | 14 ms | 2.5 ms | 0 |
+| повтор, SSE | answer cache | 2 ms | 0.9 ms | 0 |
+
+Оба повтора вернули те же answer, grounding (`GROUNDED`), citations (1) и `retrievalTraceId`, новый
+`messageId` и `timings` вида `(0, 0, total)`. Счётчик `chatbot.ai.operation` после первого ответа не
+изменился, SSE-повтор — ровно одно событие `final`. Порог gate (быстрее 200 ms) выполнен с запасом на
+порядок; разница между часами теста и meter-ом — вызов и маппинг ответа вокруг run.
+
+Наблюдения:
+
+- Первый ответ шёл 136 s против 25–46 s агентной ветки в baseline K01. Первый вызов пришёлся на
+  незагруженную модель, и агент дополнительно чинил ответ (`repair-agentic-answer`). На кеш это не влияет:
+  цена hit от цены вычисления не зависит, а экономия тем больше, чем дороже ответ.
+- `timings.retrievalMs` агентного ответа (109 s) снова покрывает весь tool loop — как отмечено в K01.
+
+**Решение: `chatbot.cache.answer.enabled: true` по умолчанию.** Hit заменяет run в десятки секунд
+на миллисекунды. Корректность держат scope (KB revision + pipeline fingerprint) и stale-put guard, а
+не TTL. Кешируется только первый ход, а сбой одной генерации (`INSUFFICIENT_EVIDENCE` при достаточной
+evidence) не записывается. Цена решения: до K07 нет «сгенерировать заново», и повтор того же вопроса в
+течение 24 h возвращает тот же ответ, пока KB не изменится или приложение не перезапустится. Откат —
+`chatbot.cache.answer.enabled: false`. Обоснование полностью — в [cache-plan.md](cache-plan.md),
+«Результат K02».

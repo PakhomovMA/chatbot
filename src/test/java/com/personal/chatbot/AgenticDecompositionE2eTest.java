@@ -52,6 +52,7 @@ class AgenticDecompositionE2eTest {
         registry.add("chatbot.embedding.onnx.model-dir", () -> ChatE2eTest.modelDir().toString());
         registry.add("embabel.models.default-llm", ChatE2eTest::llm);
         registry.add("chatbot.chat.decompose.enabled", () -> "true");
+        registry.add("chatbot.cache.answer.enabled", () -> "false");
         registry.add("server.port", () -> "0");
     }
 

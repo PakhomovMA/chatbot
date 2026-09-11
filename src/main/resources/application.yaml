@@ -120,10 +120,10 @@ chatbot:
     buffer-size: 256
   cache:
     # Result caches (docs/cache-plan.md): finished answers, question-preparation steps, and answers for a
-    # rephrased question. All off: each layer arrives with a checkpoint of its own (K02, K03, K05–K06),
-    # and the answer layer's default is decided at K02 from measurements.
+    # rephrased question. The answer layer is on since K02 (docs/cache-plan.md, K02 result); the others
+    # arrive with checkpoints of their own (K03, K05–K06).
     answer:
-      enabled: false
+      enabled: true                      # first turns only; stored only if the KB revision held (INV-12)
       ttl: 24h                           # an entry is unreachable anyway once the KB revision moves
       max-weight: 16MB                   # total text the entries hold
       follow-ups: false                  # also cache turns with history (the history digest is in the key)

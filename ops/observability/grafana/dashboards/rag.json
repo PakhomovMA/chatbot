@@ -445,6 +445,47 @@
           "mode": "multi"
         }
       }
+    },
+    {
+      "id": 11,
+      "title": "Cache hit ratio",
+      "type": "timeseries",
+      "description": "Hits among the lookups a layer was asked (hit + miss) per layer; bypass is not asked. docs/cache-plan.md §3.6.",
+      "gridPos": {
+        "x": 0,
+        "y": 40,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "chatbot-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (layer) (rate(chatbot_cache_lookup_total{job=\"chatbot\",result=\"hit\"}[5m])) / clamp_min(sum by (layer) (rate(chatbot_cache_lookup_total{job=\"chatbot\",result=~\"hit|miss\"}[5m])), 0.000001)",
+          "legendFormat": "{{layer}}",
+          "range": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
     }
   ]
 }
