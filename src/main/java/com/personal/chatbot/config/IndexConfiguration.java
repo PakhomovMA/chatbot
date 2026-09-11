@@ -29,17 +29,26 @@ class IndexConfiguration {
     }
 
     /**
+     * The chunking the index is built with: pinned in its manifest (INV-05) and part of the pipeline
+     * fingerprint of the result caches (docs/cache-plan.md §3.1).
+     */
+    @Bean
+    IndexManifest.Chunker indexChunker(ChatbotProperties properties) {
+        ChatbotProperties.Index index = properties.index();
+        return new IndexManifest.Chunker(index.maxChunkSize(), index.overlapSize(), ProvenanceChunkTransformer.TRANSFORMER_VERSION);
+    }
+
+    /**
      * The Embabel-facing embedding bean is injected by interface: Embabel wraps it in its own
      * tracking decorator, which still routes through the audit hook used to verify writes.
      */
     @Bean(destroyMethod = "close")
     LuceneIndexStore luceneIndexStore(ChatbotProperties properties, EmbeddingService embabelEmbeddingService,
                                       KnowledgeEmbeddingService knowledgeEmbeddingService,
-                                      ProvenanceChunkTransformer transformer) {
+                                      ProvenanceChunkTransformer transformer, IndexManifest.Chunker chunker) {
         ChatbotProperties.Index index = properties.index();
         Path indexDir = index.inMemory() ? null
                 : (index.dir() != null ? index.dir() : properties.dataDir().resolve("index"));
-        var chunker = new IndexManifest.Chunker(index.maxChunkSize(), index.overlapSize(), ProvenanceChunkTransformer.TRANSFORMER_VERSION);
         return new LuceneIndexStore(indexDir, embabelEmbeddingService, knowledgeEmbeddingService.fingerprint(),
                 chunker, index.embeddingBatchSize(), transformer).open();
     }

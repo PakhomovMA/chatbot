@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -41,7 +42,9 @@ import java.util.stream.Collectors;
  * Owns the Embabel Lucene store (docs/system-plan.md D4): opens it from {@code <index-dir>/lucene}
  * or in memory, keeps the {@code manifest.json} that pins the embedding fingerprint and chunker
  * (INV-05), serialises writers behind a read/write lock (INV-11), verifies that every chunk got a
- * vector (INV-09), recovers from a corrupt directory and rebuilds on demand.
+ * vector (INV-09), recovers from a corrupt directory and rebuilds on demand. Every operation that may
+ * change what a search finds moves {@link #revision()}, which the result caches are scoped by
+ * (docs/cache-plan.md §3.1).
  *
  * <p>Two locks, each with its own job (docs/concurrency-plan.md C09). The read/write lock keeps
  * writers, rebuilds and {@link #close()} apart from everything else; searches take it for read and
@@ -65,6 +68,8 @@ public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, Auto
     private final IndexManifestFile manifestFile;
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private final Object searchMonitor = new Object();
+    /** Bumped under the write lock, once per operation that may change the content; see {@link #revision()}. */
+    private final AtomicLong revision = new AtomicLong();
 
     private @Nullable LuceneSearchOperations operations;
     private @Nullable IndexManifest manifest;
@@ -122,6 +127,7 @@ public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, Auto
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot open index at " + indexDir, e);
         } finally {
+            revision.incrementAndGet();
             lock.writeLock().unlock();
         }
     }
@@ -157,6 +163,9 @@ public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, Auto
             refreshState();
             return chunkIds;
         } finally {
+            // Also after a failure: the previous version was deleted before the new one failed, and
+            // the purge removed whatever of the new one had been written.
+            revision.incrementAndGet();
             lock.writeLock().unlock();
         }
     }
@@ -172,6 +181,7 @@ public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, Auto
             refreshState();
             return removed;
         } finally {
+            revision.incrementAndGet();
             lock.writeLock().unlock();
         }
     }
@@ -294,6 +304,7 @@ public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, Auto
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot rebuild index at " + indexDir, e);
         } finally {
+            revision.incrementAndGet();
             lock.writeLock().unlock();
         }
     }
@@ -325,6 +336,22 @@ public class LuceneIndexStore implements KnowledgeIndexWriter, IndexStatus, Auto
     @Override
     public EmbeddingFingerprint fingerprint() {
         return fingerprint;
+    }
+
+    /**
+     * Read without the lock, so a chat request never waits for a document write just to learn the
+     * revision. Nothing is lost by that: the value moves only while a writer holds the lock, so a
+     * search, which holds it for reading, sees the content of exactly the revision it reads. Two
+     * readings differ whenever a mutation finished between them or was running at the first one —
+     * which is what the stale-put guard of the answer cache relies on.
+     *
+     * <p>An operation that turned out to change nothing (deleting an absent document, a write the index
+     * refused) moves it too: a spare bump costs one cache miss, a missing one would serve an answer
+     * computed from content that is gone.
+     */
+    @Override
+    public long revision() {
+        return revision.get();
     }
 
     /**

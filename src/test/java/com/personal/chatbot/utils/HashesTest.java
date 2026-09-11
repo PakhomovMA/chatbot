@@ -42,6 +42,14 @@ class HashesTest {
     }
 
     @Test
+    void sha256OfATextIsTheFullHexDigestOfItsUtf8Bytes() {
+        assertThat(Hashes.sha256("hello world")).isEqualTo("b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9");
+        assertThat(Hashes.sha256("")).isEqualTo("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        // UTF-8 rather than the platform charset, so a Cyrillic question hashes the same everywhere.
+        assertThat(Hashes.sha256("привет")).isEqualTo("e58f1e8c55fa105bdd3f40e5037eb0b039b5998d52c05e6cd98878dd2da5cab2");
+    }
+
+    @Test
     void shortDigestStripsAlgorithmPrefix() {
         assertThat(Hashes.shortDigest("sha256:85462619ee721b466c5927d109d4cb765861907d")).isEqualTo("85462619ee72");
         assertThat(Hashes.shortDigest("abc")).isEqualTo("abc");

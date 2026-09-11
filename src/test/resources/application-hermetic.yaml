@@ -9,6 +9,15 @@ chatbot:
   chat:
     # Tests choose the answer mode per request; the default must not follow the developer's application.yaml.
     mode: DETERMINISTIC
+  cache:
+    # Every result cache off, whatever application.yaml ships: tests repeat questions on purpose, and a
+    # cached answer would hide the run they are about. A test of a cache switches its layer on itself.
+    answer:
+      enabled: false
+    derivation:
+      enabled: false
+    semantic:
+      mode: "OFF"
 
 embabel:
   agent:

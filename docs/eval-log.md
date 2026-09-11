@@ -802,3 +802,65 @@ Kimi K3 [7]» — цитаты из обоих документов.
 `./gradlew ragEval --tests '*hybridRetrievalMeetsRecallTarget'` и `--tests '*neighbourExpansionTradeOff'`
 на дефолтной доле 0.6 — прежние цифры. INV-01/03: квота работает внутри fusion, до модели; бюджет
 поиска ничего не добавляет в evidence и не меняет проверку цитат; событие таймаута — не ответ.
+
+## 2026-09-11 — Baseline цен стадий перед кешированием (K01)
+
+Первая задача [плана кеширования](cache-plan.md) K01: свежие цены стадий на текущем стеке, с которыми
+будут сравниваться K02 (повтор вопроса из answer cache) и K05 (прирост miss-пути). Прогон:
+`./gradlew test -PincludeTags=e2e -Pe2e.llm=gemma4:12b` на рабочем дереве K01, все слои кеша выключены.
+Стек: `gemma4:12b` в Ollama, EmbeddingGemma ONNX, индекс in-memory во временном data-dir, M1 Pro 32 GB.
+
+Цены взяты из собственных meters приложения, а не из `ChatTimings`. У агентной ветки `timings.retrievalMs`
+в логе покрывает весь tool loop (например, «retrieval 41797 ms» при ответе за 41886 ms), поэтому стадии по
+нему не разделить. После каждого теста e2e-класс пишет `build/reports/stage-costs/<class>.json`. Там
+`chatbot.chat.request`, `chatbot.ai.operation{operation}` и `chatbot.retrieval.search`; percentiles и max
+держатся за весь прогон, а не за двухминутное окно Micrometer. Выборки маленькие: p50 и p95 при n ≤ 8 —
+по сути, медиана и максимум.
+
+**Прогон неполный.** Около 17:45, на 14-м ответе, процесс тестов был снят по нехватке памяти на машине.
+Прошли `AgenticDecompositionE2eTest` (2 теста), `ChatBranchesOffE2eTest` и 3 метода `ChatE2eTest`:
+агентный golden-набор, follow-up с историей, сравнение двух документов. Не успели: детерминированный
+golden-набор, `expandSearch`, вопрос из двух частей и русский follow-up по SSE. Поэтому здесь нет
+цены `expand-rewrite` и детерминированного ответа по SSE — их даст повтор этих методов.
+
+| Класс | Meter | Labels | n | mean | p50 | p95 | max |
+|---|---|---|---:|---:|---:|---:|---:|
+| ChatE2eTest | `chatbot.ai.operation` | operation=compare-sources, outcome=success | 1 | 32.2 s | 32.1 s | 32.1 s | 32.2 s |
+| ChatE2eTest | `chatbot.ai.operation` | operation=conversation-query-rewrite, outcome=success | 2 | 5.4 s | 5.3 s | 5.6 s | 5.6 s |
+| AgenticDecompositionE2eTest | `chatbot.ai.operation` | operation=decompose-question, outcome=fallback | 2 | 10.7 s | 8.1 s | 13.3 s | 13.3 s |
+| ChatE2eTest | `chatbot.ai.operation` | operation=decompose-question, outcome=success | 2 | 6.6 s | 6.5 s | 6.7 s | 6.7 s |
+| ChatE2eTest | `chatbot.ai.operation` | operation=draft-answer, outcome=fallback | 1 | 19.0 s | 19.0 s | 19.0 s | 19.0 s |
+| ChatBranchesOffE2eTest | `chatbot.ai.operation` | operation=draft-answer, outcome=success | 2 | 29.0 s | 27.4 s | 30.7 s | 30.7 s |
+| ChatE2eTest | `chatbot.ai.operation` | operation=draft-answer, outcome=success | 2 | 26.1 s | 21.4 s | 30.7 s | 30.7 s |
+| AgenticDecompositionE2eTest | `chatbot.ai.operation` | operation=research-agentic, outcome=success | 2 | 35.6 s | 29.4 s | 41.8 s | 41.8 s |
+| ChatE2eTest | `chatbot.ai.operation` | operation=research-agentic, outcome=success | 6 | 32.3 s | 27.8 s | 46.3 s | 46.2 s |
+| AgenticDecompositionE2eTest | `chatbot.chat.request` | agentic, sync, grounded | 1 | 29.5 s | 29.5 s | 29.5 s | 29.5 s |
+| ChatE2eTest | `chatbot.chat.request` | agentic, sync, grounded | 6 | 32.4 s | 27.8 s | 46.3 s | 46.3 s |
+| AgenticDecompositionE2eTest | `chatbot.chat.request` | agentic, stream, insufficient_evidence | 1 | 41.9 s | 41.9 s | 41.9 s | 41.9 s |
+| ChatBranchesOffE2eTest | `chatbot.chat.request` | deterministic, sync, grounded | 2 | 29.2 s | 27.6 s | 30.8 s | 30.8 s |
+| ChatE2eTest | `chatbot.chat.request` | deterministic, sync, grounded | 3 | 40.5 s | 26.9 s | 69.8 s | 69.8 s |
+| AgenticDecompositionE2eTest | `chatbot.retrieval.search` | hybrid, success | 2 | 94 ms | 92 ms | 95 ms | 95 ms |
+| ChatBranchesOffE2eTest | `chatbot.retrieval.search` | hybrid, success | 2 | 104 ms | 41 ms | 166 ms | 166 ms |
+| ChatE2eTest | `chatbot.retrieval.search` | hybrid, success | 8 | 122 ms | 107 ms | 154 ms | 154 ms |
+
+Все `chatbot.chat.request` — `outcome=success`. p95 у `research-agentic` в `ChatE2eTest` на 0.1 s выше
+max: это погрешность оценки percentile (3 значащих цифры), а не данные.
+
+Сверка с §2.1 плана кеширования:
+
+- **Retrieval** — 41–166 ms на проход, против p50 27 ms в Phase 4. Здесь meter включает ожидание read lock
+  и query embedding на машине, где параллельно отвечает модель. Это 0.1–0.5 % времени ответа, так что
+  вывод §2.1 не меняется: кешировать retrieval незачем.
+- **Ответ целиком** — 25–46 s в агентной ветке (§2.1: 30–53 s на gemma4) и 25–31 s в детерминированной.
+  70 s — ответ, к которому добавился `compare-sources` (32 s).
+- **Шаги подготовки вопроса**: conversation rewrite — 5.3–5.6 s (§2.1: ~5 s live). `decompose-question` на
+  gemma4 стоит 6.5–6.7 s, а не ~2.5 s, как на qwen3 в eval Phase 9d. Два неудачных разбора русского
+  составного вопроса (`fallback`) стоили 8–13 s и ничего не дали. Для K03 это аргумент «за»:
+  подготовка вопроса на gemma4 дороже, чем в оценке §2.1.
+
+Упали два теста, оба уже известны по gemma4 (запись 2026-09-09) и с кешем не связаны:
+
+- `explicitDeveloperIsAnsweredAndCitedAlongsideTheContextLength`: ответ GROUNDED с обеими цитатами, но
+  `decomposition() == null` — `decompose-question` дважды закончился `fallback`.
+- `aQuestionThatComparesTwoDocumentsKeepsBothSidesInTheAnswer`: ответ GROUNDED с двумя цитатами, но без
+  `deploy.sh` / `--rollback` / `previous image tag`, которых требует ассерт.

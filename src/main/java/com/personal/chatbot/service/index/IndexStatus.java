@@ -12,4 +12,11 @@ public interface IndexStatus {
     IndexInfo info();
 
     IndexState state();
+
+    /**
+     * Version of what a search can find (docs/cache-plan.md §3.1): it grows with every operation that
+     * may have changed the content and with nothing that only reads. Kept in memory, so it starts over
+     * with the process — as do the caches scoped by it.
+     */
+    long revision();
 }

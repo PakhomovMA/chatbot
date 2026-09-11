@@ -33,6 +33,10 @@ class ChatbotApplicationTests extends AbstractChatbotIntegrationTest {
         assertThat(properties.dataDir()).isNotNull();
         assertThat(Files.isDirectory(properties.dataDir())).isTrue();
         assertThat(properties.embedding().provider()).isEqualTo("fake");
+        // Tests repeat questions on purpose, so no result cache may answer them (docs/cache-plan.md §3.8).
+        assertThat(properties.cache().answer().enabled()).isFalse();
+        assertThat(properties.cache().derivation().enabled()).isFalse();
+        assertThat(properties.cache().semantic().mode()).isEqualTo(ChatbotProperties.SemanticCache.Mode.OFF);
     }
 
     @Test

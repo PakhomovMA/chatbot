@@ -39,7 +39,8 @@ public record ChatbotProperties(
         @Valid @DefaultValue Retrieval retrieval,
         @Valid @DefaultValue Chat chat,
         @Valid @DefaultValue Sse sse,
-        @Valid @DefaultValue Observability observability
+        @Valid @DefaultValue Observability observability,
+        @Valid @DefaultValue Cache cache
 ) {
 
     /**
@@ -301,5 +302,73 @@ public record ChatbotProperties(
             @DefaultValue("none") TraceExport traceExport,
             @DefaultValue("5s") Duration flushTimeout
     ) {
+    }
+
+    /**
+     * Result caches (docs/cache-plan.md §3.8). Every layer ships off, and the hermetic profile says so
+     * again: a test that repeats a question must not start getting its answer from a cache. The layers
+     * arrive one checkpoint at a time (answer K02, derivation K03, semantic K05–K06); until a layer
+     * exists, nothing reads its settings.
+     */
+    public record Cache(
+            @Valid @DefaultValue AnswerCache answer,
+            @Valid @DefaultValue DerivationCache derivation,
+            @Valid @DefaultValue SemanticCache semantic
+    ) {
+    }
+
+    /**
+     * Finished first-turn answers, valid under the knowledge-base revision and the pipeline fingerprint
+     * they were computed and verified at (docs/cache-plan.md §3.1, §3.3).
+     *
+     * @param ttl               how long an entry lives after it was written
+     * @param maxWeight         total size of the text the entries hold
+     * @param followUps         also cache turns that have history; the history digest keeps them apart
+     * @param cacheInsufficient also keep "the knowledge base has nothing on this", but only when the
+     *                          retrieval itself found too little
+     */
+    public record AnswerCache(
+            @DefaultValue("false") boolean enabled,
+            @NotNull @DefaultValue("24h") Duration ttl,
+            @NotNull @DefaultValue("16MB") DataSize maxWeight,
+            @DefaultValue("false") boolean followUps,
+            @DefaultValue("true") boolean cacheInsufficient
+    ) {
+    }
+
+    /**
+     * Results of the question-preparation steps — conversational rewrite, expansion queries, the
+     * hypothetical passage, sub-questions — which depend on the question and never on the knowledge
+     * base, so a change to it does not invalidate them (docs/cache-plan.md §3.2).
+     */
+    public record DerivationCache(
+            @DefaultValue("false") boolean enabled,
+            @NotNull @DefaultValue("7d") Duration ttl,
+            @Min(1) @DefaultValue("5000") int maxEntries
+    ) {
+    }
+
+    /**
+     * Answers served for a rephrased question (docs/cache-plan.md §3.5): OFF until it has been
+     * calibrated (K04) and watched in SHADOW (K05).
+     *
+     * @param embeddingPrompt how a question is embedded for the comparison, chosen by the K04 calibration
+     * @param minSimilarity   cosine a candidate must reach, set from the K04 calibration
+     * @param maxEntries      question vectors kept for the nearest-neighbour search
+     * @param judge           ask the model whether the two questions are equivalent before serving
+     */
+    public record SemanticCache(
+            @NotNull @DefaultValue("OFF") Mode mode,
+            @NotNull @DefaultValue("SIMILARITY") EmbeddingPrompt embeddingPrompt,
+            @DecimalMin("0.0") @DecimalMax("1.0") @DefaultValue("0.0") double minSimilarity,
+            @Min(1) @DefaultValue("1000") int maxEntries,
+            @DefaultValue("false") boolean judge
+    ) {
+
+        /** OFF; SHADOW compares a candidate with the fresh answer and never serves it; SERVE serves it. */
+        public enum Mode { OFF, SHADOW, SERVE }
+
+        /** EmbeddingGemma's sentence-similarity prompt, or the query prompt retrieval already uses. */
+        public enum EmbeddingPrompt { SIMILARITY, QUERY }
     }
 }

@@ -53,6 +53,11 @@ public class ObservabilityConfiguration {
     }
 
     @Bean
+    CacheObservations cacheObservations(Observations observations) {
+        return new CacheObservations(observations);
+    }
+
+    @Bean
     MeterFilter chatbotLabelSchema() {
         return MeterSchema.labels();
     }

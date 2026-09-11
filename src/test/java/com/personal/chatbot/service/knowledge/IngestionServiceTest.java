@@ -69,7 +69,12 @@ class IngestionServiceTest {
                 com.personal.chatbot.support.ChatSettings.defaults(),
                 new ChatbotProperties.Sse(256),
                 new ChatbotProperties.Observability(true, com.personal.chatbot.observability.TraceExport.NONE,
-                        java.time.Duration.ofSeconds(5)));
+                        java.time.Duration.ofSeconds(5)),
+                new ChatbotProperties.Cache(
+                        new ChatbotProperties.AnswerCache(false, java.time.Duration.ofHours(24), DataSize.ofMegabytes(16), false, true),
+                        new ChatbotProperties.DerivationCache(false, java.time.Duration.ofDays(7), 5000),
+                        new ChatbotProperties.SemanticCache(ChatbotProperties.SemanticCache.Mode.OFF,
+                                ChatbotProperties.SemanticCache.EmbeddingPrompt.SIMILARITY, 0.0, 1000, false)));
     }
 
     /** Wires the same objects the Spring context would; events are dispatched directly to the service. */

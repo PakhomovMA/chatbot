@@ -2,7 +2,7 @@
   "version": 1,
   "status": "accepted-for-O02-O07",
   "applicationSeriesLimit": 5000,
-  "conservativeApplicationSeries": 3637,
+  "conservativeApplicationSeries": 3522,
   "budgetFormula": "Для Timer без buckets: 3 terminal + 3 active series; с buckets: N finite + Inf + count/sum/max + 3 active. Summary: count/sum/max. Gauge/Counter: 1. Декартово произведение enum values, включая несовместимые пары. Framework/JVM/HTTP отдельно.",
   "outcomes": [
     "success",
@@ -835,6 +835,109 @@
       "compatibility": "new-O04",
       "maxLabelCombinations": 1,
       "maxSeries": 1
+    },
+    {
+      "name": "chatbot.cache.lookup",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "layer": [
+          "answer",
+          "derivation",
+          "semantic"
+        ],
+        "result": [
+          "hit",
+          "miss",
+          "bypass"
+        ]
+      },
+      "boundary": "Одно решение lookup на слой за запрос (answer, semantic) или за шаг подготовки вопроса (derivation). bypass — слой выключен или запрос не eligible (docs/cache-plan.md §3.3). Ключ и текст вопроса в метрику не попадают.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "new-K01",
+      "maxLabelCombinations": 9,
+      "maxSeries": 9
+    },
+    {
+      "name": "chatbot.cache.store",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "layer": [
+          "answer",
+          "derivation",
+          "semantic"
+        ],
+        "result": [
+          "stored",
+          "ineligible",
+          "stale"
+        ]
+      },
+      "boundary": "После terminal outcome run или шага, одно событие на результат, дошедший до решения о записи: stored, ineligible по политике кешируемости, stale — KB revision сменилась за время run. Отмена, ошибка и таймаут потока события не пишут.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "new-K01",
+      "maxLabelCombinations": 9,
+      "maxSeries": 9
+    },
+    {
+      "name": "chatbot.cache.entries",
+      "type": "gauge",
+      "unit": "count",
+      "labels": {
+        "layer": [
+          "answer",
+          "derivation",
+          "semantic"
+        ]
+      },
+      "boundary": "Оценка числа записей слоя (Caffeine estimatedSize) на момент scrape; без lock. Series появляется, когда слой создан.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "new-K01",
+      "maxLabelCombinations": 3,
+      "maxSeries": 3
+    },
+    {
+      "name": "chatbot.cache.evictions",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "layer": [
+          "answer",
+          "derivation",
+          "semantic"
+        ],
+        "cause": [
+          "size",
+          "expired"
+        ]
+      },
+      "boundary": "Removal listener слоя: вытеснение по весу или числу записей (size) либо по TTL (expired). Явная инвалидация и замена записи не считаются.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "new-K01",
+      "maxLabelCombinations": 6,
+      "maxSeries": 6
+    },
+    {
+      "name": "chatbot.cache.semantic.shadow",
+      "type": "counter",
+      "unit": "count",
+      "labels": {
+        "verdict": [
+          "agree",
+          "disagree"
+        ]
+      },
+      "boundary": "K05: после свежего ответа, если semantic-кандидат прошёл guards. agree — тот же grounding и Jaccard cited chunk ids ≥ 0.5, иначе disagree.",
+      "owner": "application",
+      "histogram": null,
+      "compatibility": "new-K01",
+      "maxLabelCombinations": 2,
+      "maxSeries": 2
     }
   ],
   "framework": [

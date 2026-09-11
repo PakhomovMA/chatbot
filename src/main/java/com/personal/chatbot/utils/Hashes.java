@@ -6,6 +6,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -13,7 +14,7 @@ import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
 
-/** Content hashing helpers used for model fingerprints (and, later, document identity). */
+/** Content hashing helpers: model fingerprints, cache keys and the pipeline fingerprint. */
 public final class Hashes {
 
     private static final Logger log = LoggerFactory.getLogger(Hashes.class);
@@ -25,10 +26,15 @@ public final class Hashes {
     private Hashes() {
     }
 
+    /** Hex SHA-256 of the UTF-8 bytes of a text: what cache keys and the pipeline fingerprint are made of. */
+    public static String sha256(String text) {
+        return HexFormat.of().formatHex(sha256Digest().digest(text.getBytes(StandardCharsets.UTF_8)));
+    }
+
     /** First {@value #SHORT_DIGEST_LENGTH} hex chars of the SHA-256 of a file. */
     public static String sha256Prefix(Path file) {
         try (InputStream in = Files.newInputStream(file)) {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            MessageDigest digest = sha256Digest();
             byte[] buffer = new byte[1 << 20];
             int read;
             while ((read = in.read(buffer)) > 0) {
@@ -37,8 +43,6 @@ public final class Hashes {
             return shortDigest(HexFormat.of().formatHex(digest.digest()));
         } catch (IOException e) {
             throw new UncheckedIOException("Cannot hash " + file, e);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
         }
     }
 
@@ -73,6 +77,14 @@ public final class Hashes {
     public static String shortDigest(String digest) {
         String clean = digest.startsWith("sha256:") ? digest.substring("sha256:".length()) : digest;
         return clean.length() > SHORT_DIGEST_LENGTH ? clean.substring(0, SHORT_DIGEST_LENGTH) : clean;
+    }
+
+    private static MessageDigest sha256Digest() {
+        try {
+            return MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is required of every Java platform", e);
+        }
     }
 
     private static String cacheKey(Path file) {

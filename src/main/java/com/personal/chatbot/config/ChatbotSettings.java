@@ -39,4 +39,9 @@ class ChatbotSettings {
     ChatbotProperties.Observability observabilitySettings(ChatbotProperties properties) {
         return properties.observability();
     }
+
+    @Bean
+    ChatbotProperties.Cache cacheSettings(ChatbotProperties properties) {
+        return properties.cache();
+    }
 }

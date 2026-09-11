@@ -42,6 +42,12 @@ dependencies {
     implementation 'io.opentelemetry:opentelemetry-exporter-logging'
     implementation 'io.opentelemetry:opentelemetry-exporter-otlp'
     implementation 'org.springframework.boot:spring-boot-starter-validation'
+    // In-memory result caches (docs/cache-plan.md); the version comes from the Spring Boot BOM. Its
+    // Error Prone annotations are compile-time only and would lift the version the rest of the graph
+    // agrees on (2.41.0), so they are left out: the graph changes by Caffeine and nothing else.
+    implementation('com.github.ben-manes.caffeine:caffeine') {
+        exclude group: 'com.google.errorprone', module: 'error_prone_annotations'
+    }
 
     // Embabel: platform, Ollama models, Lucene RAG store, Tika parsing.
     // Deliberately NOT embabel-agent-starter-onnx: it downloads MiniLM and is incompatible with EmbeddingGemma.

@@ -118,6 +118,26 @@ chatbot:
     # behind it cancelled; each connection is written by a sender of its own, so a slow reader
     # delays nobody else (docs/concurrency-plan.md C06).
     buffer-size: 256
+  cache:
+    # Result caches (docs/cache-plan.md): finished answers, question-preparation steps, and answers for a
+    # rephrased question. All off: each layer arrives with a checkpoint of its own (K02, K03, K05–K06),
+    # and the answer layer's default is decided at K02 from measurements.
+    answer:
+      enabled: false
+      ttl: 24h                           # an entry is unreachable anyway once the KB revision moves
+      max-weight: 16MB                   # total text the entries hold
+      follow-ups: false                  # also cache turns with history (the history digest is in the key)
+      cache-insufficient: true           # keep "not in the KB" only when retrieval itself found too little
+    derivation:
+      enabled: false
+      ttl: 7d                            # survives KB changes: these steps never see evidence
+      max-entries: 5000
+    semantic:
+      mode: "OFF"                        # OFF | SHADOW | SERVE; quoted, or YAML reads it as a boolean
+      embedding-prompt: SIMILARITY       # SIMILARITY | QUERY, chosen by the K04 calibration
+      min-similarity: 0.0                # set from the K04 calibration
+      max-entries: 1000
+      judge: false
 
 spring.servlet.multipart:
   max-file-size: 20MB
