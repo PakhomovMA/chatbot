@@ -20,6 +20,7 @@ import java.util.Set;
  * @param cancellation the request's completion signal, polled before every expensive step (not part
  *                     of the data model)
  * @param effectiveQuery standalone search text after conversation reference resolution; never answer evidence
+ * @param derivations request-owned pending cache writes, shared by prepared copies and never serialized
  */
 public record UserQuestion(
         String conversationId,
@@ -31,19 +32,28 @@ public record UserQuestion(
         AnswerMode mode,
         @JsonIgnore @Nullable AnswerStreamSink stream,
         @JsonIgnore ChatCancellation cancellation,
-        String effectiveQuery
+        String effectiveQuery,
+        @JsonIgnore PendingDerivations derivations
 ) {
 
     public UserQuestion(String conversationId, String messageId, String question, List<ConversationTurn> history,
                         @Nullable Integer topK, @Nullable Set<String> documentIds, AnswerMode mode,
+                        @Nullable AnswerStreamSink stream, ChatCancellation cancellation, String effectiveQuery) {
+        this(conversationId, messageId, question, history, topK, documentIds, mode, stream, cancellation,
+                effectiveQuery, new PendingDerivations());
+    }
+
+    public UserQuestion(String conversationId, String messageId, String question, List<ConversationTurn> history,
+                        @Nullable Integer topK, @Nullable Set<String> documentIds, AnswerMode mode,
                         @Nullable AnswerStreamSink stream, ChatCancellation cancellation) {
-        this(conversationId, messageId, question, history, topK, documentIds, mode, stream, cancellation, question);
+        this(conversationId, messageId, question, history, topK, documentIds, mode, stream, cancellation,
+                question, new PendingDerivations());
     }
 
     /** Changes search text only; the original question still controls the answer, language and history. */
     public UserQuestion withEffectiveQuery(String query) {
         return new UserQuestion(conversationId, messageId, question, history, topK, documentIds, mode, stream,
-                cancellation, query);
+                cancellation, query, derivations);
     }
 
     public UserQuestion(String conversationId, String messageId, String question, List<ConversationTurn> history,

@@ -176,6 +176,7 @@ public class ChatService {
         if (cached instanceof ChatAnswerCache.Miss miss) {
             answerCache.store(miss, question, answer, retrieval);
         }
+        input.derivations().commit();
         recordExchange(conversation, messageId, question, answer.answer(), answer.citations());
         observed.succeeded(answer.grounding());
         log.info("Chat [{}] {} in {} ms ({} citations, retrieval {} ms{})", messageId, answer.grounding(),

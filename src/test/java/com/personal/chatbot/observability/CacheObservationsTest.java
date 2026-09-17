@@ -74,6 +74,26 @@ class CacheObservationsTest {
         assertThat(published).isEqualTo(catalogSeries());
     }
 
+    @Test
+    void derivationLookupAddsOnlyBoundedMetadataToTheExistingSpan() {
+        var destination = new TracePipelineTest.Recorder();
+        var sanitizer = new TelemetrySanitizer(ContentPolicy.METADATA_ONLY, List.of());
+        try (var provider = io.opentelemetry.sdk.trace.SdkTracerProvider.builder().addSpanProcessor(
+                io.opentelemetry.sdk.trace.export.SimpleSpanProcessor.create(
+                        new SanitizingSpanExporter(destination, sanitizer))).build()) {
+            var span = provider.get("test").spanBuilder("prepareQuestion").startSpan();
+            try (var ignored = span.makeCurrent()) {
+                cache.derivationLookup(Lookup.HIT, true);
+            }
+            span.end();
+        }
+        assertThat(destination.spans).singleElement().satisfies(span ->
+                assertThat(span.getAttributes().get(io.opentelemetry.api.common.AttributeKey.stringKey(
+                        "chatbot.cache.derivation.result"))).isEqualTo("would-hit"));
+        assertThat(count("chatbot.cache.lookup", "layer", "derivation", "result", "hit")).isEqualTo(1);
+        assertThat(meters.find("chatbot.ai.operation").timers()).isEmpty();
+    }
+
     private double count(String name, String... tags) {
         return meters.get(name).tags(tags).counter().count();
     }

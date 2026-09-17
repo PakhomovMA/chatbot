@@ -10,6 +10,8 @@ import com.personal.chatbot.observability.AiOperation;
 import com.personal.chatbot.observability.ChatObservations;
 import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.observability.Outcome;
+import com.personal.chatbot.service.cache.Derivation;
+import com.personal.chatbot.service.cache.DerivationCache;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +34,7 @@ public class ConversationQueryRewriter {
     /** Words of a question, punctuation trimmed; identifiers keep the characters they are written with. */
     private static final Pattern WORD = Pattern.compile("[\\p{L}\\p{N}][\\p{L}\\p{N}._:/-]*");
 
+    private final DerivationCache derivations;
     private final GroundedAnswerPrompt prompt;
     private final GroundingInstructions instructions;
     private final int historyTurns;
@@ -40,6 +43,13 @@ public class ConversationQueryRewriter {
 
     public ConversationQueryRewriter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
                                      int historyTurns, Duration timeout, ChatObservations observations) {
+        this(prompt, instructions, historyTurns, timeout, observations, DerivationCache.NONE);
+    }
+
+    public ConversationQueryRewriter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
+                                     int historyTurns, Duration timeout, ChatObservations observations,
+                                     DerivationCache derivations) {
+        this.derivations = derivations;
         this.prompt = prompt;
         this.instructions = instructions;
         this.historyTurns = historyTurns;
@@ -100,6 +110,13 @@ public class ConversationQueryRewriter {
         if (!shouldRewrite(question)) {
             return question;
         }
+        String userPrompt = prompt.buildForConversationRewrite(question.question(), question.history());
+        var attempt = derivations.lookup(Derivation.CONVERSATION_QUERY_REWRITE, userPrompt,
+                instructions.conversationRewrite().contribution(), 0.0, question);
+        var cached = attempt.value();
+        if (cached.isPresent()) {
+            return question.withEffectiveQuery(cached.orElseThrow().getFirst());
+        }
         question.notifyStage(AnswerStages.REWRITING);
         // Whatever the attempt ends in — including a cancellation, as it always has (metric catalog,
         // chatbot.chat.query.rewrite) — the branch reports one decision about the search text.
@@ -114,7 +131,7 @@ public class ConversationQueryRewriter {
                         .withLlm(LlmOptions.withDefaultLlm().withTemperature(0.0).withTimeout(timeout))
                         .withPromptContributor(instructions.conversationRewrite())
                         .creating(StandaloneQuery.class)
-                        .fromPrompt(prompt.buildForConversationRewrite(question.question(), question.history()));
+                        .fromPrompt(userPrompt);
                 question.abortIfCancelled();
                 String query = result == null || result.query() == null ? "" : result.query().strip();
                 // Broken/verbose output must not replace a usable question, nor be truncated into a different intent.
@@ -124,6 +141,7 @@ public class ConversationQueryRewriter {
                 }
                 outcome = query.equals(question.question())
                         ? ChatObservations.RewriteOutcome.UNCHANGED : ChatObservations.RewriteOutcome.REWRITTEN;
+                attempt.usable(List.of(query));
                 operation.succeeded();
                 return question.withEffectiveQuery(query);
             } catch (Exception e) {

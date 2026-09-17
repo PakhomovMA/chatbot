@@ -4,6 +4,7 @@ import com.embabel.agent.api.common.OperationContext;
 import com.embabel.agent.api.common.PromptRunner;
 import com.embabel.common.ai.model.LlmOptions;
 import com.personal.chatbot.config.ChatbotProperties;
+import com.personal.chatbot.exceptions.ChatCancelledException;
 import com.personal.chatbot.models.agent.Evidence;
 import com.personal.chatbot.models.agent.HypotheticalPassage;
 import com.personal.chatbot.models.agent.RewrittenQueries;
@@ -16,6 +17,8 @@ import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.observability.RetrievalObservations;
 import com.personal.chatbot.observability.RetrievalStrategy;
 import com.personal.chatbot.observability.RetrievalWorkflow;
+import com.personal.chatbot.service.cache.Derivation;
+import com.personal.chatbot.service.cache.DerivationCache;
 import com.personal.chatbot.service.retrieval.SearchExpander;
 import com.personal.chatbot.utils.Texts;
 import org.slf4j.Logger;
@@ -42,6 +45,7 @@ public class EvidenceExpander {
     private static final Logger log = LoggerFactory.getLogger(EvidenceExpander.class);
 
     private final SearchExpander expander;
+    private final DerivationCache derivations;
     private final GroundedAnswerPrompt prompt;
     private final GroundingInstructions instructions;
     private final ChatbotProperties.Chat settings;
@@ -51,7 +55,14 @@ public class EvidenceExpander {
     public EvidenceExpander(SearchExpander expander, GroundedAnswerPrompt prompt, GroundingInstructions instructions,
                             ChatbotProperties.Chat settings, ChatObservations observations,
                             RetrievalObservations retrievalObservations) {
+        this(expander, prompt, instructions, settings, observations, retrievalObservations, DerivationCache.NONE);
+    }
+
+    public EvidenceExpander(SearchExpander expander, GroundedAnswerPrompt prompt, GroundingInstructions instructions,
+                            ChatbotProperties.Chat settings, ChatObservations observations,
+                            RetrievalObservations retrievalObservations, DerivationCache derivations) {
         this.expander = expander;
+        this.derivations = derivations;
         this.prompt = prompt;
         this.instructions = instructions;
         this.settings = settings;
@@ -75,12 +86,15 @@ public class EvidenceExpander {
         UserQuestion question = evidence.question();
         ExpansionStrategy strategy = settings.expandSearch().strategy();
         question.abortIfCancelled();
-        question.notifyStage(AnswerStages.EXPANDING);
+        if (strategy == ExpansionStrategy.NEIGHBOURS || strategy == ExpansionStrategy.NONE) {
+            question.notifyStage(AnswerStages.EXPANDING);
+        }
         // The branch is measured as a whole: the model call that produces the wider queries belongs to
         // it and to no pass, and so does the merge at the end (docs/observability-plan.md §4.1).
         try (RetrievalWorkflow workflow = retrievalObservations.startWorkflow(RetrievalStrategy.EXPANSION)) {
             try {
                 List<String> queries = queriesFor(strategy, question, context);
+                question.abortIfCancelled();
                 RetrievalResult widened = expander.expand(question.retrievalQuery(), evidence.retrieval(), strategy,
                         queries, workflow);
                 retrievalObservations.expansion(strategy, widened.evidenceSufficient());
@@ -104,6 +118,10 @@ public class EvidenceExpander {
                 case HYDE -> hypothetical(question, context);
             };
         } catch (Exception e) {
+            if (ChatCancelledException.isCancellation(e)) {
+                throw new ChatCancelledException(question.messageId(), "cancelled during query expansion");
+            }
+            question.abortIfCancelled();
             // A failed widening must not cost the answer: fall back to what the first pass found.
             log.warn("Query expansion ({}) failed for [{}]: {}", strategy, question.messageId(), e.toString());
             return List.of();
@@ -111,10 +129,16 @@ public class EvidenceExpander {
     }
 
     private List<String> rewrite(UserQuestion question, OperationContext context) {
+        String userPrompt = prompt.buildForExpansion(question.effectiveQuery());
+        var attempt = derivations.lookup(Derivation.EXPAND_REWRITE, userPrompt,
+                instructions.queryRewrite().contribution(), settings.temperature(), question);
+        var cached = attempt.value();
+        if (cached.isPresent()) return cached.orElseThrow();
+        question.notifyStage(AnswerStages.EXPANDING);
         return observed(AiOperation.EXPAND_SEARCH_REWRITE, question, () -> {
             RewrittenQueries rewritten = runner(context).withPromptContributor(instructions.queryRewrite())
                     .creating(RewrittenQueries.class)
-                    .fromPrompt(prompt.buildForExpansion(question.effectiveQuery()));
+                    .fromPrompt(userPrompt);
             List<String> queries = rewritten.queriesOrEmpty().stream()
                     .filter(q -> q != null && !q.isBlank())
                     .map(String::strip)
@@ -122,19 +146,29 @@ public class EvidenceExpander {
                     .limit(settings.expandSearch().queries())
                     .toList();
             log.debug("Rewrote [{}] into {}", question.messageId(), queries);
+            question.abortIfCancelled();
+            attempt.usable(queries);
             return queries;
         });
     }
 
     private List<String> hypothetical(UserQuestion question, OperationContext context) {
+        String userPrompt = prompt.buildForExpansion(question.effectiveQuery());
+        var attempt = derivations.lookup(Derivation.EXPAND_HYDE, userPrompt,
+                instructions.hypotheticalPassage().contribution(), settings.temperature(), question);
+        var cached = attempt.value();
+        if (cached.isPresent()) return cached.orElseThrow();
+        question.notifyStage(AnswerStages.EXPANDING);
         return observed(AiOperation.EXPAND_SEARCH_HYDE, question, () -> {
             HypotheticalPassage passage = runner(context).withPromptContributor(instructions.hypotheticalPassage())
                     .creating(HypotheticalPassage.class)
-                    .fromPrompt(prompt.buildForExpansion(question.effectiveQuery()));
+                    .fromPrompt(userPrompt);
             if (passage.passage() == null || passage.passage().isBlank()) {
                 return List.of();
             }
             log.debug("Hypothetical passage for [{}]: {}", question.messageId(), Texts.singleLine(passage.passage(), 200));
+            question.abortIfCancelled();
+            attempt.usable(List.of(passage.passage()));
             return List.of(passage.passage());
         });
     }

@@ -22,7 +22,8 @@ public final class TelemetrySanitizer {
     public static final int MAX_ATTRIBUTES = 48;
     private static final Set<String> METADATA = Set.of(
             "session.id", "chatbot.request.id", "chatbot.message.id", "chatbot.document.id",
-            "chatbot.retrieval.id", "chatbot.cache.layer", "deployment.environment.name", "service.version", "service.name",
+            "chatbot.retrieval.id", "chatbot.cache.layer", "chatbot.cache.derivation.result",
+            "deployment.environment.name", "service.version", "service.name",
             "gen_ai.operation.name", "gen_ai.system", "gen_ai.provider.name", "gen_ai.request.model",
             "gen_ai.response.model", "gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens",
             "gen_ai.usage.total_tokens", "gen_ai.request.temperature", "gen_ai.request.max_tokens",

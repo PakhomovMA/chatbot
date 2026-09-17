@@ -64,6 +64,13 @@ public final class CacheObservations {
         lookups.get(layer).get(result).increment();
     }
 
+    /** One bounded attribute on the current action span; never a new AI operation or a metric label. */
+    public void derivationLookup(Lookup result, boolean shadow) {
+        lookup(Layer.DERIVATION, result);
+        io.opentelemetry.api.trace.Span.current().setAttribute("chatbot.cache.derivation.result",
+                shadow && result == Lookup.HIT ? "would-hit" : label(result));
+    }
+
     public void store(Layer layer, Store result) {
         stores.get(layer).get(result).increment();
     }

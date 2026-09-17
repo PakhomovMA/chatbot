@@ -2,6 +2,7 @@ package com.personal.chatbot.config;
 
 import com.personal.chatbot.observability.ChatObservations;
 import com.personal.chatbot.observability.RetrievalObservations;
+import com.personal.chatbot.service.cache.DerivationCache;
 import com.personal.chatbot.service.chat.AgenticResearcher;
 import com.personal.chatbot.service.chat.AnswerDrafter;
 import com.personal.chatbot.service.chat.ConversationQueryRewriter;
@@ -29,9 +30,10 @@ class ChatConfiguration {
 
     @Bean
     ConversationQueryRewriter conversationQueryRewriter(GroundedAnswerPrompt prompt, GroundingInstructions instructions,
-                                                       ChatbotProperties.Chat chat, ChatObservations observations) {
+                                                       ChatbotProperties.Chat chat, ChatObservations observations,
+                                                       DerivationCache derivations) {
         return new ConversationQueryRewriter(prompt, instructions, chat.historyTurns(), chat.queryRewriteTimeout(),
-                observations);
+                observations, derivations);
     }
 
     @Bean
@@ -64,15 +66,18 @@ class ChatConfiguration {
     @Bean
     EvidenceExpander evidenceExpander(SearchExpander expander, GroundedAnswerPrompt prompt,
                                       GroundingInstructions instructions, ChatbotProperties.Chat chat,
-                                      ChatObservations observations, RetrievalObservations retrievalObservations) {
-        return new EvidenceExpander(expander, prompt, instructions, chat, observations, retrievalObservations);
+                                      ChatObservations observations, RetrievalObservations retrievalObservations,
+                                      DerivationCache derivations) {
+        return new EvidenceExpander(expander, prompt, instructions, chat, observations, retrievalObservations, derivations);
     }
 
     @Bean
     QuestionDecomposer questionDecomposer(Retriever retriever, SubQuestionSearch search, GroundedAnswerPrompt prompt,
                                           GroundingInstructions instructions, ChatbotProperties.Chat chat,
-                                          ChatObservations observations, RetrievalObservations retrievalObservations) {
-        return new QuestionDecomposer(retriever, search, prompt, instructions, chat, observations, retrievalObservations);
+                                          ChatObservations observations, RetrievalObservations retrievalObservations,
+                                          DerivationCache derivations) {
+        return new QuestionDecomposer(retriever, search, prompt, instructions, chat, observations, retrievalObservations,
+                derivations);
     }
 
     @Bean

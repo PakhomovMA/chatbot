@@ -16,6 +16,8 @@ import com.personal.chatbot.observability.Measured;
 import com.personal.chatbot.observability.RetrievalObservations;
 import com.personal.chatbot.observability.RetrievalStrategy;
 import com.personal.chatbot.observability.RetrievalWorkflow;
+import com.personal.chatbot.service.cache.Derivation;
+import com.personal.chatbot.service.cache.DerivationCache;
 import com.personal.chatbot.service.retrieval.Retriever;
 import com.personal.chatbot.service.retrieval.SubQuestionSearch;
 import org.jspecify.annotations.Nullable;
@@ -61,6 +63,7 @@ public class QuestionDecomposer {
 
     private final Retriever retriever;
     private final SubQuestionSearch search;
+    private final DerivationCache derivations;
     private final GroundedAnswerPrompt prompt;
     private final GroundingInstructions instructions;
     private final ChatbotProperties.Chat settings;
@@ -70,8 +73,16 @@ public class QuestionDecomposer {
     public QuestionDecomposer(Retriever retriever, SubQuestionSearch search, GroundedAnswerPrompt prompt,
                               GroundingInstructions instructions, ChatbotProperties.Chat settings,
                               ChatObservations observations, RetrievalObservations retrievalObservations) {
+        this(retriever, search, prompt, instructions, settings, observations, retrievalObservations, DerivationCache.NONE);
+    }
+
+    public QuestionDecomposer(Retriever retriever, SubQuestionSearch search, GroundedAnswerPrompt prompt,
+                              GroundingInstructions instructions, ChatbotProperties.Chat settings,
+                              ChatObservations observations, RetrievalObservations retrievalObservations,
+                              DerivationCache derivations) {
         this.retriever = retriever;
         this.search = search;
+        this.derivations = derivations;
         this.prompt = prompt;
         this.instructions = instructions;
         this.settings = settings;
@@ -147,6 +158,11 @@ public class QuestionDecomposer {
 
     /** @return the parts of the question, empty when it asks for one thing, null when the call failed */
     private @Nullable List<String> partsOf(UserQuestion question, OperationContext context) {
+        String userPrompt = prompt.buildForDecomposition(question.effectiveQuery());
+        var attempt = derivations.lookup(Derivation.DECOMPOSE_QUESTION, userPrompt,
+                instructions.questionDecomposition().contribution(), 0.0, question);
+        var cached = attempt.value();
+        if (cached.isPresent()) return cached.orElseThrow();
         question.notifyStage(AnswerStages.DECOMPOSING);
         try (Measured operation = observations.startAiOperation(AiOperation.DECOMPOSE_QUESTION)) {
             try {
@@ -154,7 +170,7 @@ public class QuestionDecomposer {
                         .withLlm(LlmOptions.withDefaultLlm().withTemperature(0.0))
                         .withPromptContributor(instructions.questionDecomposition())
                         .creating(SubQuestions.class)
-                        .fromPrompt(prompt.buildForDecomposition(question.effectiveQuery()));
+                        .fromPrompt(userPrompt);
                 question.abortIfCancelled();
                 Set<String> seen = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
                 seen.add(question.effectiveQuery().strip());
@@ -169,6 +185,7 @@ public class QuestionDecomposer {
                 // One part is the question again, said differently; that is the widening branch's job, not this one.
                 List<String> useful = parts.size() < 2 ? List.of() : parts;
                 log.debug("Decomposed [{}] into {}", question.messageId(), useful);
+                attempt.usable(useful);
                 operation.succeeded();
                 return useful;
             } catch (Exception e) {

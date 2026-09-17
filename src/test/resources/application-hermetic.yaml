@@ -16,6 +16,7 @@ chatbot:
       enabled: false
     derivation:
       enabled: false
+      shadow: false
     semantic:
       mode: "OFF"
 

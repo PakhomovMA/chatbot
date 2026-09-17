@@ -898,3 +898,93 @@ evidence) не записывается. Цена решения: до K07 не�
 течение 24 h возвращает тот же ответ, пока KB не изменится или приложение не перезапустится. Откат —
 `chatbot.cache.answer.enabled: false`. Обоснование полностью — в [cache-plan.md](cache-plan.md),
 «Результат K02».
+
+## 2026-09-17 — Derivation cache (K03)
+
+**Решение: go для opt-in; default остаётся `enabled: false`, `shadow: false`.**
+Повторяемые преобразования действительно встречаются даже при включённом answer cache, но текущий
+замер подтверждает полезность в специально повторённых диалогах, а не частоту таких повторов в
+обычной работе. Для включения по умолчанию данных недостаточно. Откат — оба флага `false`;
+для дополнительного замера — только `shadow: true`.
+
+### Shadow и живой стек
+
+Стек: `gemma4:12b`, EmbeddingGemma ONNX, отдельные временные data-dir и in-memory Lucene.
+Пользовательский `~/.chatbot` не изменялся. Answer cache включён, answer mode — `DETERMINISTIC`.
+Shadow считает `lookup{layer=derivation,result=hit}` как would-hit, хранит только digest и marker,
+никогда не выдаёт сохранённый результат. Все четыре операции охвачены parameterized-тестом;
+живой сценарий ниже измеряет conversation rewrite, единственную включённую по умолчанию LLM-ветку
+подготовки вопроса.
+
+| Сценарий | Derivation miss | would-hit / hit | Вызовы rewrite |
+|---|---:|---:|---:|
+| E2e: два одинаковых диалога, shadow | 1 | 1 (50%) | 2 |
+| Тот же E2e, serving | 1 | 1 (50%) | 1 |
+| Ручная API-сессия: три диалога, shadow | 2 | 1 (33.3%) | 3 |
+
+E2e загружает `payments-runbook`, дважды начинает разговор вопросом «How do I restart the payments
+service?», затем в обоих разговорах спрашивает «And how do I check that it is healthy?». Первый ответ
+второго разговора берётся из answer cache; поэтому текст истории для rewrite совпадает. Последний
+follow-up идёт по SSE. В shadow модель вызывается снова; в serving отсутствуют rewrite-вызов и
+SSE-стадия `rewriting`, retrieval и генерация нового ответа выполняются. По `chatbot.ai.operation`
+rewrite в shadow: 2 вызова, mean 1759.6 ms; в serving: единственный холодный вызов 5063.4 ms.
+Это разные прогоны с разной прогретостью модели: разность полных латентностей не используется как
+оценка экономии. Дополнительный shadow smoke на `qwen3:14b` также дал 1 would-hit / 1 miss.
+
+Ручной сценарий через `bootRun` на порту 18080, HTTP API и `/actuator/metrics`:
+
+1. «Как перезапустить сервис payments?» → «Как проверить его состояние?».
+2. Тот же первый вопрос в новом разговоре → тот же follow-up.
+3. «Как откатить релиз payments?» → «Сколько времени это займёт?».
+
+Всего 6 ответов, все `GROUNDED`, с 1–2 citations. Answer lookup: 1 hit, 2 miss, 3 bypass;
+derivation: 1 would-hit, 2 miss. Повтор первого вопроса занял 3 ms; shadow-follow-up всё равно
+прошёл через модель. `/actuator/health` — `UP`, лог старта обнаружил `gemma4:12b`.
+Запущенный для проверки процесс остановлен после сессии.
+
+**Ограничения решения:** выборка мала и намеренно содержит повторы; это не оценка реального hit-rate.
+На неповторяющихся вопросах слой не экономит вызовы. Различная история даёт разные ключи, а первый
+ход при прежней KB обычно перехватывает answer cache. Польза ожидается при воспроизведении диалогов,
+повторных запросах с другими options и после изменений KB. Последний случай подтверждён integration
+тестом: новый документ делает answer miss, derivation hit сохраняется, retrieval trace новый.
+
+### Корректность и eval
+
+- Ключи всех четырёх шагов включают точный готовый prompt, standing instructions, operation, LLM,
+  temperature и pipeline fingerprint. История участвует через готовый prompt rewrite; KB revision
+  отсутствует. Тексты не добавляются в telemetry.
+- Repeat каждого шага даёт тот же провалидированный результат без `context.ai()`, новой
+  `chatbot.ai.operation` и стадии подготовки; rewrite hit также не увеличивает счётчик попыток rewrite.
+  `unchanged` кешируется, fallback, исключения и пустые/непригодные результаты — нет.
+- Записи публикуются только после успешного ответа и проверки отмены. Integration-тест отдельно
+  проверяет ошибку draft, disconnect и timeout после успешной decomposition; следующий запрос
+  снова вызывает модель. Prepared-копия вопроса сохраняет ту же очередь отложенных записей.
+- TTL не продлевается на hit, включены ограничения 5000 записей и 16 MB текста. Shadow и serving
+  нельзя включить одновременно. Hermetic-профиль явно выключает оба режима.
+- `questions-conversation.json`: baseline Recall@5 / MRR / evidence-in-budget = 0.8 / 0.8 / 0.8;
+  после rewrite = 1.0 / 1.0 / 1.0; negative sufficiency = 0. На тёплом проходе совпадают effective query
+  и все retrieval hits, повторного LLM-вызова нет.
+- `questions-hard.json` и golden: REWRITE/HYDE проходят через production expansion service.
+  Для каждого пригодного результата проверены тёплые queries, hits и sufficiency против холодного
+  прохода, а также отсутствие обращения к модели. Значит, Recall/MRR/coverage и negative sufficiency
+  совпадают у cold и warm для одного сэмпла. Пригодность результата не подменяется равенством двух
+  независимых стохастических генераций.
+- На финальном expansion-прогоне hard Recall@5 и evidence-in-budget = 1.0 у всех стратегий;
+  MRR: baseline 0.725, gated REWRITE 0.817 / HYDE 0.767, forced REWRITE 0.9 / HYDE 0.825. Negative sufficiency = 0.75
+  даже без expansion: этот известный предел near-topic набора кеш не исправляет и не ухудшает.
+  Golden REWRITE дал 1/6 sufficient negatives, HYDE — 0/6. Слой не является фильтром качества поиска.
+
+Команды проверки:
+
+```bash
+./gradlew clean build
+./gradlew ragEval --tests '*RagEvalTest.conversationRewritingDoesNotDegradeRetrieval' \
+  --tests '*RagEvalTest.expandSearchStrategies' -Peval.llm=gemma4:12b -PskipFrontend
+./gradlew test -PincludeTags=e2e -Pe2e.llm=gemma4:12b \
+  --tests '*DerivationShadowE2eTest' --tests '*DerivationCacheE2eTest' -PskipFrontend
+```
+
+Все gate прошли: `clean build` — 462 backend-теста и 14 frontend-тестов, без ошибок;
+оба eval — без skips; оба e2e на Gemma — без ошибок. Build также включает architecture/metric-catalog
+проверки. Eval-отчёты создаются в `build/reports/rag-eval/`, stage costs — в
+`build/reports/stage-costs/Derivation{Shadow,Cache}E2eTest.json` (очищаются следующим `clean`).

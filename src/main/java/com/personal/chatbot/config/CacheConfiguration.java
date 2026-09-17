@@ -5,6 +5,8 @@ import com.personal.chatbot.models.index.IndexManifest;
 import com.personal.chatbot.observability.CacheObservations;
 import com.personal.chatbot.service.cache.AnswerCache;
 import com.personal.chatbot.service.cache.CaffeineAnswerCache;
+import com.personal.chatbot.service.cache.CaffeineDerivationCache;
+import com.personal.chatbot.service.cache.DerivationCache;
 import com.personal.chatbot.service.cache.PipelineFingerprint;
 import com.personal.chatbot.service.chat.ChatAnswerCache;
 import com.personal.chatbot.service.chat.GroundedAnswerPrompt;
@@ -33,10 +35,14 @@ class CacheConfiguration {
         return PipelineFingerprint.of(llm, instructions.digest(), chat, retrieval, embeddings.fingerprint(), chunker);
     }
 
-    /**
-     * Finished answers (§1). There whether the layer is on or not: off, it is never asked, and its size
-     * reads zero like that of any empty layer.
-     */
+    @Bean
+    DerivationCache derivationCache(ChatbotProperties.Cache settings,
+                                    @Value("${embabel.models.default-llm}") String llm,
+                                    PipelineFingerprint pipeline, CacheObservations observations) {
+        return new CaffeineDerivationCache(settings.derivation(), llm, pipeline, observations, Ticker.systemTicker());
+    }
+
+    /** Finished answers; disabled layers stay empty and still expose their entry gauge. */
     @Bean
     AnswerCache answerCache(ChatbotProperties.Cache settings, CacheObservations observations) {
         return new CaffeineAnswerCache(settings.answer().ttl(), settings.answer().maxWeight(), observations,

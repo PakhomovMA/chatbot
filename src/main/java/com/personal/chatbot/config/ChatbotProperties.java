@@ -340,11 +340,14 @@ public record ChatbotProperties(
      * Results of the question-preparation steps — conversational rewrite, expansion queries, the
      * hypothetical passage, sub-questions — which depend on the question and never on the knowledge
      * base, so a change to it does not invalidate them (docs/cache-plan.md §3.2).
+     * Shadow counts would-hits without serving output; it cannot be combined with enabled.
      */
     public record DerivationCache(
             @DefaultValue("false") boolean enabled,
+            @DefaultValue("false") boolean shadow,
             @NotNull @DefaultValue("7d") Duration ttl,
-            @Min(1) @DefaultValue("5000") int maxEntries
+            @Min(1) @DefaultValue("5000") int maxEntries,
+            @NotNull @DefaultValue("16MB") DataSize maxWeight
     ) {
     }
 

@@ -4,6 +4,10 @@ import com.embabel.agent.api.common.OperationContext;
 import com.embabel.common.ai.model.LlmOptions;
 import com.personal.chatbot.config.ChatbotProperties;
 import com.personal.chatbot.models.agent.Evidence;
+import com.personal.chatbot.models.agent.RewrittenQueries;
+import com.personal.chatbot.models.agent.HypotheticalPassage;
+import com.personal.chatbot.service.chat.EvidenceExpander;
+import com.personal.chatbot.support.DerivationCaches;
 import com.personal.chatbot.models.agent.StandaloneQuery;
 import com.personal.chatbot.models.agent.SubQuestions;
 import com.personal.chatbot.models.agent.UserQuestion;
@@ -260,9 +264,11 @@ class RagEvalTest {
         assumeTrue(EvalQueryWriter.ollamaAvailable(), "Ollama required for conversational rewriting eval");
         var cases = JsonMapper.builder().build().readValue(
                 Files.readString(Path.of("src/test/resources/eval/questions-conversation.json")), ConversationSet.class);
+        var cacheMetrics = TestObservations.create();
+        var derivations = DerivationCaches.serving(cacheMetrics);
         var rewriter = new ConversationQueryRewriter(
                 new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO),
-                new GroundingInstructions(4, 3, 3, 4), 10, Duration.ofSeconds(20), TestObservations.chat());
+                new GroundingInstructions(4, 3, 3, 4), 10, Duration.ofSeconds(20), TestObservations.chat(), derivations);
         var context = Mockito.mock(OperationContext.class,
                 Mockito.RETURNS_DEEP_STUBS);
         List<Map<String, Object>> outcomes = new ArrayList<>();
@@ -293,12 +299,18 @@ class RagEvalTest {
                 long started = System.nanoTime();
                 var prepared = rewriter.rewrite(input, context);
                 long rewriteMs = (System.nanoTime() - started) / 1_000_000;
+                input.derivations().commit();
+                Mockito.clearInvocations(output);
+                var cached = rewriter.rewrite(input, context);
+                assertThat(cached.effectiveQuery()).isEqualTo(prepared.effectiveQuery());
+                Mockito.verifyNoInteractions(output);
                 if (!item.id().equals("conv-07") && !item.id().equals("conv-09")) {
                     assertThat(prepared.effectiveQuery()).as("resolved reference for %s", item.id())
                             .isNotEqualTo(item.question());
                 }
                 RetrievalResult before = retrieval.search(input.retrievalQuery());
                 RetrievalResult after = retrieval.search(prepared.retrievalQuery());
+                assertThat(retrieval.search(cached.retrievalQuery()).hits()).isEqualTo(after.hits());
                 Question relevance = new Question(item.id(), item.question(), item.expectedDocument(), item.mustContain());
                 int beforeRank = relevantRank(before, relevance), afterRank = relevantRank(after, relevance);
                 if (!relevance.isNegative()) {
@@ -329,6 +341,8 @@ class RagEvalTest {
         Files.writeString(reports.resolve("conversation-rewrite.json"), JsonMapper.builder()
                 .enable(SerializationFeature.INDENT_OUTPUT).build().writeValueAsString(report));
         log.info("Conversation rewriting eval: {}", report);
+        System.out.println("K03 conversation cache: " + cacheMetrics.meters().get("chatbot.cache.lookup")
+                .tags("layer", "derivation", "result", "hit").counter().count() + " hits; identical warm retrieval");
         assertThat(rewrittenRecall).as("paired Recall@5").isGreaterThanOrEqualTo(baselineRecall);
         assertThat(rewrittenMrr).as("paired MRR").isGreaterThanOrEqualTo(baselineMrr);
         assertThat(rewrittenCoverage).as("paired answer evidence within budget").isGreaterThanOrEqualTo(baselineCoverage);
@@ -475,6 +489,16 @@ class RagEvalTest {
     private StrategySummary measureStrategy(String setName, QuestionSet questions, ExpansionStrategy strategy,
                                             boolean forced, @Nullable EvalQueryWriter writer) {
         SearchExpander expander = new SearchExpander(retrieval, new RetrievalTraceStore(500), retrievalSettings);
+        var metrics = TestObservations.create();
+        var derivations = DerivationCaches.serving(metrics);
+        var settings = ChatSettings.of(new ChatbotProperties.ExpandSearch(strategy, EXPANSION_QUERIES),
+                ChatSettings.NO_DECOMPOSITION, ChatSettings.NO_COMPARISON);
+        var service = new EvidenceExpander(expander,
+                new GroundedAnswerPrompt(6000, 10, AnswerLanguage.AUTO), new GroundingInstructions(4, 3, 3, 4),
+                settings, metrics.chatObservations(), metrics.retrievalObservations(), derivations);
+        var context = Mockito.mock(OperationContext.class, Mockito.RETURNS_DEEP_STUBS);
+        var runner = context.ai().withLlm(ArgumentMatchers.any(LlmOptions.class))
+                .withPromptContributor(ArgumentMatchers.any());
         GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(EVIDENCE_CHAR_BUDGET, 0, AnswerLanguage.EN);
         int positives = 0;
         int negatives = 0;
@@ -490,33 +514,45 @@ class RagEvalTest {
         for (Question question : questions.questions()) {
             RetrievalQuery query = new RetrievalQuery(question.question(), NDCG_K, RetrievalMode.HYBRID, null);
             long started = System.nanoTime();
+            long validationNanos = 0;
             RetrievalResult result = retrieval.search(query);
             boolean weakBefore = !result.evidenceSufficient();
             double cosineBefore = result.maxVectorScore();
             boolean fired = strategy != ExpansionStrategy.NONE
                     && (forced ? !result.hits().isEmpty() : expander.worthExpanding(result));
             if (fired) {
-                long modelMs = 0;
-                List<String> extra = switch (strategy) {
-                    case NEIGHBOURS -> List.of(question.question());
-                    case REWRITE -> writer.rewrite(question.question(), EXPANSION_QUERIES);
-                    case HYDE -> writer.hypothetical(question.question());
-                    case NONE -> List.of();
-                };
-                if (needsModel(strategy)) {
-                    modelMs = writer.lastCallMs();
-                    modelLatencies.add(modelMs);
+                if (strategy == ExpansionStrategy.REWRITE) {
+                    var output = runner.creating(RewrittenQueries.class);
+                    Mockito.doAnswer(_ -> new RewrittenQueries(writer.rewrite(question.question(), EXPANSION_QUERIES)))
+                            .when(output).fromPrompt(ArgumentMatchers.anyString());
+                } else if (strategy == ExpansionStrategy.HYDE) {
+                    var output = runner.creating(HypotheticalPassage.class);
+                    Mockito.doAnswer(_ -> new HypotheticalPassage(writer.hypothetical(question.question()).stream()
+                            .findFirst().orElse("")))
+                            .when(output).fromPrompt(ArgumentMatchers.anyString());
                 }
-                try (RetrievalWorkflow workflow = TestObservations.retrieval()
-                        .startWorkflow(RetrievalStrategy.EXPANSION)) {
-                    result = expander.expand(query, result, strategy, extra, workflow);
-                    workflow.succeeded();
+                var input = new UserQuestion("eval", question.id(), question.question(), List.of(), NDCG_K, null);
+                var first = new Evidence(input, result);
+                result = service.expand(first, context).retrieval();
+                input.derivations().commit();
+                if (needsModel(strategy)) {
+                    modelLatencies.add(writer.lastCallMs());
+                    if (!result.expansion().queries().isEmpty()) {
+                        long validating = System.nanoTime();
+                        Mockito.clearInvocations(context);
+                        var warm = service.expand(first, context).retrieval();
+                        assertThat(warm.hits()).as("warm expansion %s %s", strategy, question.id()).isEqualTo(result.hits());
+                        assertThat(warm.evidenceSufficient()).isEqualTo(result.evidenceSufficient());
+                        assertThat(warm.expansion().queries()).isEqualTo(result.expansion().queries());
+                        Mockito.verifyNoInteractions(context);
+                        validationNanos += System.nanoTime() - validating;
+                    }
                 }
                 log.info(String.format(Locale.ROOT, "[%s %s%s] %s widened with %d queries: cosine %.3f -> %.3f%s",
                         setName, strategy, forced ? " forced" : "", question.id(), result.expansion().queries().size(),
                         cosineBefore, result.maxVectorScore(), weakBefore && result.evidenceSufficient() ? " (now sufficient)" : ""));
             }
-            long tookMs = (System.nanoTime() - started) / 1_000_000;
+            long tookMs = (System.nanoTime() - started - validationNanos) / 1_000_000;
             latencies.add(tookMs);
             if (question.isNegative()) {
                 negatives++;

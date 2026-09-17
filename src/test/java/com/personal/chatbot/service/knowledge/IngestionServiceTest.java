@@ -72,7 +72,7 @@ class IngestionServiceTest {
                         java.time.Duration.ofSeconds(5)),
                 new ChatbotProperties.Cache(
                         new ChatbotProperties.AnswerCache(false, java.time.Duration.ofHours(24), DataSize.ofMegabytes(16), false, true),
-                        new ChatbotProperties.DerivationCache(false, java.time.Duration.ofDays(7), 5000),
+                        new ChatbotProperties.DerivationCache(false, false, java.time.Duration.ofDays(7), 5000, org.springframework.util.unit.DataSize.ofMegabytes(16)),
                         new ChatbotProperties.SemanticCache(ChatbotProperties.SemanticCache.Mode.OFF,
                                 ChatbotProperties.SemanticCache.EmbeddingPrompt.SIMILARITY, 0.0, 1000, false)));
     }

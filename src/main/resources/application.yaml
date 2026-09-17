@@ -120,8 +120,8 @@ chatbot:
     buffer-size: 256
   cache:
     # Result caches (docs/cache-plan.md): finished answers, question-preparation steps, and answers for a
-    # rephrased question. The answer layer is on since K02 (docs/cache-plan.md, K02 result); the others
-    # arrive with checkpoints of their own (K03, K05–K06).
+    # rephrased question. The answer layer is on since K02; derivation is opt-in (K03).
+    # Semantic arrives with K05–K06.
     answer:
       enabled: true                      # first turns only; stored only if the KB revision held (INV-12)
       ttl: 24h                           # an entry is unreachable anyway once the KB revision moves
@@ -129,9 +129,11 @@ chatbot:
       follow-ups: false                  # also cache turns with history (the history digest is in the key)
       cache-insufficient: true           # keep "not in the KB" only when retrieval itself found too little
     derivation:
-      enabled: false
+      enabled: false                    # opt-in after K03; all four query transformations
+      shadow: false                     # would-hit only; mutually exclusive with enabled
       ttl: 7d                            # survives KB changes: these steps never see evidence
       max-entries: 5000
+      max-weight: 16MB
     semantic:
       mode: "OFF"                        # OFF | SHADOW | SERVE; quoted, or YAML reads it as a boolean
       embedding-prompt: SIMILARITY       # SIMILARITY | QUERY, chosen by the K04 calibration

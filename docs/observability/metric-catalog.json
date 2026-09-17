@@ -852,7 +852,7 @@
           "bypass"
         ]
       },
-      "boundary": "Одно решение lookup на слой за запрос (answer, semantic) или за шаг подготовки вопроса (derivation). bypass — слой выключен или запрос не eligible (docs/cache-plan.md §3.3). Ключ и текст вопроса в метрику не попадают.",
+      "boundary": "Одно решение lookup на слой за запрос (answer, semantic) или за шаг подготовки вопроса (derivation). bypass — слой выключен или запрос не eligible (docs/cache-plan.md §3.3). В derivation shadow hit означает would-hit, модель вызывается всегда. Ключ и текст вопроса в метрику не попадают.",
       "owner": "application",
       "histogram": null,
       "compatibility": "new-K01",
