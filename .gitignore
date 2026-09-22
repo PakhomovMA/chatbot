@@ -46,3 +46,23 @@ ops/observability/.env
 
 # Python bytecode from the one-off verification scripts in scripts/
 __pycache__/
+
+# Local-only working documents (design plans, checkpoint evidence, original task statement).
+# Referenced from code comments and AGENTS.md; intentionally not published.
+chatbot-plan-prompt-ru.md
+docs/system-plan.md
+docs/cache-plan.md
+docs/concurrency-plan.md
+docs/observability-plan.md
+docs/observability-validation.md
+docs/observability/o01/
+docs/observability/o02/
+docs/observability/o03/
+docs/observability/o04/
+docs/observability/o05/
+docs/observability/o06/
+docs/observability/o07/
+
+# Generated agent navigation aids (slim codemap tool)
+.slim/
+codemap.md

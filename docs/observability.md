@@ -1,9 +1,12 @@
 # Observability
 
-Что и где смотреть, когда RAG отвечает не так, как ожидалось, или медленно (docs/system-plan.md D14, Phase 8).
+Что и где смотреть, когда RAG отвечает не так, как ожидалось, или медленно.
 
-Проверенный стек и ограничения текущих измерений: [O01 baseline](observability/o01/README.md). Контракт миграции: [metric catalog](observability/metric-catalog.json), порядок работ: [observability-plan.md](observability-plan.md).
-Canonical families введены в [O02](observability/o02/README.md) и достроены в [O03](observability/o03/README.md); Prometheus/Grafana — [O04](observability/o04/README.md), trace pipeline и Langfuse — [O05](observability/o05/README.md), async correlation и content policy — [O06](observability/o06/README.md), эксплуатационная проверка и завершение миграции — [O07](observability/o07/README.md).
+Контракт метрик: [metric catalog](observability/metric-catalog.json). Checkpoint-документы O01–O07
+(проверенный стек, baseline, gates, evidence) и рабочие планы (`system-plan.md`, `observability-plan.md`,
+`cache-plan.md`, `concurrency-plan.md`) — локальные рабочие материалы maintainer'а и в репозиторий не
+входят; ниже собрано всё необходимое для эксплуатации. Verify-скрипты из `scripts/` читают evidence из
+локальных `docs/observability/o0*`, поэтому вне окружения maintainer'а запускаются только частично.
 
 ## Корреляция логов (MDC)
 
@@ -57,7 +60,7 @@ Overall-статус агрегируется Spring: OUT_OF_SERVICE/DOWN люб
 
 Legacy-семейства `chatbot.chat`, `chatbot.llm` и `chatbot.retrieval` (другие границы и population) удалены в O07
 вместе с compatibility adapter: все потребители уже читали canonical families. Соответствие старых имён
-canonical — в [O02](observability/o02/README.md). Buckets для percentile включены у canonical timers,
+canonical зафиксировано в checkpoint O02 (локально). Buckets для percentile включены у canonical timers,
 `chatbot.embedding` и `chatbot.sse.send` (`chatbot.observability.histograms=false` их снимает).
 
 Embabel (`embabel.agent.platform.observability.metrics-enabled=true`, включено всегда): `embabel.agent.duration`,
@@ -121,7 +124,7 @@ Compose project — `chatbot-observability`; отдельные named volumes `p
 и 2 GB** (срабатывает первое ограничение; WAL/head сверх block budget требуют свободного места).
 Порты UI опубликованы только на loopback: Grafana **3001**, Prometheus **9090**.
 Оба контейнера ограничены 512 MiB / 1 CPU; это проверенные стартовые лимиты для локального smoke,
-не capacity promise под production load. [Результаты измерения и gates](observability/o04/README.md).
+не capacity promise под production load. Результаты измерения и gates — в локальном evidence O04.
 
 ### Как читать dashboards
 
@@ -205,7 +208,7 @@ SPRING_PROFILES_ACTIVE=observability-otlp,metrics ./gradlew bootRun
 По умолчанию содержимое сообщений не захватывается: `capture-message-content=false` и `trace-http-details=false`
 заданы в **базовой** конфигурации, а не только в профиле.
 
-Владельцы pipeline не менялись (проверено в [O01](observability/o01/README.md) и тестом
+Владельцы pipeline не менялись (проверено в checkpoint O01 (локально) и тестом
 `TraceExportTest`): `SdkTracerProvider` и `OpenTelemetry` — Embabel, `BatchSpanProcessor` и `Sampler` —
 Boot, exporter — `TraceExportConfiguration`. Второго SDK не создаётся; старт падает, если провайдеров
 или batch processor-ов оказалось больше одного.
@@ -282,7 +285,7 @@ OTLP receiver **4318** и health Collector-а **13133** — все на loopback
 ### Сбои trace pipeline (проверено в O07)
 
 Воспроизводимый сценарий: `uv run scripts/verify_outage.py --output ... --application-log ...`
-([evidence](observability/o07/evidence/outage.json)). Ключевые факты:
+(evidence хранится локально). Ключевые факты:
 
 - **Collector недоступен.** Запросы приложения не блокируются: спаны остаются в bounded-очереди
   BatchSpanProcessor SDK (2048), излишек SDK отбрасывает с записью в лог. После старта Collector-а
@@ -308,7 +311,7 @@ OTLP receiver **4318** и health Collector-а **13133** — все на loopback
 (`chatbot-observability-restore`, порты переопределены). Воспроизводимый drill:
 `uv run scripts/verify_restore.py --output ...` — backup, restore, проверка исторических данных
 Prometheus, sqlite Grafana, API Langfuse и очереди Collector-а, затем `down -v` **только** restore-проекта
-([evidence](observability/o07/evidence/restore.json)).
+(evidence хранится локально).
 
 Измеренный disk budget локального стека (drill 2026-09-11): **≈592 MiB суммарно** (153 MiB в tar.gz) —
 Grafana 181 MiB (sqlite + provisioning/plugins state), ClickHouse data 169 MiB, ClickHouse logs 133 MiB,
@@ -339,7 +342,7 @@ Alertmanager, без внешнего хранилища — его отказ �
 
 ## O06: correlation и содержимое
 
-[O06](observability/o06/README.md) переносит application MDC/diagnostics вместе с trace context через
+Checkpoint O06 переносит application MDC/diagnostics вместе с trace context через
 chat workers, Embabel parallel executor, Reactor и SSE sender. Ingestion processing начинает новый root
 со span link к upload; pending/rerun используют context последнего enqueue, restart начинает новый trace.
 Console содержит отдельные `requestId`, `conversationId`, `messageId`, `documentId`, реальные `traceId`/`spanId`.

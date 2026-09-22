@@ -1,7 +1,8 @@
 # chatbot — local-first RAG / knowledge assistant
 
 Local-first chat + knowledge-base assistant on **Java 25 · Spring Boot 4.1.1 · Embabel 1.5.1 · Ollama · Lucene**.
-Architecture and phased implementation plan: [`docs/system-plan.md`](docs/system-plan.md).
+Operations and observability: [`docs/observability.md`](docs/observability.md); retrieval quality
+measurements: [`docs/eval-log.md`](docs/eval-log.md).
 
 Current state: **Phase 9a–9d** (search widening, conversation query rewriting, agentic RAG, question
 decomposition and source comparison) — Chat (streamed, cited
@@ -174,7 +175,7 @@ tool boundary; the model call already in flight runs to completion. Comparison a
 An answer with retrieved evidence but no citations is regenerated once from a bounded, numbered evidence
 prompt before anything is streamed. If it still claims sufficiency without valid citations, the service reports insufficient
 evidence. Citation verification checks passage references, not semantic entailment: a brand name or API URL
-alone does not establish a developer. See `docs/agentic-decomposition-fix.md` for the multipart regression.
+alone does not establish a developer.
 
 ## Retrieval and diagnostics
 

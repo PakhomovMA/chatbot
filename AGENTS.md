@@ -3,10 +3,11 @@
 Local-first RAG / knowledge assistant: Spring Boot 4.1.1 + Embabel 1.5.1 + Ollama (`gemma4:12b`) +
 EmbeddingGemma (in-process ONNX) + Lucene via `embabel-agent-rag-lucene`, Vue 3 UI.
 Key decision: retrieval, parsing, chunking, embedding and indexing are deterministic Spring services;
-Embabel only orchestrates LLM actions on top of them. `docs/system-plan.md` is the authoritative plan;
-its phases 0–9d are done. Observability hardening is tracked in `docs/observability-plan.md`
-(checkpoints O01–O07 done; O08 awaits an API decision). Result caching is tracked in
-`docs/cache-plan.md` (K01–K02 done: KB revision, pipeline fingerprint, answer cache).
+Embabel only orchestrates LLM actions on top of them. `docs/system-plan.md` is the authoritative plan
+(**local-only**, gitignored — see "Git workflow"); its phases 0–9d are done. Observability hardening is
+tracked in `docs/observability-plan.md` (checkpoints O01–O07 done; O08 awaits an API decision). Result
+caching is tracked in `docs/cache-plan.md` (K01–K03 done: KB revision, pipeline fingerprint, answer
+cache, derivation cache).
 
 ## Boundaries
 
@@ -85,28 +86,31 @@ Never:
 
 ## Git workflow
 
-Each implementation phase from `docs/system-plan.md` is a separate Git checkpoint.
+Trunk-based on `master` (protected on GitHub): every change lands through a pull request from a
+short-lived branch — `feature/<slug>`, `fix/<slug>` or `chore/<slug>` — squash-merged after CI
+(`./gradlew clean build` on GitHub Actions) is green. Never push directly to `master`, even with
+admin rights. Branch from an up-to-date `master` (`git pull --ff-only`); one logical change per PR;
+conventional commit style (`feat:`, `fix:`, `docs:`, `chore:`, `refactor:`).
 
-After completing a phase:
+Before opening or merging a PR:
 
-1. Run all verification gates and Done criteria defined for that phase.
-2. Commit only after verification succeeds.
-3. Create one logical commit containing the completed phase changes.
-4. Do not include unrelated changes in the commit.
-5. Do not start the next phase before the current phase is committed.
-6. If verification fails, do not commit a knowingly broken state.
+1. Run `./gradlew clean build` (plus `bootRun` with Ollama when the change touches models).
+2. Update docs and this file when behavior, contracts or workflow change.
+3. Do not merge a knowingly broken state.
 
-Use a concise commit message describing the phase, for example:
+Releases are tagged on `master` (`vX.Y.Z`) when the maintainer decides to cut one.
 
-`feat: complete phase 0 foundation`
-`feat: complete phase 1 embedding service`
-
-At the end of the phase report, include the resulting commit hash.
+Local-only working documents — `docs/system-plan.md`, `docs/cache-plan.md`, `docs/concurrency-plan.md`,
+`docs/observability-plan.md`, `docs/observability-validation.md`, `docs/observability/o01–o07/` and
+`chatbot-plan-prompt-ru.md` — are gitignored and not in the GitHub repo; references to them in code
+comments are intentional and stay valid in the maintainer's checkout. Published docs:
+`docs/observability.md`, `docs/eval-log.md`, `docs/observability/metric-catalog.json`. On a fresh
+clone without the plans, ask the maintainer for direction instead of guessing.
 
 ## See Also
 
-- Plan, decisions, invariants, phases: `docs/system-plan.md`
+- Plan, decisions, invariants, phases: `docs/system-plan.md` (local-only, not in the repo)
 - Runtime prerequisites and commands: `README.md`
 - Reference Embabel project (agents, prompt templates, observability patterns; **Embabel 1.0.0**, API differs):
-  `~/IdeaProjects/analyst-agent`
+  a local checkout the maintainer can point you to (ask for the path)
 - When you hit a wrong assumption in this file, propose a AGENTS.md correction.
