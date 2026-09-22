@@ -231,35 +231,12 @@ tasks.named('processResources') {
     }
 }
 
-// O01 probe is deliberately outside the application jar and the default test/runtime classpaths.
-// Its exporter changes only the destination; SDK/provider/handler selection stays auto-configured.
-sourceSets {
-    baseline {
-        compileClasspath += sourceSets.main.output
-        runtimeClasspath += sourceSets.main.output
-    }
-}
-configurations {
-    baselineImplementation.extendsFrom implementation
-    baselineRuntimeOnly.extendsFrom runtimeOnly
-}
-tasks.named('check') {
-    dependsOn tasks.named('baselineClasses')
-}
-if (project.hasProperty('observabilityBaseline')) {
-    tasks.named('bootRun') {
-        dependsOn tasks.named('baselineClasses')
-        classpath = sourceSets.baseline.runtimeClasspath
-        mainClass = 'com.personal.chatbot.baseline.ObservabilityBaseline'
-    }
-}
 tasks.register('observabilityDependencies') {
-    description = 'Writes resolved production and probe dependency inventories as JSON'
+    description = 'Writes the resolved production dependency inventory as JSON'
     group = 'verification'
     doLast {
         def target = file(providers.gradleProperty('inventoryOutput').getOrElse('/tmp/chatbot-o01-dependencies.json'))
-        def graph = [runtimeClasspath: configurations.runtimeClasspath,
-                     baselineRuntimeClasspath: configurations.baselineRuntimeClasspath].collectEntries { name, config ->
+        def graph = [runtimeClasspath: configurations.runtimeClasspath].collectEntries { name, config ->
             [(name): config.resolvedConfiguration.resolvedArtifacts.collect {
                 [group: it.moduleVersion.id.group, name: it.name, version: it.moduleVersion.id.version,
                  sha256: java.security.MessageDigest.getInstance('SHA-256').digest(it.file.bytes).encodeHex().toString()]
