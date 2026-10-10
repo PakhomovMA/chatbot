@@ -43,12 +43,18 @@ public final class OllamaTextEmbedder implements TextEmbedder {
         } catch (RuntimeException e) {
             throw new EmbeddingModelUnavailableException("Ollama is not reachable at " + baseUrl + ": " + e.getMessage(), e);
         }
+        String tagged = withDefaultTag(modelName);
         return models.stream()
-                .filter(m -> modelName.equals(m.name()) || modelName.equals(m.model()))
+                .filter(m -> tagged.equals(withDefaultTag(m.name())) || tagged.equals(withDefaultTag(m.model())))
                 .map(m -> Hashes.shortDigest(m.digest()))
                 .findFirst()
                 .orElseThrow(() -> new EmbeddingModelUnavailableException(
                         "Model " + modelName + " is not installed in Ollama at " + baseUrl + "; run: ollama pull " + modelName));
+    }
+
+    /** Ollama reads a name without a tag as {@code :latest} but lists it with the tag spelled out. */
+    static String withDefaultTag(String name) {
+        return name == null || name.contains(":") ? name : name + ":latest";
     }
 
     @Override
