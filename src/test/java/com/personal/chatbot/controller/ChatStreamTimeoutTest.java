@@ -77,15 +77,13 @@ class ChatStreamTimeoutTest extends AbstractChatbotIntegrationTest {
         MvcResult started = mockMvc.perform(post("/api/chat/stream").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"message\":\"A question nothing will answer\"}"))
                 .andExpect(request().asyncStarted()).andReturn();
+        List<ChatStreamControllerTest.SseEvent> events;
         try {
-            await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
-                    assertThat(started.getResponse().getContentAsString()).contains("event:error"));
+            events = ChatStreamControllerTest.awaitTerminalEvent(started, "error");
         } finally {
             cancelled.countDown();
         }
 
-        List<ChatStreamControllerTest.SseEvent> events =
-                ChatStreamControllerTest.parse(started.getResponse().getContentAsString());
         assertThat(events).extracting(ChatStreamControllerTest.SseEvent::name).doesNotContain("final").contains("error");
         assertThat((String) JsonPath.read(events.getLast().data(), "$.message")).isEqualTo(ChatController.TIMED_OUT);
         await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> {

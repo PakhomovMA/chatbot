@@ -28,6 +28,8 @@ import com.personal.chatbot.service.chat.GroundingInstructions;
 import com.personal.chatbot.service.chat.QuestionDecomposer;
 import com.personal.chatbot.service.embedding.EmbabelEmbeddingServiceAdapter;
 import com.personal.chatbot.service.embedding.PromptedEmbeddingService;
+import com.personal.chatbot.service.embedding.TextEmbedder;
+import com.personal.chatbot.service.embedding.ollama.OllamaTextEmbedder;
 import com.personal.chatbot.service.embedding.onnx.OnnxModelFiles;
 import com.personal.chatbot.service.embedding.onnx.OnnxTextEmbedder;
 import com.personal.chatbot.service.index.LuceneIndexStore;
@@ -78,6 +80,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * Retrieval quality gate (docs/system-plan.md §11, Phase 4): indexes the golden documents with the
  * real EmbeddingGemma model and measures Recall@5, MRR and nDCG@10 per retrieval mode.
  * Run with {@code ./gradlew ragEval} (optionally {@code -Peval.chunkSize=800 -Peval.overlap=100});
+ * {@code -Peval.embedding=ollama:<model>} swaps the in-process ONNX model for one served by Ollama;
  * reports land in {@code build/reports/rag-eval/}.
  */
 @Tag("eval")
@@ -170,6 +173,9 @@ class RagEvalTest {
     /** The production chatbot.retrieval.max-document-share; sweep it with -Peval.maxDocumentShare. */
     private final double maxDocumentShare = Double.parseDouble(System.getProperty("eval.maxDocumentShare", "0.6"));
 
+    /** {@code onnx} (default) or {@code ollama:<model>}, e.g. {@code ollama:embeddinggemma-2}. */
+    private final String embeddingBackend = System.getProperty("eval.embedding", "onnx");
+
     private PromptedEmbeddingService embeddings;
     private LuceneIndexStore store;
     private RetrievalService retrieval;
@@ -190,10 +196,9 @@ class RagEvalTest {
 
     @BeforeAll
     void indexGoldenDocuments() throws IOException {
-        assumeTrue(Files.isRegularFile(modelDir().resolve("model.onnx")), "model files not present in " + modelDir());
-        OnnxModelFiles files = OnnxModelFiles.resolve(modelDir(), "model.onnx", "tokenizer.json");
-        embeddings = new PromptedEmbeddingService(new OnnxTextEmbedder(files, "embeddinggemma-300m", 2048, 0, 768),
-                16, 2, true, TestObservations.embedding("onnx", "embeddinggemma-300m"));
+        TextEmbedder backend = embeddingBackend();
+        embeddings = new PromptedEmbeddingService(backend, 16, 2, true,
+                TestObservations.embedding(backend.provider(), backend.modelName()));
         embeddings.warmUp();
         EmbeddingFingerprint fingerprint = embeddings.fingerprint();
         store = new LuceneIndexStore(dir.resolve("index"), new EmbabelEmbeddingServiceAdapter(embeddings), fingerprint,
@@ -218,6 +223,17 @@ class RagEvalTest {
         }
         log.info("Indexed {} documents into {} chunks (chunkSize={}, overlap={}) in {} ms", documentIdsByKey.size(),
                 store.info().chunkCount(), chunkSize, overlap, (System.nanoTime() - started) / 1_000_000);
+    }
+
+    private TextEmbedder embeddingBackend() {
+        if (embeddingBackend.startsWith("ollama:")) {
+            assumeTrue(EvalQueryWriter.ollamaAvailable(), "Ollama required for " + embeddingBackend);
+            return new OllamaTextEmbedder(System.getProperty("eval.ollamaUrl", "http://localhost:11434"),
+                    embeddingBackend.substring("ollama:".length()));
+        }
+        assumeTrue(Files.isRegularFile(modelDir().resolve("model.onnx")), "model files not present in " + modelDir());
+        OnnxModelFiles files = OnnxModelFiles.resolve(modelDir(), "model.onnx", "tokenizer.json");
+        return new OnnxTextEmbedder(files, "embeddinggemma-300m", 2048, 0, 768);
     }
 
     @AfterAll

@@ -1,0 +1,13 @@
+# Opt-in: EmbeddingGemma 2 (Ollama `embeddinggemma-2`, 740m text+vision, 768d) instead of the in-process
+# EmbeddingGemma 300m. Same instruction prefixes, different vector space: the index fingerprint changes,
+# so the existing index turns INCOMPATIBLE until POST /api/knowledge-base/reindex (docs/eval-log.md,
+# 2026-10-11). Needs Ollama >= 0.36 and `ollama pull embeddinggemma-2`.
+chatbot:
+  embedding:
+    provider: ollama
+    ollama:
+      model: embeddinggemma-2
+  retrieval:
+    # EmbeddingGemma 2 puts every cosine higher: golden positives min 0.693, negatives max 0.587.
+    # The v1 threshold 0.3 would mark every negative as sufficient evidence.
+    sufficient-cosine: 0.64

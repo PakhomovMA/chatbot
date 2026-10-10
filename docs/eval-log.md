@@ -8,7 +8,7 @@ Hit релевантен, если принадлежит ожидаемому �
 доля позитивов с `evidenceSufficient=true`, доля негативов с `evidenceSufficient=true` (должна быть 0),
 латентность p50/p95. Отчёты: `build/reports/rag-eval/*.json`. Параметры: `-Peval.chunkSize`,
 `-Peval.overlap`, `-Peval.sufficientCosine`, `-Peval.minRecall` (gate, по умолчанию 0.8),
-`-Peval.llm`, `-Peval.ollamaUrl`.
+`-Peval.llm`, `-Peval.ollamaUrl`, `-Peval.embedding` (`onnx` по умолчанию или `ollama:<model>`).
 
 Второй набор — `questions-hard.json` (10 позитивов + 4 негатива «около темы»): вопросы словами
 пользователя, а не документации, включая русские к английскому корпусу. Он существует ради ветки
@@ -988,3 +988,52 @@ derivation: 1 would-hit, 2 miss. Повтор первого вопроса за
 оба eval — без skips; оба e2e на Gemma — без ошибок. Build также включает architecture/metric-catalog
 проверки. Eval-отчёты создаются в `build/reports/rag-eval/`, stage costs — в
 `build/reports/stage-costs/Derivation{Shadow,Cache}E2eTest.json` (очищаются следующим `clean`).
+
+## 2026-10-11 — EmbeddingGemma 2 против EmbeddingGemma 300m
+
+Кандидат: Ollama `embeddinggemma-2:latest` (740m, text+vision, MLX runner, `nvfp4`, 768d, контекст 8K),
+fingerprint `ollama/embeddinggemma-2/969600645b52/768/gemma-prefix-v1/l2`. Instruction prefixes по model card
+те же, что у v1 (`task: search result | query: …` / `title: none | text: …`), `PREFIX_VERSION` не меняется.
+Контроль: тот же v1 через Ollama (GGUF), чтобы отделить эффект модели от эффекта backend.
+Запуск: `./gradlew ragEval -Peval.embedding=ollama:embeddinggemma-2 [-Peval.sufficientCosine=0.64]`.
+
+### Golden set (800/100, 25 чанков)
+
+| Embedding | HYBRID MRR / nDCG@10 | VECTOR MRR / nDCG@10 | pos min / p10 / медиана cos | neg max cos | зазор |
+|---|---|---|---|---|---|
+| ONNX `embeddinggemma-300m` | 0.974 / 0.981 | 0.925 / 0.958 | 0.341 / 0.389 / 0.533 | 0.172 | 0.170 |
+| Ollama `embeddinggemma:300m` | 0.974 / 0.981 | 0.925 / 0.958 | 0.341 / 0.388 / 0.533 | 0.171 | 0.170 |
+| Ollama `embeddinggemma-2` | 0.974 / 0.981 | 0.910 / 0.946 | 0.693 / 0.708 / 0.757 | 0.587 | 0.106 |
+
+Recall@5 = 1.0 везде. GGUF-v1 совпадает с ONNX-v1 до третьего знака: backend на качество не влияет.
+
+**Порог.** Шкала cosine у v2 сдвинута вверх и сжата: все шесть негативов лежат в 0.54–0.59. С порогом
+v1 `0.3` все негативы получают `evidenceSufficient=true`, и ассистент перестаёт отвечать «в базе этого нет».
+Для v2 принят порог **0.64** (середина зазора). Абсолютный запас ±0.05 против ±0.07/0.09 у v1.
+
+### Hard set (Russian/paraphrased, 10 позитивов + 4 негатива «около темы»; LLM `gemma4:12b`)
+
+| Embedding (порог) | NONE MRR | REWRITE MRR | HYDE MRR | neg sufficient | retrieval p50 |
+|---|---|---|---|---|---|
+| ONNX v1 (0.3) | 0.725 | 0.817 | 0.767 | 0.75 | 28 ms |
+| Ollama v2 (0.64) | 0.720 | 0.800 | 0.800 | 0.75 | 37–42 ms |
+
+Кросс-язычный поиск (RU → EN) у v2 не лучше. Негативы «около темы» пропускают обе модели: это
+ограничение одного порога cosine, к модели оно не относится.
+
+### Скорость
+
+Ollama, батч 16 × ~800 символов, M-series GPU: v1 27 чанков/с, v2 19 чанков/с (~1.5× медленнее индексация).
+Retrieval p50 на ~10–15 мс выше, чем у in-process ONNX, за счёт HTTP-вызова.
+
+### Решение
+
+Default остаётся ONNX v1. На текстовом английском корпусе v2 не даёт измеримого выигрыша, зато
+медленнее, требует reindex и сужает зазор порога. Заявленные сильные стороны v2 (code retrieval +14%,
+изображения/PDF-страницы, аудио) наш golden set не покрывает. v2 доступна как профиль
+`embeddinggemma2` с откалиброванным порогом. Пересмотреть, когда в корпусе появятся код или
+мультимодальные документы. Отдельно стоит померить text-only теги `270m`/`570m`: вероятно, та же
+текстовая точность при меньших затратах.
+
+Найденный дефект: `OllamaTextEmbedder` не находил модель, заданную без тега (`embeddinggemma-2`), потому что
+Ollama перечисляет её как `embeddinggemma-2:latest`. Исправлено: имя без тега читается как `:latest`.

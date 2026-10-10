@@ -319,9 +319,7 @@ class AnswerCacheChatTest extends AbstractChatbotIntegrationTest {
         MvcResult started = mockMvc.perform(post("/api/chat/stream").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(request().asyncStarted())
                 .andReturn();
-        await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
-                assertThat(started.getResponse().getContentAsString()).containsAnyOf("event:final", "event:error"));
-        return ChatStreamControllerTest.parse(started.getResponse().getContentAsString());
+        return ChatStreamControllerTest.awaitTerminalEvent(started, "final", "error");
     }
 
     private double lookups(String result) {

@@ -35,6 +35,12 @@ Without these files the app refuses to start and prints the same instructions. A
 `chatbot.embedding.provider=ollama` to embed through Ollama (`ollama pull embeddinggemma:300m`);
 note that the two providers produce different index fingerprints.
 
+**EmbeddingGemma 2** (opt-in): `ollama pull embeddinggemma-2`, then run with
+`SPRING_PROFILES_ACTIVE=embeddinggemma2`. The profile switches to the Ollama provider and to the
+`sufficient-cosine` calibrated for that model; the existing index becomes `INCOMPATIBLE` and needs
+`POST /api/knowledge-base/reindex`. On the eval set it matches v1 on retrieval quality and is ~1.5×
+slower to index (`docs/eval-log.md`, 2026-10-11), so v1 stays the default.
+
 ## Web UI
 
 Open `http://127.0.0.1:8080/` after `./gradlew bootRun`: **Chat** (`/chat`) and **Knowledge Base** (`/knowledge`).
