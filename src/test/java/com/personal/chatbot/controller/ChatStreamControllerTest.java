@@ -92,12 +92,31 @@ class ChatStreamControllerTest extends AbstractChatbotIntegrationTest {
         MvcResult started = mockMvc.perform(post("/api/chat/stream").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(request().asyncStarted())
                 .andReturn();
-        // The emitter writes straight into the mock response; wait for the terminal event rather than for
-        // async completion, which MockMvc may observe before the last write has landed.
-        await().atMost(Duration.ofSeconds(30)).untilAsserted(() ->
-                assertThat(started.getResponse().getContentAsString()).containsAnyOf("event:final", "event:error"));
+        List<SseEvent> events = awaitTerminalEvent(started, "final", "error");
         assertThat(started.getResponse().getContentType()).startsWith(MediaType.TEXT_EVENT_STREAM_VALUE);
-        return parse(started.getResponse().getContentAsString());
+        return events;
+    }
+
+    /**
+     * Waits until one of {@code names} has been written in full, then parses the stream. The emitter writes
+     * straight into the mock response, and one event in several writes ({@code event:…\ndata:}, the
+     * payload, the blank line), so seeing the event name is not enough: a read in between finds an
+     * event with no data yet. Async completion is no signal either — MockMvc may observe it before the
+     * last write has landed.
+     */
+    static List<SseEvent> awaitTerminalEvent(MvcResult started, String... names) {
+        return parse(await().atMost(Duration.ofSeconds(30)).until(
+                () -> started.getResponse().getContentAsString(), body -> terminated(body, names)));
+    }
+
+    private static boolean terminated(String body, String... names) {
+        for (String name : names) {
+            int at = body.lastIndexOf("event:" + name);
+            if (at >= 0 && body.indexOf("\n\n", at) >= 0) {
+                return true;
+            }
+        }
+        return false;
     }
 
     static List<SseEvent> parse(String body) {
