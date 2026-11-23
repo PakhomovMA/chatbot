@@ -1,0 +1,51 @@
+Billing and Settlement Operations Manual
+Document owner: Payment Operations
+Edition: BILL-2026-09
+
+1. Operating boundaries
+
+This manual covers synthetic merchant billing, acquirer reconciliation and settlement exception handling. Operations staff may inspect originals but may not rewrite ledger entries. Corrections are represented as compensating entries linked to the original operation. Every manual action requires a ticket and a merchant identifier.
+
+2. Daily settlement schedule
+
+The EUR settlement cut-off is 16:40 CET on banking days. The GBP cut-off is 15:55 London time, while RUB settlements close at 02:15 Moscow time. A cut-off moved for a holiday must be published in the calendar billing-cutoffs at least two banking days in advance.
+
+3. Reconciliation batches
+
+Batch creation uses command shopctl billing reconcile --date <date> --currency <code>. The default lookback is 26 hours so late acquirer files are included. A completed batch receives prefix RECON-OK. If the acquirer file has no checksum, the batch remains WAITING_FILE and no automatic adjustment is made.
+
+4. Discrepancy handling
+
+A discrepancy greater than 14 minor units enters MANUAL_REVIEW. The operator records reason codes DUPLICATE_ROW, MISSING_ROW or FX_MISMATCH. The reconciliation pause code is HOLD-42 and blocks only the affected merchant and currency pair. Other merchants continue through settlement.
+
+5. Currency conversion
+
+Reporting conversion uses the European Central Bank reference rate captured at 17:00 CET. The rate is stored with six decimal places. Manual FX overrides require two operator approvals and field fx_override_ticket. Rounding is half-up to the currency minor unit after the complete batch is summed.
+
+6. Refund adjustments
+
+A refund confirmed after the original settlement appears in adjustment queue billing-refund-adjustments. The adjustment references original_charge_id and never changes the original batch total. Refund adjustments older than 20 days require Finance review before export. The export filename prefix is REFUND-ADJ-V3.
+
+7. Failed acquirer responses
+
+For ACQUIRER_BUSY the batch scheduler retries seven times with an initial delay of 125 milliseconds. NETWORK_TIMEOUT is retryable only when an idempotency key is present. After the final retry the batch state becomes DELIVERY_FAILED and alert BillingDeliveryFailed includes the batch ID without merchant names.
+
+8. Holds and releases
+
+A compliance hold is separate from HOLD-42: compliance uses reason COMPLIANCE_REVIEW and stops every currency for the merchant. Releasing a compliance hold requires the legal case identifier. Releasing a reconciliation pause requires the reconciled batch ID and command shopctl billing resume --batch <id>.
+
+9. Reporting and retention
+
+The daily finance report is named recon-daily-v2-<batch>.json. Reports are uploaded to bucket shop-finance-reports and retained for seven years. Temporary operator CSV exports expire after 24 hours. A report checksum is verified before the download link is sent to Finance.
+
+10. Recovery drill
+
+The monthly drill uses merchant sandbox-merchant-17 and a deliberately duplicated acquirer row. The expected outcome is one MANUAL_REVIEW entry and zero automatic ledger edits. The drill ticket uses prefix BILL-DRILL and records the number of duplicate keys rejected by the reconciler.
+
+11. Escalation
+
+An unreconciled amount above 250000 minor units or a delay above 45 minutes is escalated to payments-duty. If customer funds are visibly duplicated, escalate immediately as SEV-1 rather than waiting for the daily batch. Escalation notes contain currency, amount in minor units and batch state.
+
+12. Completion checklist
+
+Before closing the daily shift, the operator checks all three cut-offs, unresolved HOLD-42 entries and the report checksum. The handoff channel is #billing-ops-handoff. A green dashboard alone is insufficient: the operator must also confirm that no batch remains WAITING_FILE beyond its documented lookback.

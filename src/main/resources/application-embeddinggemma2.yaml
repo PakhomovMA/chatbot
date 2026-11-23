@@ -8,6 +8,6 @@ chatbot:
     ollama:
       model: embeddinggemma-2
   retrieval:
-    # EmbeddingGemma 2 puts every cosine higher: golden positives min 0.693, negatives max 0.587.
-    # The v1 threshold 0.3 would mark every negative as sufficient evidence.
-    sufficient-cosine: 0.64
+    # Not transferable from v1: another vector space. Eval 2.0 (docs/eval-log.md, 2026-11-24): the Youden-J rule gave
+    # 0.726, which flags ~29 % of answerable questions as insufficient; 0.69 keeps validation TPR 0.95 at FPR 0.25.
+    sufficient-cosine: 0.689956545829773

@@ -1,0 +1,51 @@
+Observability Operations Handbook
+Document owner: Reliability Enablement
+Edition: OBS-2026-04
+
+1. Scope and operating model
+
+This handbook defines telemetry for the synthetic Shop payment platform. Services emit traces, metrics and structured logs through the local OpenTelemetry collector. A service team owns the semantic correctness of its spans, while Reliability Enablement owns collector capacity and long-term storage. No telemetry backend may be queried directly by an application request path.
+
+2. Retention and sampling
+
+The telemetry retention is thirteen months for aggregated service-level metrics. Raw traces are retained for 21 days and raw debug logs for 72 hours. The default head sampler keeps 12 percent of successful checkout traces and every trace with a payment failure. A forced diagnostic trace carries baggage key shop-debug=true and is never downsampled.
+
+3. Collector deployment
+
+Each region runs three collector agents per cluster and two gateway replicas. The gateway queue holds 4000 spans. When the queue exceeds 75 percent for six minutes, alert CollectorQueuePressure fires. Operators drain the gateway with systemctl restart otel-gateway only after confirming that the alternate gateway reports healthy.
+
+4. Trace conventions
+
+Payment spans use payment.id in attributes and never include a full card number. The settlement operation name is settlement.reconcile.v2. Database statements are replaced by operation names such as ledger.select_batch. A trace with more than 800 spans is truncated by the gateway and marked trace.truncated=true.
+
+5. Metric cardinality
+
+The metric payment_request_duration_seconds has buckets 0.05, 0.1, 0.25, 0.5, 1, 2 and 5 seconds. Merchant identifiers are forbidden as metric labels. The allowed route label is the templated route, for example /v1/charges/{id}. Experiments use the label experiment_bucket with at most eight active values.
+
+6. Log handling
+
+Application logs use JSON field event_id for cross-service lookup. The field customer_email is redacted before export. A log shipment batch contains at most 700 events and is flushed every four seconds. If redaction fails, the event is dropped into quarantine topic logs-redaction-quarantine rather than exported unchanged.
+
+7. Alert burn rates
+
+The checkout availability alert uses a 14.4x burn rate over five minutes and a 6x burn rate over one hour. Both windows must fire before a page is created. The weekly error-budget report is generated at 06:30 UTC on Tuesday. Budget values below 15 percent require a reliability review before the next feature rollout.
+
+8. Dashboard ownership
+
+The executive availability dashboard is named Payments / Availability / Fleet. Dashboard changes are reviewed in folder reliability-dashboards. Every panel links to a runbook anchor and declares whether it shows raw or sampled data. A dashboard without an owner for 60 days is moved to the archive folder.
+
+9. Diagnostic workflow
+
+For elevated latency, first compare gateway queue depth with application span duration. Use command shopctl traces inspect --trace <id> --redact to print a local diagnostic summary. The command does not modify stored telemetry. If the trace is absent, check the forced sampling baggage before increasing global sampling.
+
+10. Disaster recovery
+
+Collector configuration snapshots are copied to bucket shop-observability-backup every three hours. A restore drill selects the latest snapshot with a valid SHA256 manifest and starts a separate collector on port 14318. The drill must prove export of the synthetic span DRILL-CHECK-9. Production traffic is never redirected during the drill.
+
+11. Capacity notes
+
+A gateway replica handles approximately 18000 spans per second at the standard attribute budget. Adding merchant labels is not an accepted scaling strategy. During regional failover, sampling is reduced to 5 percent for successful read-only requests while payment failure sampling remains at 100 percent.
+
+12. Review checklist
+
+Quarterly review checks retention, redaction, alert ownership and unused attributes. The review ticket uses prefix OBS-REVIEW and records the number of quarantined log events. Any change to the thirteen-month aggregate retention requires approval from Compliance and an updated capacity estimate.

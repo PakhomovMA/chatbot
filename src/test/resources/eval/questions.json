@@ -1,347 +1,3449 @@
 {
-  "description": "Golden questions for retrieval evaluation. A hit is relevant when it belongs to expectedDocument and its text contains at least one of mustContain (case- and whitespace-insensitive). Questions without expectedDocument are negatives: the corpus does not answer them and retrieval must not report sufficient evidence.",
+  "description": "Eval 2.0 multi-relevance golden set: 18 synthetic RU/EN documents, PDFs, tables and code. Each relevant entry is a mandatory passage; mustContain values are alternatives. Empty relevant marks a negative.",
   "questions": [
     {
       "id": "run-01",
       "question": "How do I restart the payments service?",
-      "expectedDocument": "payments-runbook",
-      "mustContain": [
-        "rollout restart"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "payments-runbook",
+          "mustContain": [
+            "rollout restart"
+          ]
+        }
       ]
     },
     {
       "id": "run-02",
       "question": "When must I not restart all payment replicas at once?",
-      "expectedDocument": "payments-runbook",
-      "mustContain": [
-        "settlement window"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "payments-runbook",
+          "mustContain": [
+            "settlement window"
+          ]
+        }
       ]
     },
     {
       "id": "run-03",
       "question": "What command rolls back a payments release?",
-      "expectedDocument": "payments-runbook",
-      "mustContain": [
-        "--rollback"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "payments-runbook",
+          "mustContain": [
+            "--rollback"
+          ]
+        }
       ]
     },
     {
       "id": "run-04",
       "question": "What threshold triggers the PaymentsHighDeclineRate alert?",
-      "expectedDocument": "payments-runbook",
-      "mustContain": [
-        "8 percent"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "payments-runbook",
+          "mustContain": [
+            "8 percent"
+          ]
+        }
       ]
     },
     {
       "id": "run-05",
       "question": "How do I retry a failed settlement batch?",
-      "expectedDocument": "payments-runbook",
-      "mustContain": [
-        "settlement-retry",
-        "cronjob/settlement-cron"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "payments-runbook",
+          "mustContain": [
+            "settlement-retry",
+            "cronjob/settlement-cron"
+          ]
+        }
       ]
     },
     {
       "id": "run-06",
       "question": "What is the point-in-time recovery retention for the payments database?",
-      "expectedDocument": "payments-runbook",
-      "mustContain": [
-        "fourteen days"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "payments-runbook",
+          "mustContain": [
+            "fourteen days"
+          ]
+        }
       ]
     },
     {
       "id": "run-07",
       "question": "Which feature flag forces 3-D Secure?",
-      "expectedDocument": "payments-runbook",
-      "mustContain": [
-        "3ds_enforced"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "payments-runbook",
+          "mustContain": [
+            "3ds_enforced"
+          ]
+        }
       ]
     },
     {
       "id": "run-08",
       "question": "At what time are settlement batches sent to the acquirer?",
-      "expectedDocument": "payments-runbook",
-      "mustContain": [
-        "02:15"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "payments-runbook",
+          "mustContain": [
+            "02:15"
+          ]
+        }
       ]
     },
     {
       "id": "dep-01",
       "question": "How much production traffic does the canary receive and for how long?",
-      "expectedDocument": "deployment-guide",
-      "mustContain": [
-        "five percent"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "five percent"
+          ]
+        }
       ]
     },
     {
       "id": "dep-02",
       "question": "What makes the canary abort automatically?",
-      "expectedDocument": "deployment-guide",
-      "mustContain": [
-        "0.5 percentage points"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "0.5 percentage points"
+          ]
+        }
       ]
     },
     {
       "id": "dep-03",
       "question": "Where are secrets stored and how often are they rotated?",
-      "expectedDocument": "deployment-guide",
-      "mustContain": [
-        "ninety days"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "ninety days"
+          ]
+        }
       ]
     },
     {
       "id": "dep-04",
       "question": "What is the minimum coverage for the build stage to pass?",
-      "expectedDocument": "deployment-guide",
-      "mustContain": [
-        "70 percent"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "70 percent"
+          ]
+        }
       ]
     },
     {
       "id": "dep-05",
       "question": "How are destructive database schema changes handled?",
-      "expectedDocument": "deployment-guide",
-      "mustContain": [
-        "two releases"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "two releases"
+          ]
+        }
       ]
     },
     {
       "id": "dep-06",
       "question": "How do I ship an emergency hotfix?",
-      "expectedDocument": "deployment-guide",
-      "mustContain": [
-        "hotfix"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "hotfix"
+          ]
+        }
       ]
     },
     {
       "id": "dep-07",
       "question": "How often is the staging environment refreshed?",
-      "expectedDocument": "deployment-guide",
-      "mustContain": [
-        "Monday"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "Monday"
+          ]
+        }
       ]
     },
     {
       "id": "dep-08",
       "question": "What is the minimum number of production replicas?",
-      "expectedDocument": "deployment-guide",
-      "mustContain": [
-        "below two"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "below two"
+          ]
+        }
       ]
     },
     {
       "id": "api-01",
       "question": "How long do API access tokens last?",
-      "expectedDocument": "api-reference",
-      "mustContain": [
-        "sixty minutes"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "sixty minutes"
+          ]
+        }
       ]
     },
     {
       "id": "api-02",
       "question": "What is the API rate limit per minute?",
-      "expectedDocument": "api-reference",
-      "mustContain": [
-        "600 requests"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "600 requests"
+          ]
+        }
       ]
     },
     {
       "id": "api-03",
       "question": "Which header prevents duplicate orders?",
-      "expectedDocument": "api-reference",
-      "mustContain": [
-        "Idempotency-Key"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "Idempotency-Key"
+          ]
+        }
       ]
     },
     {
       "id": "api-04",
       "question": "What happens when I cancel an order that has already shipped?",
-      "expectedDocument": "api-reference",
-      "mustContain": [
-        "ORDER_ALREADY_SHIPPED"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "ORDER_ALREADY_SHIPPED"
+          ]
+        }
       ]
     },
     {
       "id": "api-05",
       "question": "How are webhook deliveries signed?",
-      "expectedDocument": "api-reference",
-      "mustContain": [
-        "HMAC-SHA256"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "HMAC-SHA256"
+          ]
+        }
       ]
     },
     {
       "id": "api-06",
       "question": "How long does a deprecated API version keep working?",
-      "expectedDocument": "api-reference",
-      "mustContain": [
-        "twelve months"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "twelve months"
+          ]
+        }
       ]
     },
     {
       "id": "api-07",
       "question": "How many orders can one search page contain?",
-      "expectedDocument": "api-reference",
-      "mustContain": [
-        "100"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "100"
+          ]
+        }
       ]
     },
     {
       "id": "api-08",
       "question": "Which scope do I need to create orders?",
-      "expectedDocument": "api-reference",
-      "mustContain": [
-        "orders:write"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "orders:write"
+          ]
+        }
       ]
     },
     {
       "id": "onb-01",
       "question": "How do I request AWS access?",
-      "expectedDocument": "onboarding-handbook",
-      "mustContain": [
-        "access-requests"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "onboarding-handbook",
+          "mustContain": [
+            "access-requests"
+          ]
+        }
       ]
     },
     {
       "id": "onb-02",
       "question": "Which VPN client do we use?",
-      "expectedDocument": "onboarding-handbook",
-      "mustContain": [
-        "Tailscale"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "onboarding-handbook",
+          "mustContain": [
+            "Tailscale"
+          ]
+        }
       ]
     },
     {
       "id": "onb-03",
       "question": "How many reviewers are required for changes to payment code?",
-      "expectedDocument": "onboarding-handbook",
-      "mustContain": [
-        "need two"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "onboarding-handbook",
+          "mustContain": [
+            "need two"
+          ]
+        }
       ]
     },
     {
       "id": "onb-04",
       "question": "What is the branch naming convention?",
-      "expectedDocument": "onboarding-handbook",
-      "mustContain": [
-        "ticket-id"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "onboarding-handbook",
+          "mustContain": [
+            "ticket-id"
+          ]
+        }
       ]
     },
     {
       "id": "onb-05",
       "question": "How quickly must the primary on-call respond to a page?",
-      "expectedDocument": "onboarding-handbook",
-      "mustContain": [
-        "fifteen minutes"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "onboarding-handbook",
+          "mustContain": [
+            "fifteen minutes"
+          ]
+        }
       ]
     },
     {
       "id": "onb-06",
       "question": "What happens to flaky tests?",
-      "expectedDocument": "onboarding-handbook",
-      "mustContain": [
-        "quarantined"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "onboarding-handbook",
+          "mustContain": [
+            "quarantined"
+          ]
+        }
       ]
     },
     {
       "id": "onb-07",
       "question": "How do I install the developer toolchain on a new laptop?",
-      "expectedDocument": "onboarding-handbook",
-      "mustContain": [
-        "bootstrap.sh"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "onboarding-handbook",
+          "mustContain": [
+            "bootstrap.sh"
+          ]
+        }
       ]
     },
     {
       "id": "inc-01",
       "question": "What counts as a SEV-1 incident?",
-      "expectedDocument": "incident-process",
-      "mustContain": [
-        "cannot buy"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "incident-process",
+          "mustContain": [
+            "cannot buy"
+          ]
+        }
       ]
     },
     {
       "id": "inc-02",
       "question": "How do I declare an incident?",
-      "expectedDocument": "incident-process",
-      "mustContain": [
-        "/incident declare"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "incident-process",
+          "mustContain": [
+            "/incident declare"
+          ]
+        }
       ]
     },
     {
       "id": "inc-03",
       "question": "How soon must the first public status update be posted?",
-      "expectedDocument": "incident-process",
-      "mustContain": [
-        "fifteen minutes"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "incident-process",
+          "mustContain": [
+            "fifteen minutes"
+          ]
+        }
       ]
     },
     {
       "id": "inc-04",
       "question": "What is the preferred order of mitigations during an incident?",
-      "expectedDocument": "incident-process",
-      "mustContain": [
-        "roll back the latest release"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "incident-process",
+          "mustContain": [
+            "roll back the latest release"
+          ]
+        }
       ]
     },
     {
       "id": "inc-05",
       "question": "When is a postmortem due and what must it contain?",
-      "expectedDocument": "incident-process",
-      "mustContain": [
-        "five working days"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "incident-process",
+          "mustContain": [
+            "five working days"
+          ]
+        }
       ]
     },
     {
       "id": "inc-06",
       "question": "What are the incident time targets for SEV-1?",
-      "expectedDocument": "incident-process",
-      "mustContain": [
-        "thirty minutes to mitigate"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "incident-process",
+          "mustContain": [
+            "thirty minutes to mitigate"
+          ]
+        }
       ]
     },
     {
       "id": "inc-07",
       "question": "Who owns communication during an incident?",
-      "expectedDocument": "incident-process",
-      "mustContain": [
-        "communications lead",
-        "owns communication"
+      "categories": [
+        "legacy"
+      ],
+      "relevant": [
+        {
+          "document": "incident-process",
+          "mustContain": [
+            "communications lead",
+            "owns communication"
+          ]
+        }
       ]
     },
     {
       "id": "neg-01",
       "question": "What is the capital of France?",
-      "expectedDocument": null,
-      "mustContain": []
+      "categories": [
+        "legacy",
+        "negative"
+      ],
+      "relevant": []
     },
     {
       "id": "neg-02",
       "question": "How do I bake sourdough bread at home?",
-      "expectedDocument": null,
-      "mustContain": []
+      "categories": [
+        "legacy",
+        "negative"
+      ],
+      "relevant": []
     },
     {
       "id": "neg-03",
       "question": "Which planets have rings?",
-      "expectedDocument": null,
-      "mustContain": []
+      "categories": [
+        "legacy",
+        "negative"
+      ],
+      "relevant": []
     },
     {
       "id": "neg-04",
       "question": "How do I configure a Cisco router for BGP peering?",
-      "expectedDocument": null,
-      "mustContain": []
+      "categories": [
+        "legacy",
+        "negative"
+      ],
+      "relevant": []
     },
     {
       "id": "neg-05",
       "question": "What is the recommended dosage of ibuprofen for adults?",
-      "expectedDocument": null,
-      "mustContain": []
+      "categories": [
+        "legacy",
+        "negative"
+      ],
+      "relevant": []
     },
     {
       "id": "neg-06",
       "question": "How do I change the oil in a 2015 Toyota Corolla?",
-      "expectedDocument": null,
-      "mustContain": []
+      "categories": [
+        "legacy",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "sec-01",
+      "question": "How often are webhook keys rotated and how long does a deprecated API remain available?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "45 дней"
+          ]
+        },
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "180 days"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sec-02",
+      "question": "How long do break-glass access and post-rollback queue quarantine last?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "20 минут"
+          ]
+        },
+        {
+          "document": "rollback-runbook",
+          "mustContain": [
+            "five-minute quarantine"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sec-03",
+      "question": "Which container signing algorithm and stable API error field are used?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "Ed25519"
+          ]
+        },
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "diagnostic_id"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sec-04",
+      "question": "How long are access audit data and the financial ledger retained?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "400 дней"
+          ]
+        },
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "7 лет"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sec-05",
+      "question": "Which queues handle security exceptions and postmortem actions?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "security-approvals"
+          ]
+        },
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "reliability-actions"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rinc-01",
+      "question": "Which KRIT-1 payment loss threshold and checkout alert burn rate apply?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "более 10 процентов"
+          ]
+        },
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "14.4x"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rinc-02",
+      "question": "Which command assigns the commander and which annotation marks automatic rollback?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "/incident lead @user"
+          ]
+        },
+        {
+          "document": "rollback-runbook",
+          "mustContain": [
+            "rollback.source=automatic"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rinc-03",
+      "question": "When are the first internal incident message and SEV-1 support response due?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "7 минут"
+          ]
+        },
+        {
+          "document": "sla-matrix",
+          "mustContain": [
+            "SEV-1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rinc-04",
+      "question": "What replication lag is allowed and what generic replica floor applies?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "не более 5 секунд"
+          ]
+        },
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "below two"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rinc-05",
+      "question": "How long must metrics be stable before closure and what billing delay triggers escalation?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "30 минут"
+          ]
+        },
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "45 minutes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-01",
+      "question": "How long are the ledger and finance reports retained?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "7 лет"
+          ]
+        },
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "seven years"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-02",
+      "question": "How long are request logs and raw traces retained?",
+      "categories": [
+        "en-to-ru",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "30 дней"
+          ]
+        },
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "21 days"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-03",
+      "question": "What are the erasure deadline and pagination cursor lifetime?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "72 часов"
+          ]
+        },
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "24 hours"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-04",
+      "question": "How often are database and collector configuration backups made?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "каждые 6 часов"
+          ]
+        },
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "every three hours"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rel-01",
+      "question": "Which prefixes are required for release tickets and billing drills?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "`REL-`"
+          ]
+        },
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "BILL-DRILL"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rel-02",
+      "question": "When does the release freeze start and how much notice does planned maintenance need?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "четверг в 18:00"
+          ]
+        },
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "48 часов"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rel-03",
+      "question": "How do Russian and legacy canary traffic shares differ?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "10 процентов"
+          ]
+        },
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "five percent"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rel-04",
+      "question": "Which commands run manual rollback in the Russian checklist and advanced runbook?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "shopctl rollout undo"
+          ]
+        },
+        {
+          "document": "rollback-runbook",
+          "mustContain": [
+            "shopctl rollback execute"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-01",
+      "question": "Как долго хранятся агрегированные метрики и финансовый ledger?",
+      "categories": [
+        "ru-to-en",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "thirteen months"
+          ]
+        },
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "7 лет"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-02",
+      "question": "Каковы сроки хранения сырых трассировок и request-логов?",
+      "categories": [
+        "ru-to-en",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "21 days"
+          ]
+        },
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "30 дней"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-03",
+      "question": "Каковы вместимость очереди gateway и queue warning payments-api?",
+      "categories": [
+        "ru-to-en",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "4000 spans"
+          ]
+        },
+        {
+          "document": "capacity-matrix",
+          "mustContain": [
+            "400 jobs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-04",
+      "question": "Какие histogram buckets и initial backoff RetryPolicy настроены?",
+      "categories": [
+        "ru-to-en",
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "0.05, 0.1, 0.25"
+          ]
+        },
+        {
+          "document": "RetryPolicy",
+          "mustContain": [
+            "125"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-05",
+      "question": "На каком порту запускается отдельный collector в restore drill?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "14318"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-01",
+      "question": "Во сколько наступает EUR settlement cut-off?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "16:40 CET"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-02",
+      "question": "Какой код приостанавливает reconciliation для пары merchant и currency?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "HOLD-42"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-03",
+      "question": "Во сколько фиксируется reference rate для reporting conversion?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "reference rate"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-04",
+      "question": "В какую очередь попадает поздний refund adjustment?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "adjustment queue"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-05",
+      "question": "При какой несогласованной сумме нужна эскалация?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "250000 minor units"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cap-01",
+      "question": "Сколько минимум и максимум pods выделено payments-api?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "capacity-matrix",
+          "mustContain": [
+            "payments-api"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cap-02",
+      "question": "До какого числа pods может масштабироваться ledger-writer?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "capacity-matrix",
+          "mustContain": [
+            "ledger-writer"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cap-03",
+      "question": "Какой queue warning задан для webhook-relay?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "capacity-matrix",
+          "mustContain": [
+            "webhook-relay"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cap-04",
+      "question": "Как называется еженедельный load-test сценарий?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "capacity-matrix",
+          "mustContain": [
+            "mixed-checkout-v4"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sla-01",
+      "question": "Какой first response target у SEV-1?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "sla-matrix",
+          "mustContain": [
+            "SEV-1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sla-02",
+      "question": "Какой workaround target у SEV-2?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "sla-matrix",
+          "mustContain": [
+            "SEV-2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sla-03",
+      "question": "Какой merchant tier получает named incident contact?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "sla-matrix",
+          "mustContain": [
+            "strategic"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sla-04",
+      "question": "Во сколько вступает в силу смена merchant tier?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "sla-matrix",
+          "mustContain": [
+            "00:00 UTC"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "java-01",
+      "question": "Какое максимальное число попыток задаёт RetryPolicy?",
+      "categories": [
+        "ru-to-en"
+      ],
+      "relevant": [
+        {
+          "document": "RetryPolicy",
+          "mustContain": [
+            "MAX_ATTEMPTS = 7"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "java-02",
+      "question": "Какой initial backoff задан в RetryPolicy?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "RetryPolicy",
+          "mustContain": [
+            "125"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "java-03",
+      "question": "Какие коды ошибок считаются retryable в RetryPolicy?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "RetryPolicy",
+          "mustContain": [
+            "ACQUIRER_BUSY"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "py-01",
+      "question": "Какой ledger tolerance в minor units задан в settlement_reconciler?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "settlement_reconciler",
+          "mustContain": [
+            "LEDGER_TOLERANCE_MINOR = 14"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "py-02",
+      "question": "Какие валюты обрабатывает needs_review без автоматического unknown-currency review?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "settlement_reconciler",
+          "mustContain": [
+            "RUB"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "py-03",
+      "question": "Какой prefix использует report_name?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "settlement_reconciler",
+          "mustContain": [
+            "recon-daily-v2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sql-01",
+      "question": "Какой burst limit используется по умолчанию в rate_limiter.sql?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "rate_limiter",
+          "mustContain": [
+            "default 90"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sql-02",
+      "question": "Какой sustained_limit задан для refund sandbox-merchant-17?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "rate_limiter",
+          "mustContain": [
+            "'refund', 35"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sql-03",
+      "question": "Какая policy_version записана в rate_limiter.sql?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "rate_limiter",
+          "mustContain": [
+            "limits-2026-b"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rbk-01",
+      "question": "Какая команда запускает manual rollback в advanced runbook?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "rollback-runbook",
+          "mustContain": [
+            "shopctl rollback execute"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rbk-02",
+      "question": "За сколько секунд aborted canary возвращает трафик на stable image?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "rollback-runbook",
+          "mustContain": [
+            "90 seconds"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rbk-03",
+      "question": "Что проверяет rollback verify по числу synthetic charges и refunds?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "rollback-runbook",
+          "mustContain": [
+            "ten synthetic charges"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rbk-04",
+      "question": "Какой lock file останавливает schema migrations?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "rollback-runbook",
+          "mustContain": [
+            "/run/payments/rollback.lock"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "apiv-01",
+      "question": "Какой header выбирает версию API?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "Shop-API-Version"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "apiv-02",
+      "question": "Сколько дней deprecated version остаётся доступной?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "180 days"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "apiv-03",
+      "question": "Каков срок жизни pagination cursor?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "24 hours"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "apiv-04",
+      "question": "Какая настройка включает webhook contract v3?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "webhook_contract=v3"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sec-06",
+      "question": "Сколько часов действует сессия оператора admin-панели?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "9 часов"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rinc-06",
+      "question": "Как часто обновляется внешний статус КРИТ-1?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "каждые 20 минут"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-05",
+      "question": "Через сколько часов удаляются экспортированные CSV?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "24 часа"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rel-05",
+      "question": "Какой p95 порог останавливает rollout?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "900 миллисекунд"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-06",
+      "question": "Какая доля payment failure traces сохраняется?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "payment failure"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-01",
+      "question": "Compare canary traffic in the payments runbook and the Russian release checklist.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "five percent"
+          ]
+        },
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "10 процентов"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-02",
+      "question": "Compare secret rotation in the deployment guide with webhook key rotation in the security policy.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "ninety days"
+          ]
+        },
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "45 дней"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-03",
+      "question": "Compare external status update cadence in the incident process and the Russian incident regulation.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "incident-process",
+          "mustContain": [
+            "fifteen minutes"
+          ]
+        },
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "каждые 20 минут"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-04",
+      "question": "Compare the original payments rollback command with the advanced manual rollback command.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "payments-runbook",
+          "mustContain": [
+            "--rollback"
+          ]
+        },
+        {
+          "document": "rollback-runbook",
+          "mustContain": [
+            "shopctl rollback execute"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-05",
+      "question": "Compare API deprecation support duration in the API reference and versioning guide.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "twelve months"
+          ]
+        },
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "180 days"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-06",
+      "question": "Compare primary on-call response and SEV-1 first response targets.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "onboarding-handbook",
+          "mustContain": [
+            "fifteen minutes"
+          ]
+        },
+        {
+          "document": "sla-matrix",
+          "mustContain": [
+            "SEV-1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-07",
+      "question": "Compare RUB settlement timing in the payments runbook and billing operations manual.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "payments-runbook",
+          "mustContain": [
+            "02:15"
+          ]
+        },
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "02:15 Moscow"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-08",
+      "question": "Compare generic minimum production replicas with the payments-api capacity floor.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "below two"
+          ]
+        },
+        {
+          "document": "capacity-matrix",
+          "mustContain": [
+            "payments-api"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-09",
+      "question": "Compare postmortem deadlines in the two incident documents.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "incident-process",
+          "mustContain": [
+            "five working days"
+          ]
+        },
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "3 рабочих дня"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-10",
+      "question": "Compare the general API rate limit with the sandbox charge sustained limit in SQL.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "600 requests"
+          ]
+        },
+        {
+          "document": "rate_limiter",
+          "mustContain": [
+            "'charge', 120"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-11",
+      "question": "Compare API token lifetime with the admin operator session lifetime.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "sixty minutes"
+          ]
+        },
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "9 часов"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cmp-12",
+      "question": "Compare automatic canary abort thresholds in the deployment guide and Russian release checklist.",
+      "categories": [
+        "multi-chunk",
+        "comparison"
+      ],
+      "relevant": [
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "0.5 percentage points"
+          ]
+        },
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "0.8 процентного пункта"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-01",
+      "question": "What are the break-glass duration and ledger retention period?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "20 минут"
+          ]
+        },
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "7 лет"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-02",
+      "question": "Which signing algorithm and stable error field are used?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "Ed25519"
+          ]
+        },
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "diagnostic_id"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-03",
+      "question": "What replication lag is allowed and how quickly must a manual release rollback finish?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "не более 5 секунд"
+          ]
+        },
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "25 минут"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-04",
+      "question": "How often are database backups and collector configuration snapshots made?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "каждые 6 часов"
+          ]
+        },
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "every three hours"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-05",
+      "question": "What is the erasure deadline and which prefix is required for a release ticket?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "72 часов"
+          ]
+        },
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "REL-"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-06",
+      "question": "What canary traffic share and legacy abort threshold apply?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "10 процентов"
+          ]
+        },
+        {
+          "document": "deployment-guide",
+          "mustContain": [
+            "0.5 percentage points"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-07",
+      "question": "How long are raw debug logs and postmortem drafts without personal data retained?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "72 hours"
+          ]
+        },
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "2 года"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-08",
+      "question": "Which restore-drill port and audit retention period are configured?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "14318"
+          ]
+        },
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "400 дней"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-09",
+      "question": "Which reconciliation lookback is documented and which Python constant implements it?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "26 hours"
+          ]
+        },
+        {
+          "document": "settlement_reconciler",
+          "mustContain": [
+            "BATCH_LOOKBACK_HOURS = 26"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-10",
+      "question": "When do refund adjustments need Finance review and when do CSV exports expire?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "20 days"
+          ]
+        },
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "24 часа"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-11",
+      "question": "What retry counts appear in the billing manual and RetryPolicy?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "seven times"
+          ]
+        },
+        {
+          "document": "RetryPolicy",
+          "mustContain": [
+            "MAX_ATTEMPTS = 7"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-12",
+      "question": "What is the ledger-writer pod ceiling and the SQL policy version?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "capacity-matrix",
+          "mustContain": [
+            "ledger-writer"
+          ]
+        },
+        {
+          "document": "rate_limiter",
+          "mustContain": [
+            "limits-2026-b"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-13",
+      "question": "What is the payments-api pod maximum and the Russian canary traffic share?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "capacity-matrix",
+          "mustContain": [
+            "payments-api"
+          ]
+        },
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "10 процентов"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-14",
+      "question": "What is the SEV-2 first response and what event defines KRIT-2?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "sla-matrix",
+          "mustContain": [
+            "SEV-2"
+          ]
+        },
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "КРИТ-2"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-15",
+      "question": "Which billing retry delay and RetryPolicy maximum backoff apply?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "125 milliseconds"
+          ]
+        },
+        {
+          "document": "RetryPolicy",
+          "mustContain": [
+            "MAX_BACKOFF = Duration.ofSeconds(9)"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-16",
+      "question": "Which retryable code is in Java and which request header makes order retries safe?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "RetryPolicy",
+          "mustContain": [
+            "NETWORK_TIMEOUT"
+          ]
+        },
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "Idempotency-Key"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-17",
+      "question": "Which report prefix is implemented in Python and how long are finance reports retained?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "settlement_reconciler",
+          "mustContain": [
+            "REPORT_PREFIX = \"recon-daily-v2\""
+          ]
+        },
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "seven years"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-18",
+      "question": "What is the sandbox charge limit in SQL and payments-api pod maximum in the capacity table?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "rate_limiter",
+          "mustContain": [
+            "'charge', 120"
+          ]
+        },
+        {
+          "document": "capacity-matrix",
+          "mustContain": [
+            "payments-api"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-19",
+      "question": "Which rollback lock pauses migrations and which command restores a privacy-check snapshot?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "rollback-runbook",
+          "mustContain": [
+            "/run/payments/rollback.lock"
+          ]
+        },
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "shopctl restore --snapshot"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-20",
+      "question": "Which receipt prefixes indicate rollback and reconciliation success?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "rollback-runbook",
+          "mustContain": [
+            "RBK-OK"
+          ]
+        },
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "RECON-OK"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-21",
+      "question": "Compare cursor lifetime with temporary CSV export lifetime.",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "24 hours"
+          ]
+        },
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "24 часа"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-22",
+      "question": "Which webhook contract setting enables v3 and which signature algorithm does the API reference specify?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "webhook_contract=v3"
+          ]
+        },
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "HMAC-SHA256"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-23",
+      "question": "Which optional response change is compatible and which scope creates orders?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "api-versioning-guide",
+          "mustContain": [
+            "optional response field"
+          ]
+        },
+        {
+          "document": "api-reference",
+          "mustContain": [
+            "orders:write"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-24",
+      "question": "Which identifiers are forbidden in metric labels and privacy metrics?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "Merchant identifiers are forbidden"
+          ]
+        },
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "не должна содержать email"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-25",
+      "question": "What checkout burn rate and KRIT-1 payment loss threshold are used?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "14.4x"
+          ]
+        },
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "более 10 процентов"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-26",
+      "question": "Which reconciliation pause code and legal hold console are used?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "HOLD-42"
+          ]
+        },
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "legal-hold-console"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-27",
+      "question": "How is FX rounding performed and what discrepancy threshold enters review?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "half-up"
+          ]
+        },
+        {
+          "document": "settlement_reconciler",
+          "mustContain": [
+            "LEDGER_TOLERANCE_MINOR = 14"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "multi-28",
+      "question": "What is the post-rollback queue quarantine and the legacy settlement cut-off?",
+      "categories": [
+        "multi-chunk"
+      ],
+      "relevant": [
+        {
+          "document": "rollback-runbook",
+          "mustContain": [
+            "five-minute quarantine"
+          ]
+        },
+        {
+          "document": "payments-runbook",
+          "mustContain": [
+            "02:15"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "near-01",
+      "question": "Сколько стоит месячная подписка на PagerDuty для команды платежей?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-02",
+      "question": "Which acquirer do we use in Brazil?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-03",
+      "question": "Каков график отпусков команды платежей?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-04",
+      "question": "Какой срок хранения записей телефонных разговоров поддержки?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-05",
+      "question": "Как получить постоянный root-доступ без заявки?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-06",
+      "question": "При каком потреблении памяти canary останавливается автоматически?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-07",
+      "question": "Какая комиссия конвертации применяется к USD?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-08",
+      "question": "Какой Redis endpoint использует rate limiter?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-09",
+      "question": "Сколько одновременных WebSocket-соединений разрешено аккаунту?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-10",
+      "question": "На какой номер звонить дежурному при КРИТ-1?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-11",
+      "question": "Какова стоимость хранения одного span в месяц?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-12",
+      "question": "Какой interchange fee взимает acquirer за корпоративные карты?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-13",
+      "question": "Какой телефон используется для жалоб на refund?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-14",
+      "question": "Какая команда откатывает конфигурацию Kafka broker?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-15",
+      "question": "Сколько GPU выделено payments-api?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-16",
+      "question": "Сколько стоит индивидуальный круглосуточный SLA для strategic merchant?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-17",
+      "question": "Какая минимальная длина пароля оператора admin-панели?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "near-18",
+      "question": "Какая версия Android SDK рекомендуется для API?",
+      "categories": [
+        "near-topic",
+        "negative"
+      ],
+      "relevant": []
+    },
+    {
+      "id": "sec-x01",
+      "question": "What Vault path stores service secrets?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "secret/payments/<service>/<environment>"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sec-x02",
+      "question": "How long does an old webhook signing key remain valid for verification?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "72 часа"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sec-x03",
+      "question": "Which group grants break-glass access?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "security-break-glass"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sec-x04",
+      "question": "What is the maximum duration of a security policy exception?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "30 дней"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sec-x05",
+      "question": "Which operator action requires reauthentication before a refund?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "Повторная аутентификация"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sec-x06",
+      "question": "How long is an account locked after five bad attempts?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-security-policy",
+          "mustContain": [
+            "15 минут"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "inc-x01",
+      "question": "How much advance notice excludes planned maintenance from being an incident?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "48 часов"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "inc-x02",
+      "question": "How often does the incident scribe update the timeline?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "каждые 10 минут"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "inc-x03",
+      "question": "Which queue receives postmortem actions?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "reliability-actions"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "inc-x04",
+      "question": "What releases are forbidden during KRIT-1?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "несвязанные релизы"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "inc-x05",
+      "question": "What queue operation is forbidden during KRIT-1?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "ручная очистка очередей"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "inc-x06",
+      "question": "What merchant impact must the commander record at closure?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-incident-regulation",
+          "mustContain": [
+            "число затронутых мерчантов"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-x01",
+      "question": "How long are postmortem drafts without personal data retained?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "2 года"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-x02",
+      "question": "What legal case format is required for a hold?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "LH-YYYY-NNN"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-x03",
+      "question": "How many confirmations are required to release a legal hold?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "двух подтверждений"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-x04",
+      "question": "How many stores are checked before erasure confirmation?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "четырёх хранилищ"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-x05",
+      "question": "How long are primary database backups retained?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "35 дней"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data-x06",
+      "question": "What overdue erasure share is allowed?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-data-retention",
+          "mustContain": [
+            "менее 0.5 процента"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rel-x01",
+      "question": "How long must feature flags be checked in staging?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "20 минут"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rel-x02",
+      "question": "Which label allows a hotfix during the freeze?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "freeze-exception"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rel-x03",
+      "question": "Which traffic steps follow the canary?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "25, 50 и 100 процентов"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rel-x04",
+      "question": "What pause separates post-canary traffic steps?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "15 минут"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rel-x05",
+      "question": "Which channel receives the post-rollback message?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "#release-audit"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "rel-x06",
+      "question": "What amount is used for the post-release control purchase?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "ru-release-checklist",
+          "mustContain": [
+            "101 RUB"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x01",
+      "question": "How long are raw debug logs retained?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "72 hours"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x02",
+      "question": "What share of successful checkout traces is sampled by default?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "12 percent"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x03",
+      "question": "Which baggage key forces a diagnostic trace?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "shop-debug"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x04",
+      "question": "How many gateway replicas run in each region?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "two gateway replicas"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x05",
+      "question": "When does CollectorQueuePressure fire?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "75 percent"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x06",
+      "question": "When is a trace marked truncated?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "800 spans"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x07",
+      "question": "What is the maximum log shipment batch size?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "700 events"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x08",
+      "question": "How often is a log shipment batch flushed?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "four seconds"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x09",
+      "question": "Which topic receives events that fail redaction?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "logs-redaction-quarantine"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x10",
+      "question": "When is the weekly error-budget report generated?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "06:30 UTC"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x11",
+      "question": "What remaining error budget requires reliability review?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "15 percent"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x12",
+      "question": "After how many ownerless days is a dashboard archived?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "60 days"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x13",
+      "question": "Which command prints a redacted trace summary?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "shopctl traces inspect"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x14",
+      "question": "Which bucket stores collector configuration snapshots?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "shop-observability-backup"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x15",
+      "question": "What span throughput can one gateway replica handle?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "18000 spans"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "obs-x16",
+      "question": "What successful read-only sampling rate is used during regional failover?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "observability-handbook",
+          "mustContain": [
+            "5 percent"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x01",
+      "question": "What is the GBP settlement cut-off?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "GBP cut-off"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x02",
+      "question": "How far ahead must a holiday cut-off change be published?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "billing-cutoffs"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x03",
+      "question": "Which command creates a reconciliation batch?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "shopctl billing reconcile"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x04",
+      "question": "Which prefix marks a completed reconciliation batch?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "RECON-OK"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x05",
+      "question": "What state is used when an acquirer file has no checksum?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "WAITING_FILE"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x06",
+      "question": "How many decimal places are stored for the FX rate?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "six decimal places"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x07",
+      "question": "Which field records a manual FX override ticket?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "fx_override_ticket"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x08",
+      "question": "Which field links a refund adjustment to the original charge?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "original_charge_id"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x09",
+      "question": "What filename prefix is used for refund adjustments?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "REFUND-ADJ-V3"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x10",
+      "question": "What batch state follows the final failed delivery retry?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "DELIVERY_FAILED"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x11",
+      "question": "Which reason stops all currencies for a merchant?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "compliance hold"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x12",
+      "question": "Which command releases a reconciliation pause?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "shopctl billing resume"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x13",
+      "question": "Which bucket stores finance reports?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "shop-finance-reports"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x14",
+      "question": "Which ticket prefix is used for the billing recovery drill?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "BILL-DRILL"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x15",
+      "question": "What reconciliation delay triggers escalation?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "45 minutes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bill-x16",
+      "question": "Which channel receives the billing shift handoff?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "billing-operations",
+          "mustContain": [
+            "handoff channel"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cap-x01",
+      "question": "What CPU target is assigned to payments-api?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "capacity-matrix",
+          "mustContain": [
+            "62 percent"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cap-x02",
+      "question": "What scale-in cooldown is assigned to settlement-worker?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "capacity-matrix",
+          "mustContain": [
+            "20 minutes"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sla-x01",
+      "question": "What is the first response target for SEV-4?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "sla-matrix",
+          "mustContain": [
+            "1 working day"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sla-x02",
+      "question": "Which queue receives a late SEV-2 workaround escalation?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "sla-matrix",
+          "mustContain": [
+            "payments-critical"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "java-x01",
+      "question": "What jitter ratio is configured in RetryPolicy?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "RetryPolicy",
+          "mustContain": [
+            "JITTER_RATIO = 0.20"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "java-x02",
+      "question": "Which audit tag suffix versions the retry policy?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "RetryPolicy",
+          "mustContain": [
+            "-v3"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "py-x01",
+      "question": "Which suspicious status constant is defined by the reconciler?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "settlement_reconciler",
+          "mustContain": [
+            "SUSPICIOUS_STATUS = \"MANUAL_REVIEW\""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "sql-x01",
+      "question": "What sustained charge limit is assigned to merchant-enterprise-8?",
+      "categories": [],
+      "relevant": [
+        {
+          "document": "rate_limiter",
+          "mustContain": [
+            "850"
+          ]
+        }
+      ]
     }
   ]
 }

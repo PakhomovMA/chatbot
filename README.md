@@ -37,9 +37,11 @@ note that the two providers produce different index fingerprints.
 
 **EmbeddingGemma 2** (opt-in): `ollama pull embeddinggemma-2`, then run with
 `SPRING_PROFILES_ACTIVE=embeddinggemma2`. The profile switches to the Ollama provider and to the
-`sufficient-cosine` calibrated for that model; the existing index becomes `INCOMPATIBLE` and needs
-`POST /api/knowledge-base/reindex`. On the eval set it matches v1 on retrieval quality and is ~1.5×
-slower to index (`docs/eval-log.md`, 2026-10-11), so v1 stays the default.
+`sufficient-cosine` set for that model; the existing index becomes `INCOMPATIBLE` and needs
+`POST /api/knowledge-base/reindex`. On Eval 2.0 (`docs/eval-log.md`, 2026-11-24) Recall@5, MRR and nDCG@10
+are inconclusive between v1 and v2, while v2 separates answerable from unanswerable questions better
+(it marks fewer near-topic negatives as sufficient at a cost of ~5 % of answerable ones). It needs Ollama,
+so v1 stays the local default.
 
 ## Web UI
 
@@ -199,7 +201,7 @@ profile (traces via local OpenTelemetry Collector to Langfuse, compose profile `
 
 Retrieval is deterministic: vector k-NN and BM25 candidates are fused with reciprocal rank fusion
 (`chatbot.retrieval.*`). `evidenceSufficient` is true when the best cosine clears the calibrated
-floor (`sufficient-cosine`, 0.3). Quality is measured with `./gradlew ragEval` against
+floor (`sufficient-cosine`, 0.283 for v1). Quality is measured with `./gradlew ragEval` against
 `src/test/resources/eval` (needs the ONNX model files); results and the calibration history live in
 [`docs/eval-log.md`](docs/eval-log.md).
 

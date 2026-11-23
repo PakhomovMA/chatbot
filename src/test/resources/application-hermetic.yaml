@@ -6,6 +6,10 @@ chatbot:
     provider: fake
   index:
     in-memory: true
+    # Fake embeddings and tiny fixtures use the historical test geometry, not model-specific production calibration.
+    max-chunk-size: 800
+  retrieval:
+    sufficient-cosine: 0.3
   chat:
     # Tests choose the answer mode per request; the default must not follow the developer's application.yaml.
     mode: DETERMINISTIC
