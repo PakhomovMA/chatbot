@@ -87,9 +87,13 @@ Hermetic-валидация проверяет:
 
 Sweep: `max-chunk-size = 500, 800, 1200`, overlap остаётся 100. Выбор выполняется на calibration-части с ONNX v1 при Recall@5 не ниже 0.8. Приоритет: multi-chunk fragment Recall@5, затем nDCG@10, MRR, общий Recall@5; latency используется только как наблюдение, а не как скрытый критерий качества. Выбранное значение проверяется на validation-части и используется для обеих моделей. Итоговая таблица всех кандидатов попадает в `eval-log.md`.
 
+Отклонение после review (2026-11-24): fragment Recall@5 не учитывает, сколько чанков реально помещается в prompt. Sweep дополнен покрытием multi-chunk фрагментов на production top-k в пределах evidence budget. По Recall@5 выигрывает 1200, по покрытию в бюджете — 800; разницы малы, и maintainer оставил 800 (действующий default, без принудительного reindex).
+
 ### Sufficiency threshold
 
 Порог выбирается отдельно для v1 и v2 на calibration-части выбранного chunking. Кандидаты — midpoint между наблюдаемыми top-cosine значениями; критерий — максимум Youden J (`TPR - FPR`), при равенстве выбирается больший абсолютный зазор до ближайших calibration-значений. На validation-части отдельно публикуются TPR/FPR и confusion counts. Нулевой FPR не постулируется заранее: near-topic негативы могут пересекаться с позитивами, и это должно быть видно в результате.
+
+Top cosine для калибровки берётся из поиска на production top-k (8), а не из ranking-поиска top-10: от top-k зависят кандидаты и fused hits, а значит и максимальный cosine, с которым production сравнивает порог (уточнение после review, 2026-11-24).
 
 Значения записываются в `chatbot.retrieval.sufficient-cosine` для v1 и в профиль `embeddinggemma2` для v2. Выбранный `chatbot.index.max-chunk-size` обновляется в общей конфигурации. Комментарии и README синхронизируются с новой калибровкой.
 
@@ -97,7 +101,7 @@ Sweep: `max-chunk-size = 500, 800, 1200`, overlap остаётся 100. Выбо
 
 Оба прогона используют одинаковые документы, вопросы, chunking и retrieval-настройки, кроме embedding-модели и её откалиброванного sufficiency threshold. Сравниваются ONNX v1 и Ollama `embeddinggemma-2:latest`.
 
-Comparison-скрипт на Python standard library принимает два JSON-отчёта и создаёт Markdown. Для каждой метрики используются пары с одинаковым question ID. Bootstrap: 10 000 paired resamples вопросов, фиксированный seed, percentile 95% CI для `v2 - v1`. Ranking-метрики считаются на позитивах, negative sufficiency — на негативах.
+Comparison-скрипт на Python standard library принимает два JSON-отчёта и создаёт Markdown. Для каждой метрики используются пары с одинаковым question ID. Bootstrap: 10 000 paired resamples вопросов, фиксированный seed, percentile 95% CI для `v2 - v1`. Ranking-метрики считаются на позитивах, negative sufficiency — на негативах validation-части: порог каждой модели подобран на calibration-части, и in-sample негативы завышали бы различие. Полярность вопроса скрипт берёт из флага `negative` отчёта. В отчёт также выводятся диагностики, не влияющие на verdict: positive sufficiency (цена более строгого порога) и threshold-free AUC по top cosine, отделяющий вклад embedding от выбора порога.
 
 - Модели различимы по метрике, если её CI не содержит ноль.
 - Паритет по метрике доказан, если весь CI находится внутри `[-0.02, +0.02]`.

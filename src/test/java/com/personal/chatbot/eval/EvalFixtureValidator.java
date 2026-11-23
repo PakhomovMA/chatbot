@@ -5,6 +5,7 @@ import com.personal.chatbot.service.parsing.ProvenanceChunkTransformer;
 
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -24,10 +25,14 @@ public final class EvalFixtureValidator {
             String normalizedText = question.question().toLowerCase(Locale.ROOT).trim().replaceAll("\\s+", " ");
             String previousId = idsByQuestionText.putIfAbsent(normalizedText, question.id());
             require(previousId == null, "Duplicate question text in " + previousId + " and " + question.id());
+            // Java scores a question as negative by its empty evidence and exports that flag to the comparison
+            // script; the categories must agree with it in both directions.
             boolean negativeCategory = question.categories().contains("negative")
                     || question.categories().contains("near-topic");
             require(!negativeCategory || question.relevant().isEmpty(),
                     "negative question " + question.id() + " has relevant evidence");
+            require(negativeCategory || !question.relevant().isEmpty(),
+                    "question " + question.id() + " has no relevant evidence but no negative category");
         }
 
         require(set.questions().size() >= 160, "Expected at least 160 questions, got " + set.questions().size());
@@ -54,7 +59,7 @@ public final class EvalFixtureValidator {
             }
         }
         for (EvalQuestion question : set.questions()) {
-            Set<String> distinctRelevantChunks = new HashSet<>();
+            Map<String, Chunk> relevantChunks = new LinkedHashMap<>();
             for (EvalQuestion.RelevantPassage target : question.relevant()) {
                 List<Chunk> documentChunks = byDocument.get(target.document());
                 require(documentChunks != null,
@@ -62,30 +67,29 @@ public final class EvalFixtureValidator {
                 for (String phrase : target.mustContain()) {
                     require(!phrase.isBlank(), "Blank expected phrase in question " + question.id());
                 }
-                List<Chunk> matches = documentChunks.stream().filter(chunk -> containsAny(chunk, target)).toList();
+                List<Chunk> matches = documentChunks.stream().filter(chunk -> isRelevant(chunk, target)).toList();
                 require(!matches.isEmpty(), "Expected phrase " + target.mustContain() + " from " + target.document()
                         + " not found for question " + question.id());
-                matches.forEach(chunk -> distinctRelevantChunks.add(chunk.getId()));
+                matches.forEach(chunk -> relevantChunks.putIfAbsent(chunk.getId(), chunk));
             }
-            require(!question.isMultiChunk() || distinctRelevantChunks.size() >= 2,
-                    "Multi-chunk question " + question.id() + " does not have two distinct relevant chunks");
+            if (question.isMultiChunk()) {
+                // Every target needs a chunk of its own, otherwise full coverage is trivially met or unreachable.
+                var matching = new EvalMetrics.FragmentMatching<Chunk>(question.relevant(),
+                        EvalFixtureValidator::isRelevant);
+                relevantChunks.values().forEach(matching::add);
+                require(question.relevant().size() >= 2 && matching.matched() == question.relevant().size(),
+                        "Multi-chunk question " + question.id() + " does not have a distinct relevant chunk for every target");
+            }
         }
     }
 
-    private static boolean containsAny(Chunk chunk, EvalQuestion.RelevantPassage target) {
-        if (target.mustContain().isEmpty()) {
-            return true;
-        }
-        String text = normalise(chunk.getUrtext());
-        return target.mustContain().stream().anyMatch(phrase -> text.contains(normalise(phrase)));
+    private static boolean isRelevant(Chunk chunk, EvalQuestion.RelevantPassage target) {
+        return target.document().equals(String.valueOf(chunk.getMetadata().get(ProvenanceChunkTransformer.DOCUMENT_ID)))
+                && EvalMetrics.containsAny(chunk.getUrtext(), target);
     }
 
     private static long categoryCount(EvalQuestionSet set, String category) {
         return set.questions().stream().filter(question -> question.categories().contains(category)).count();
-    }
-
-    private static String normalise(String value) {
-        return value.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
     }
 
     private static void require(boolean condition, String message) {

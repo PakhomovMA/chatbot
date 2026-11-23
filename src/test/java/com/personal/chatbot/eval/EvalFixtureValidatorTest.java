@@ -83,6 +83,34 @@ class EvalFixtureValidatorTest {
     }
 
     @Test
+    void rejectsAQuestionWithoutEvidenceThatIsNotTaggedNegative() {
+        EvalQuestion original = completeSet().questions().get(50);
+        EvalQuestionSet set = replace(completeSet(), 50,
+                new EvalQuestion(original.id(), original.question(), original.categories(), List.of()));
+
+        assertThatThrownBy(() -> EvalFixtureValidator.validateSchema(set))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining(original.id())
+                .hasMessageContaining("no negative category");
+    }
+
+    @Test
+    void rejectsAMultiChunkQuestionWithOneTargetRepeatedAcrossChunks() {
+        EvalQuestionSet set = completeSet();
+        EvalQuestion original = set.questions().getFirst();
+        EvalQuestionSet single = replace(set, 0, new EvalQuestion(original.id(), original.question(), original.categories(),
+                List.of(original.relevant().getFirst())));
+        List<Chunk> chunks = new ArrayList<>(matchingChunks(set));
+        chunks.add(Chunk.create("answer 0 a repeated", "doc-a",
+                Map.of(ProvenanceChunkTransformer.DOCUMENT_ID, "doc-a"), "q0-repeat", "answer 0 a repeated", null));
+
+        assertThatThrownBy(() -> EvalFixtureValidator.validateChunks(single, chunks))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("q0")
+                .hasMessageContaining("distinct");
+    }
+
+    @Test
     void rejectsUnknownDocumentsAndMissingExpectedPhrases() {
         EvalQuestionSet set = completeSet();
         EvalQuestion original = set.questions().getFirst();

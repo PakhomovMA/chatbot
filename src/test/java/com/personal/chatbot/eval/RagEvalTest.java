@@ -108,11 +108,21 @@ class RagEvalTest {
     record QuestionSet(String description, List<Question> questions) {
     }
 
-    /** @param hitDocuments the document of every returned hit, in rank order: what one document filled */
+    /**
+     * Ranking fields come from a top-{@value #NDCG_K} search; {@code topCosine}, {@code sufficient} and the in-budget
+     * coverage come from a search at the production top-k, because that is the result production judges and shows.
+     *
+     * @param hitDocuments           the document of every ranking hit, in rank order: what one document filled
+     * @param negative               nothing in the corpus answers the question (empty relevance); the comparison
+     *                               script reads this flag instead of re-deriving it from categories
+     * @param fragmentRecallInBudget share of labelled targets covered by the production hits that fit the evidence budget
+     * @param fullCoverageInBudget   every labelled target is covered within that budget
+     */
     record QuestionOutcome(String id, RetrievalMode mode, int firstRelevantRank, double topCosine, boolean sufficient,
-                           long totalMs, List<String> hitDocuments, List<String> categories, String split,
-                           boolean recallAt5, double reciprocalRank, double ndcgAt10, double fragmentRecallAt5,
-                           boolean fullCoverageAt5) {
+                           long totalMs, List<String> hitDocuments, List<String> categories, boolean negative,
+                           String split, boolean recallAt5, double reciprocalRank, double ndcgAt10,
+                           double fragmentRecallAt5, boolean fullCoverageAt5, double fragmentRecallInBudget,
+                           boolean fullCoverageInBudget) {
     }
 
     /**
@@ -120,11 +130,13 @@ class RagEvalTest {
      * @param negativeSufficientShare share of negative questions flagged as sufficient (want zero)
      * @param positiveMinCosine       lowest top-hit cosine among answered positives
      * @param negativeMaxCosine       highest top-hit cosine among negatives; the sufficiency floor must sit above it
+     * @param multiFragmentInBudget   multi-chunk targets covered by production hits within the evidence budget
+     * @param multiFullInBudget       multi-chunk questions fully covered within that budget
      */
     record ModeSummary(RetrievalMode mode, int positives, int negatives, double recallAt5, double mrr, double ndcgAt10,
-                       double multiFragmentRecallAt5, double multiFullCoverageAt5,
-                       double sufficientShare, double negativeSufficientShare, double positiveMinCosine,
-                       double negativeMaxCosine, double p50Ms, double p95Ms) {
+                       double multiFragmentRecallAt5, double multiFullCoverageAt5, double multiFragmentInBudget,
+                       double multiFullInBudget, double sufficientShare, double negativeSufficientShare,
+                       double positiveMinCosine, double negativeMaxCosine, double p50Ms, double p95Ms) {
     }
 
     record CalibrationSummary(double selectedThreshold, double calibrationTpr, double calibrationFpr,
@@ -141,7 +153,8 @@ class RagEvalTest {
      * What neighbour expansion buys and costs, measured on HYBRID. Ranking metrics are computed over
      * matched hits only, so they stay comparable; the rest describes the evidence the model would see.
      *
-     * @param answerCoverage   share of positive questions whose expected phrase appears in some returned passage
+     * @param answerCoverage   share of positive questions whose every labelled fragment appears in a returned
+     *                         passage of its own (one fragment for single-passage questions)
      * @param answerInBudget   the same, but only counting passages that fit the prompt's evidence budget
      * @param passages         average passages returned per question (hits plus neighbours)
      * @param passagesInBudget average passages that fit the evidence budget
@@ -176,10 +189,10 @@ class RagEvalTest {
     @TempDir
     static Path dir;
 
-    private final int chunkSize = Integer.getInteger("eval.chunkSize", 1200);
+    private final int chunkSize = Integer.getInteger("eval.chunkSize", 800);
     private final int overlap = Integer.getInteger("eval.overlap", 100);
     private final double minRecall = Double.parseDouble(System.getProperty("eval.minRecall", "0.8"));
-    private final double sufficientCosine = Double.parseDouble(System.getProperty("eval.sufficientCosine", "0.289795458316803"));
+    private final double sufficientCosine = Double.parseDouble(System.getProperty("eval.sufficientCosine", "0.2830873131752014"));
     /** The production chatbot.retrieval.max-document-share; sweep it with -Peval.maxDocumentShare. */
     private final double maxDocumentShare = Double.parseDouble(System.getProperty("eval.maxDocumentShare", "0.6"));
 
@@ -280,9 +293,10 @@ class RagEvalTest {
         writeReport(report);
         for (ModeSummary summary : summaries) {
             log.info(String.format(Locale.ROOT,
-                    "%-7s recall@5=%.3f mrr=%.3f ndcg@10=%.3f multiRecall@5=%.3f multiFull@5=%.3f sufficient=%.2f negSufficient=%.2f posMinCos=%.3f negMaxCos=%.3f p50=%.0fms p95=%.0fms",
+                    "%-7s recall@5=%.3f mrr=%.3f ndcg@10=%.3f multiRecall@5=%.3f multiFull@5=%.3f multiInBudget=%.3f multiFullInBudget=%.3f sufficient=%.2f negSufficient=%.2f posMinCos=%.3f negMaxCos=%.3f p50=%.0fms p95=%.0fms",
                     summary.mode(), summary.recallAt5(), summary.mrr(), summary.ndcgAt10(), summary.multiFragmentRecallAt5(),
-                    summary.multiFullCoverageAt5(), summary.sufficientShare(), summary.negativeSufficientShare(),
+                    summary.multiFullCoverageAt5(), summary.multiFragmentInBudget(), summary.multiFullInBudget(),
+                    summary.sufficientShare(), summary.negativeSufficientShare(),
                     summary.positiveMinCosine(), summary.negativeMaxCosine(), summary.p50Ms(), summary.p95Ms()));
         }
         ModeSummary hybrid = summaries.stream().filter(s -> s.mode() == RetrievalMode.HYBRID).findFirst().orElseThrow();
@@ -458,10 +472,11 @@ class RagEvalTest {
                     recallHits++;
                 }
             }
-            if (all.stream().anyMatch(hit -> isRelevant(hit, question))) {
+            // A multi-chunk question is covered only when every labelled fragment reached the evidence.
+            if (EvalMetrics.coverage(question, all).full()) {
                 covered++;
             }
-            if (all.subList(0, inBudget).stream().anyMatch(hit -> isRelevant(hit, question))) {
+            if (EvalMetrics.coverage(question, all.subList(0, inBudget)).full()) {
                 coveredInBudget++;
             }
         }
@@ -668,9 +683,8 @@ class RagEvalTest {
      * heuristic, the same instructions, the same merge; only Embabel's transport is replaced.
      *
      * <p>Measured at two budgets, because whether the parts compete at all is a property of the corpus:
-     * at the production {@code top-k} these five small documents cover both parts of every question
-     * from a single query, and the tight budget is an attempt to make them compete. Neither shows a
-     * gain here (docs/eval-log.md), so the assertion is non-degradation and the numbers decide the
+     * the tight budget is an attempt to make them compete where the production {@code top-k} leaves
+     * room for both. The assertion is non-degradation, and the numbers in docs/eval-log.md decide the
      * default, as they did for neighbour expansion.
      */
     @Test
@@ -813,14 +827,13 @@ class RagEvalTest {
                 percentile(latencies, 0.5), percentile(modelLatencies, 0.5));
     }
 
+    /** Fits sufficient-cosine on the calibration split of HYBRID outcomes; topCosine is the production top-k one. */
     private CalibrationSummary calibrate(List<QuestionOutcome> outcomes) {
-        Map<String, EvalQuestion> byId = questionSet.questions().stream()
-                .collect(java.util.stream.Collectors.toMap(EvalQuestion::id, question -> question));
         List<QuestionOutcome> hybrid = outcomes.stream().filter(outcome -> outcome.mode() == RetrievalMode.HYBRID).toList();
         List<EvalCalibration.SufficiencyObservation> calibration = hybrid.stream()
                 .filter(outcome -> outcome.split().equals("calibration"))
-                .map(outcome -> new EvalCalibration.SufficiencyObservation(outcome.id(),
-                        !byId.get(outcome.id()).isNegative(), outcome.topCosine()))
+                .map(outcome -> new EvalCalibration.SufficiencyObservation(outcome.id(), !outcome.negative(),
+                        outcome.topCosine()))
                 .toList();
         EvalCalibration.ThresholdSelection selected = EvalCalibration.selectThreshold(calibration);
         List<QuestionOutcome> validation = hybrid.stream().filter(outcome -> outcome.split().equals("validation")).toList();
@@ -830,7 +843,7 @@ class RagEvalTest {
         int trueNegatives = 0;
         for (QuestionOutcome outcome : validation) {
             boolean sufficient = outcome.topCosine() >= selected.threshold();
-            boolean positive = !byId.get(outcome.id()).isNegative();
+            boolean positive = !outcome.negative();
             if (positive && sufficient) {
                 truePositives++;
             } else if (positive) {
@@ -855,6 +868,7 @@ class RagEvalTest {
 
     private ModeSummary evaluate(RetrievalMode mode, List<QuestionOutcome> outcomes) {
         List<EvalQuestion> questions = questionSet.questions();
+        GroundedAnswerPrompt prompt = new GroundedAnswerPrompt(EVIDENCE_CHAR_BUDGET, 0, AnswerLanguage.EN);
         int positives = 0;
         int negatives = 0;
         double recallHits = 0;
@@ -863,6 +877,8 @@ class RagEvalTest {
         int multiQuestions = 0;
         double multiFragmentRecall = 0;
         double multiFullCoverage = 0;
+        double multiFragmentInBudget = 0;
+        double multiFullInBudget = 0;
         double sufficient = 0;
         double negativeSufficient = 0;
         double positiveMinCosine = Double.MAX_VALUE;
@@ -872,13 +888,19 @@ class RagEvalTest {
             RetrievalResult result = retrieval.search(new RetrievalQuery(question.question(), NDCG_K, mode, null));
             latencies.add(result.timings().totalMs());
             EvalMetrics.QuestionMetrics metrics = EvalMetrics.evaluate(question, result.hits(), RECALL_K, NDCG_K);
+            // The top-k changes the candidate pool and the fused hits, so the best cosine of a top-10 search is not
+            // the one production compares with sufficient-cosine; sufficiency and budget come from production top-k.
+            RetrievalResult production = retrieval.search(
+                    new RetrievalQuery(question.question(), retrievalSettings.topK(), mode, null));
+            List<RetrievedChunk> inBudget = production.hits().subList(0, prompt.includedHits(production.hits()));
+            EvalMetrics.Coverage budgetCoverage = EvalMetrics.coverage(question, inBudget);
             int firstRelevant = metrics.firstRelevantRank();
             if (question.isNegative()) {
                 negatives++;
-                if (result.evidenceSufficient()) {
+                if (production.evidenceSufficient()) {
                     negativeSufficient++;
                 }
-                negativeMaxCosine = Math.max(negativeMaxCosine, result.maxVectorScore());
+                negativeMaxCosine = Math.max(negativeMaxCosine, production.maxVectorScore());
             } else {
                 positives++;
                 if (metrics.recallAtK()) {
@@ -890,11 +912,13 @@ class RagEvalTest {
                     multiQuestions++;
                     multiFragmentRecall += metrics.fragmentRecallAtK();
                     multiFullCoverage += metrics.fullCoverageAtK() ? 1 : 0;
+                    multiFragmentInBudget += budgetCoverage.fragmentRecall();
+                    multiFullInBudget += budgetCoverage.full() ? 1 : 0;
                 }
                 if (firstRelevant > 0) {
-                    positiveMinCosine = Math.min(positiveMinCosine, result.maxVectorScore());
+                    positiveMinCosine = Math.min(positiveMinCosine, production.maxVectorScore());
                 }
-                if (result.evidenceSufficient()) {
+                if (production.evidenceSufficient()) {
                     sufficient++;
                 }
                 if (!metrics.recallAtK()) {
@@ -902,16 +926,19 @@ class RagEvalTest {
                             firstRelevant, result.hits().stream().limit(3).map(h -> h.provenance().documentId()).toList());
                 }
             }
-            outcomes.add(new QuestionOutcome(question.id(), mode, firstRelevant, result.maxVectorScore(),
-                    result.evidenceSufficient(), result.timings().totalMs(),
+            outcomes.add(new QuestionOutcome(question.id(), mode, firstRelevant, production.maxVectorScore(),
+                    production.evidenceSufficient(), result.timings().totalMs(),
                     result.hits().stream().map(h -> h.provenance().documentId()).toList(), question.categories(),
-                    splitById.get(question.id()), metrics.recallAtK(), metrics.reciprocalRank(), metrics.ndcgAtK(),
-                    metrics.fragmentRecallAtK(), metrics.fullCoverageAtK()));
+                    question.isNegative(), splitById.get(question.id()), metrics.recallAtK(), metrics.reciprocalRank(),
+                    metrics.ndcgAtK(), metrics.fragmentRecallAtK(), metrics.fullCoverageAtK(),
+                    budgetCoverage.fragmentRecall(), budgetCoverage.full()));
         }
         latencies.sort(null);
         return new ModeSummary(mode, positives, negatives, recallHits / positives, reciprocalRanks / positives,
                 ndcgSum / positives, multiQuestions == 0 ? 0 : multiFragmentRecall / multiQuestions,
                 multiQuestions == 0 ? 0 : multiFullCoverage / multiQuestions,
+                multiQuestions == 0 ? 0 : multiFragmentInBudget / multiQuestions,
+                multiQuestions == 0 ? 0 : multiFullInBudget / multiQuestions,
                 sufficient / positives, negatives == 0 ? 0 : negativeSufficient / negatives,
                 positiveMinCosine == Double.MAX_VALUE ? -1 : positiveMinCosine, negativeMaxCosine,
                 percentile(latencies, 0.5), percentile(latencies, 0.95));

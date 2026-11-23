@@ -57,6 +57,9 @@ Never:
   Tag such tests with `@Tag("model")` etc.; untagged tests must stay hermetic.
 - `./gradlew bootRun` — expect the log line listing discovered Ollama models incl. `gemma4:12b`,
   then `curl 127.0.0.1:8080/actuator/health`.
+- `./gradlew ragEval` writes per-question reports to `build/reports/rag-eval/`; compare two of them with
+  `uv run scripts/compare_rag_eval.py A.json B.json` (standard library only). Its tests,
+  `uv run scripts/compare_rag_eval_test.py`, are not on the CI gate: run them when the script changes.
 
 ## Conventions
 

@@ -80,6 +80,61 @@ class EvalMetricsTest {
     }
 
     @Test
+    void aTargetRepeatedAcrossChunksIsCreditedOnceSoNdcgStaysWithinOne() {
+        EvalQuestion question = question("q1", passage("doc", "HOLD-42"));
+        List<RetrievedChunk> hits = List.of(
+                hit("doc:1", 1, "doc", "pause code HOLD-42"),
+                hit("doc:2", 2, "doc", "HOLD-42 again"),
+                hit("doc:3", 3, "doc", "and HOLD-42 once more"));
+        List<RetrievedChunk> late = List.of(
+                hit("doc:1", 2, "doc", "pause code HOLD-42"),
+                hit("doc:2", 3, "doc", "HOLD-42 again"));
+
+        assertThat(EvalMetrics.evaluate(question, hits, 5, 10).ndcgAtK()).isEqualTo(1.0);
+        assertThat(EvalMetrics.evaluate(question, late, 5, 10).ndcgAtK()).isCloseTo(0.630930, offset(0.000001));
+    }
+
+    @Test
+    void aLaterChunkIsCreditedWhenItCoversATargetNotYetFound() {
+        EvalQuestion question = question("q1", passage("doc", "first"), passage("doc", "second"));
+        List<RetrievedChunk> hits = List.of(
+                hit("doc:1", 1, "doc", "first"),
+                hit("doc:2", 2, "doc", "first again"),
+                hit("doc:3", 3, "doc", "second"));
+
+        EvalMetrics.QuestionMetrics metrics = EvalMetrics.evaluate(question, hits, 5, 10);
+
+        // DCG = 1/log2(2) + 1/log2(4) = 1.5; ideal = 1 + 1/log2(3).
+        assertThat(metrics.ndcgAtK()).isCloseTo(1.5 / (1 + 1 / (Math.log(3) / Math.log(2))), offset(0.000001));
+        assertThat(metrics.fullCoverageAtK()).isTrue();
+    }
+
+    @Test
+    void anEarlierChunkMatchingBothTargetsLeavesTheOtherTargetToALaterChunk() {
+        EvalQuestion question = question("q1", passage("doc", "first"), passage("doc", "second"));
+        List<RetrievedChunk> hits = List.of(
+                hit("doc:1", 1, "doc", "first and second"),
+                hit("doc:2", 2, "doc", "first"));
+
+        EvalMetrics.QuestionMetrics metrics = EvalMetrics.evaluate(question, hits, 5, 10);
+
+        assertThat(metrics.ndcgAtK()).isEqualTo(1.0);
+        assertThat(metrics.fragmentRecallAtK()).isEqualTo(1.0);
+    }
+
+    @Test
+    void coverageCountsTheGivenPassagesOnly() {
+        EvalQuestion question = question("q1", passage("doc", "first"), passage("doc", "second"));
+        RetrievedChunk first = hit("doc:1", 1, "doc", "first");
+        RetrievedChunk second = hit("doc:9", 9, "doc", "second");
+
+        assertThat(EvalMetrics.coverage(question, List.of(first))).isEqualTo(new EvalMetrics.Coverage(0.5, false));
+        assertThat(EvalMetrics.coverage(question, List.of(first, second))).isEqualTo(new EvalMetrics.Coverage(1.0, true));
+        assertThat(EvalMetrics.coverage(new EvalQuestion("neg", "q", List.of("negative"), List.of()), List.of(first)))
+                .isEqualTo(new EvalMetrics.Coverage(0, false));
+    }
+
+    @Test
     void negativeAndEmptyResultsHaveZeroScoresInsteadOfNaN() {
         EvalQuestion negative = new EvalQuestion("neg", "unanswered", List.of("negative"), List.of());
 

@@ -8,5 +8,6 @@ chatbot:
     ollama:
       model: embeddinggemma-2
   retrieval:
-    # Calibrated on the Eval 2.0 calibration split; the v1 threshold is not transferable between vector spaces.
+    # Not transferable from v1: another vector space. Eval 2.0 (docs/eval-log.md, 2026-11-24): the Youden-J rule gave
+    # 0.726, which flags ~29 % of answerable questions as insufficient; 0.69 keeps validation TPR 0.95 at FPR 0.25.
     sufficient-cosine: 0.689956545829773

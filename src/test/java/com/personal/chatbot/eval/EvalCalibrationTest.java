@@ -85,12 +85,13 @@ class EvalCalibrationTest {
     @Test
     void outcomeJsonContainsPerQuestionMetricsAndSplit() {
         var outcome = new RagEvalTest.QuestionOutcome("q1", RetrievalMode.HYBRID, 1, 0.5, true, 12,
-                List.of("doc"), List.of("multi-chunk"), "calibration", true, 1.0, 0.75, 0.5, false);
+                List.of("doc"), List.of("multi-chunk"), false, "calibration", true, 1.0, 0.75, 0.5, false, 1.0, true);
 
         String json = JsonMapper.builder().build().writeValueAsString(outcome);
 
         assertThat(json).contains("\"recallAt5\":true", "\"reciprocalRank\":1.0", "\"ndcgAt10\":0.75",
                 "\"fragmentRecallAt5\":0.5", "\"fullCoverageAt5\":false", "\"split\":\"calibration\"",
-                "\"categories\":[\"multi-chunk\"]");
+                "\"categories\":[\"multi-chunk\"]", "\"negative\":false", "\"fragmentRecallInBudget\":1.0",
+                "\"fullCoverageInBudget\":true");
     }
 }

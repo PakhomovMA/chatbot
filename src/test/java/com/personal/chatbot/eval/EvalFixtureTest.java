@@ -9,12 +9,18 @@ import com.personal.chatbot.service.parsing.DocumentParser;
 import com.personal.chatbot.service.parsing.ProvenanceChunkTransformer;
 import com.personal.chatbot.support.FakeTextEmbedder;
 import com.personal.chatbot.support.IndexStores;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import tools.jackson.databind.json.JsonMapper;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -51,7 +57,7 @@ class EvalFixtureTest {
     @Test
     void longPdfsProduceMultipleChunks() {
         DocumentParser parser = new DocumentParser();
-        IndexManifest.Chunker chunker = new IndexManifest.Chunker(1200, 100, ProvenanceChunkTransformer.TRANSFORMER_VERSION);
+        IndexManifest.Chunker chunker = new IndexManifest.Chunker(800, 100, ProvenanceChunkTransformer.TRANSFORMER_VERSION);
         try (LuceneIndexStore store = IndexStores.store(dir.resolve("pdf-index"), new FakeTextEmbedder(16), chunker).open()) {
             for (Path path : EvalFixtures.documentPaths().stream().filter(path -> path.toString().endsWith(".pdf")).toList()) {
                 store.writeDocument(parser.parse(document(path), path));
@@ -68,12 +74,39 @@ class EvalFixtureTest {
         EvalQuestionSet questions = EvalFixtures.questions();
         EvalFixtureValidator.validateSchema(questions);
         DocumentParser parser = new DocumentParser();
-        IndexManifest.Chunker chunker = new IndexManifest.Chunker(1200, 100, ProvenanceChunkTransformer.TRANSFORMER_VERSION);
+        IndexManifest.Chunker chunker = new IndexManifest.Chunker(800, 100, ProvenanceChunkTransformer.TRANSFORMER_VERSION);
         try (LuceneIndexStore store = IndexStores.store(dir.resolve("index"), new FakeTextEmbedder(16), chunker).open()) {
             for (Path path : EvalFixtures.documentPaths()) {
                 store.writeDocument(parser.parse(document(path), path));
             }
             EvalFixtureValidator.validateChunks(questions, store.allChunks());
+        }
+    }
+
+    /** One entry of the pre-Eval-2.0 schema: a single expected document, or none for a negative. */
+    record LegacyQuestion(String id, String question, @Nullable String expectedDocument, List<String> mustContain) {
+    }
+
+    record LegacySet(String description, List<LegacyQuestion> questions) {
+    }
+
+    @Test
+    void everyLegacyQuestionIsKeptTaggedAndUnchanged() throws IOException {
+        LegacySet legacy = JsonMapper.builder().build().readValue(
+                Files.readString(Path.of("src/test/resources/eval/legacy-questions.json")), LegacySet.class);
+        Map<String, EvalQuestion> current = EvalFixtures.questions().questions().stream()
+                .collect(Collectors.toMap(EvalQuestion::id, question -> question));
+
+        assertThat(legacy.questions()).hasSize(44);
+        assertThat(current.values().stream().filter(question -> question.categories().contains("legacy"))
+                .map(EvalQuestion::id)).as("questions tagged legacy")
+                .containsExactlyInAnyOrderElementsOf(legacy.questions().stream().map(LegacyQuestion::id).toList());
+        for (LegacyQuestion expected : legacy.questions()) {
+            EvalQuestion actual = current.get(expected.id());
+            assertThat(actual.question()).as("text of %s", expected.id()).isEqualTo(expected.question());
+            List<EvalQuestion.RelevantPassage> relevance = expected.expectedDocument() == null ? List.of()
+                    : List.of(new EvalQuestion.RelevantPassage(expected.expectedDocument(), expected.mustContain()));
+            assertThat(actual.relevant()).as("relevance of %s", expected.id()).isEqualTo(relevance);
         }
     }
 

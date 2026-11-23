@@ -134,7 +134,7 @@ public record ChatbotProperties(
             @Min(0) @DefaultValue("60") int rrfK,
             @DefaultValue("0.0") double minCosine,
             @DefaultValue("0.0") double minTextScore,
-            @DefaultValue("0.3") double sufficientCosine,
+            @DefaultValue("0.2830873131752014") double sufficientCosine,
             @Min(0) @DefaultValue("0") int expandNeighbours,
             @DecimalMin("0.1") @DecimalMax("1.0") @DefaultValue("0.6") double maxDocumentShare,
             @Min(1) @DefaultValue("200") int traceBufferSize

@@ -12,3 +12,7 @@ cupsfilter -m application/pdf src/test/resources/eval/pdf-sources/billing-operat
 ```
 
 After regenerating either PDF, run `./gradlew test --tests '*EvalFixtureTest'` to verify extraction, expected phrases and multi-chunk relevance through the production parser.
+
+`legacy-questions.json` is a frozen copy of the 44 golden questions that predate Eval 2.0. `EvalFixtureTest`
+checks that `questions.json` keeps each of them, tagged `legacy`, with the same text and relevance; the specialised
+evals (`expandSearch`, decomposition) run on that subset.
