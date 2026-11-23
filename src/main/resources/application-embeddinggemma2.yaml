@@ -8,6 +8,5 @@ chatbot:
     ollama:
       model: embeddinggemma-2
   retrieval:
-    # EmbeddingGemma 2 puts every cosine higher: golden positives min 0.693, negatives max 0.587.
-    # The v1 threshold 0.3 would mark every negative as sufficient evidence.
-    sufficient-cosine: 0.64
+    # Calibrated on the Eval 2.0 calibration split; the v1 threshold is not transferable between vector spaces.
+    sufficient-cosine: 0.689956545829773

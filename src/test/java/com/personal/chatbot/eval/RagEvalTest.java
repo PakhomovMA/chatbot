@@ -92,6 +92,7 @@ class RagEvalTest {
     /** The production evidence budget (chatbot.chat.evidence-char-budget), so "in budget" means what the model sees. */
     private static final int EVIDENCE_CHAR_BUDGET = 6000;
     private static final int NDCG_K = 10;
+    private static final long SPLIT_SEED = 20261123L;
     /** The production default of chatbot.chat.expand-search.queries. */
     private static final int EXPANSION_QUERIES = 3;
     /** An evidence budget too small for a multi-part question, standing in for a larger corpus. */
@@ -109,7 +110,9 @@ class RagEvalTest {
 
     /** @param hitDocuments the document of every returned hit, in rank order: what one document filled */
     record QuestionOutcome(String id, RetrievalMode mode, int firstRelevantRank, double topCosine, boolean sufficient,
-                           long totalMs, List<String> hitDocuments) {
+                           long totalMs, List<String> hitDocuments, List<String> categories, String split,
+                           boolean recallAt5, double reciprocalRank, double ndcgAt10, double fragmentRecallAt5,
+                           boolean fullCoverageAt5) {
     }
 
     /**
@@ -119,12 +122,19 @@ class RagEvalTest {
      * @param negativeMaxCosine       highest top-hit cosine among negatives; the sufficiency floor must sit above it
      */
     record ModeSummary(RetrievalMode mode, int positives, int negatives, double recallAt5, double mrr, double ndcgAt10,
+                       double multiFragmentRecallAt5, double multiFullCoverageAt5,
                        double sufficientShare, double negativeSufficientShare, double positiveMinCosine,
                        double negativeMaxCosine, double p50Ms, double p95Ms) {
     }
 
-    record Report(Instant at, String fingerprint, int chunkSize, int overlap, int chunks, List<ModeSummary> summary,
-                  List<QuestionOutcome> outcomes, List<ExpansionSummary> expansion) {
+    record CalibrationSummary(double selectedThreshold, double calibrationTpr, double calibrationFpr,
+                              double validationTpr, double validationFpr, int validationTruePositives,
+                              int validationFalsePositives, int validationFalseNegatives, int validationTrueNegatives) {
+    }
+
+    record Report(Instant at, String fingerprint, int chunkSize, int overlap, int chunks, long splitSeed,
+                  CalibrationSummary calibration, List<ModeSummary> summary, List<QuestionOutcome> outcomes,
+                  List<ExpansionSummary> expansion) {
     }
 
     /**
@@ -166,10 +176,10 @@ class RagEvalTest {
     @TempDir
     static Path dir;
 
-    private final int chunkSize = Integer.getInteger("eval.chunkSize", 800);
+    private final int chunkSize = Integer.getInteger("eval.chunkSize", 1200);
     private final int overlap = Integer.getInteger("eval.overlap", 100);
     private final double minRecall = Double.parseDouble(System.getProperty("eval.minRecall", "0.8"));
-    private final double sufficientCosine = Double.parseDouble(System.getProperty("eval.sufficientCosine", "0.3"));
+    private final double sufficientCosine = Double.parseDouble(System.getProperty("eval.sufficientCosine", "0.289795458316803"));
     /** The production chatbot.retrieval.max-document-share; sweep it with -Peval.maxDocumentShare. */
     private final double maxDocumentShare = Double.parseDouble(System.getProperty("eval.maxDocumentShare", "0.6"));
 
@@ -180,12 +190,22 @@ class RagEvalTest {
     private LuceneIndexStore store;
     private RetrievalService retrieval;
     private ChatbotProperties.Retrieval retrievalSettings;
-    private QuestionSet questionSet;
+    private EvalQuestionSet questionSet;
     private Map<String, String> documentIdsByKey;
+    private Map<String, String> splitById;
 
     private static QuestionSet questionSet(String file) throws IOException {
         return JsonMapper.builder().build()
                 .readValue(Files.readString(Path.of("src/test/resources/eval", file)), QuestionSet.class);
+    }
+
+    private QuestionSet legacyGolden() {
+        return new QuestionSet("Legacy single-passage regression subset", questionSet.questions().stream()
+                .filter(question -> question.categories().contains("legacy"))
+                .map(question -> new Question(question.id(), question.question(),
+                        question.isNegative() ? null : question.relevant().getFirst().document(),
+                        question.isNegative() ? List.of() : question.relevant().getFirst().mustContain()))
+                .toList());
     }
 
     static Path modelDir() {
@@ -207,19 +227,21 @@ class RagEvalTest {
         retrievalSettings = new ChatbotProperties.Retrieval(8, 3, 60, 0.0, 0.0, sufficientCosine, 0, maxDocumentShare, 500);
         retrieval = new RetrievalService(store, new RetrievalTraceStore(500), retrievalSettings, TestObservations.retrieval());
 
-        questionSet = questionSet("questions.json");
+        questionSet = EvalFixtures.questions();
+        EvalCalibration.Split split = EvalCalibration.split(questionSet.questions(), SPLIT_SEED);
+        splitById = new LinkedHashMap<>();
+        split.calibration().forEach(question -> splitById.put(question.id(), "calibration"));
+        split.validation().forEach(question -> splitById.put(question.id(), "validation"));
         documentIdsByKey = new LinkedHashMap<>();
         DocumentParser parser = new DocumentParser();
         long started = System.nanoTime();
-        try (Stream<Path> docs = Files.list(Path.of("src/test/resources/eval/docs"))) {
-            for (Path file : docs.filter(p -> p.toString().endsWith(".md")).sorted().toList()) {
-                String key = file.getFileName().toString().replace(".md", "");
-                Document document = new Document(key, titleOf(file), file.getFileName().toString(), "text/markdown",
-                        Files.size(file), "eval-" + key, 1, Instant.now(), Instant.now(), DocumentStatus.READY,
-                        null, null, null, null, null);
-                store.writeDocument(parser.parse(document, file));
-                documentIdsByKey.put(key, key);
-            }
+        for (Path file : EvalFixtures.documentPaths()) {
+            String key = EvalFixtures.documentKey(file);
+            Document document = new Document(key, titleOf(file), file.getFileName().toString(), EvalFixtures.mediaType(file),
+                    Files.size(file), "eval-" + key, 1, Instant.now(), Instant.now(), DocumentStatus.READY,
+                    null, null, null, null, null);
+            store.writeDocument(parser.parse(document, file));
+            documentIdsByKey.put(key, key);
         }
         log.info("Indexed {} documents into {} chunks (chunkSize={}, overlap={}) in {} ms", documentIdsByKey.size(),
                 store.info().chunkCount(), chunkSize, overlap, (System.nanoTime() - started) / 1_000_000);
@@ -254,14 +276,14 @@ class RagEvalTest {
             summaries.add(evaluate(mode, outcomes));
         }
         Report report = new Report(Instant.now().truncatedTo(ChronoUnit.SECONDS), embeddings.fingerprint().value(),
-                chunkSize, overlap, store.info().chunkCount(), summaries, outcomes, List.of());
+                chunkSize, overlap, store.info().chunkCount(), SPLIT_SEED, calibrate(outcomes), summaries, outcomes, List.of());
         writeReport(report);
         for (ModeSummary summary : summaries) {
             log.info(String.format(Locale.ROOT,
-                    "%-7s recall@5=%.3f mrr=%.3f ndcg@10=%.3f sufficient=%.2f negSufficient=%.2f posMinCos=%.3f negMaxCos=%.3f p50=%.0fms p95=%.0fms",
-                    summary.mode(), summary.recallAt5(), summary.mrr(), summary.ndcgAt10(), summary.sufficientShare(),
-                    summary.negativeSufficientShare(), summary.positiveMinCosine(), summary.negativeMaxCosine(),
-                    summary.p50Ms(), summary.p95Ms()));
+                    "%-7s recall@5=%.3f mrr=%.3f ndcg@10=%.3f multiRecall@5=%.3f multiFull@5=%.3f sufficient=%.2f negSufficient=%.2f posMinCos=%.3f negMaxCos=%.3f p50=%.0fms p95=%.0fms",
+                    summary.mode(), summary.recallAt5(), summary.mrr(), summary.ndcgAt10(), summary.multiFragmentRecallAt5(),
+                    summary.multiFullCoverageAt5(), summary.sufficientShare(), summary.negativeSufficientShare(),
+                    summary.positiveMinCosine(), summary.negativeMaxCosine(), summary.p50Ms(), summary.p95Ms()));
         }
         ModeSummary hybrid = summaries.stream().filter(s -> s.mode() == RetrievalMode.HYBRID).findFirst().orElseThrow();
         assertThat(hybrid.recallAt5()).as("HYBRID recall@5").isGreaterThanOrEqualTo(minRecall);
@@ -294,7 +316,7 @@ class RagEvalTest {
         var budget = new GroundedAnswerPrompt(EVIDENCE_CHAR_BUDGET, 10, AnswerLanguage.AUTO);
         try (var writer = new EvalQueryWriter(System.getProperty("eval.llm", "qwen3:14b"), 0.0, 3)) {
             // No-history questions must be byte-for-byte identical before/after preparation, with no model calls.
-            for (Question golden : questionSet.questions()) {
+            for (EvalQuestion golden : questionSet.questions()) {
                 var input = new UserQuestion("eval", golden.id(), golden.question(),
                         List.of(), null, null);
                 assertThat(rewriter.rewrite(input, context)).isSameAs(input);
@@ -414,7 +436,7 @@ class RagEvalTest {
         double hitsInBudget = 0;
         double chars = 0;
         List<Long> latencies = new ArrayList<>();
-        for (Question question : questionSet.questions()) {
+        for (EvalQuestion question : questionSet.questions()) {
             RetrievalResult result = service.search(new RetrievalQuery(question.question(), NDCG_K, RetrievalMode.HYBRID, null));
             latencies.add(result.timings().totalMs());
             if (question.isNegative()) {
@@ -459,7 +481,7 @@ class RagEvalTest {
     @Test
     void expandSearchStrategies() throws IOException {
         List<Map.Entry<String, QuestionSet>> sets = List.of(
-                Map.entry("golden", questionSet), Map.entry("hard", questionSet("questions-hard.json")));
+                Map.entry("golden", legacyGolden()), Map.entry("hard", questionSet("questions-hard.json")));
         boolean withModel = EvalQueryWriter.ollamaAvailable();
         if (!withModel) {
             log.warn("Ollama is not reachable at {}: measuring the strategies that need no model call only",
@@ -656,7 +678,7 @@ class RagEvalTest {
         assumeTrue(EvalQueryWriter.ollamaAvailable(), "Ollama required for question decomposition eval");
         MultiPartSet multiPart = JsonMapper.builder().build().readValue(
                 Files.readString(Path.of("src/test/resources/eval/questions-multipart.json")), MultiPartSet.class);
-        List<MultiPartCase> golden = questionSet.questions().stream()
+        List<MultiPartCase> golden = legacyGolden().questions().stream()
                 .filter(q -> !q.isNegative())
                 .map(q -> new MultiPartCase(q.id(), q.question(), List.of(q)))
                 .toList();
@@ -791,22 +813,66 @@ class RagEvalTest {
                 percentile(latencies, 0.5), percentile(modelLatencies, 0.5));
     }
 
+    private CalibrationSummary calibrate(List<QuestionOutcome> outcomes) {
+        Map<String, EvalQuestion> byId = questionSet.questions().stream()
+                .collect(java.util.stream.Collectors.toMap(EvalQuestion::id, question -> question));
+        List<QuestionOutcome> hybrid = outcomes.stream().filter(outcome -> outcome.mode() == RetrievalMode.HYBRID).toList();
+        List<EvalCalibration.SufficiencyObservation> calibration = hybrid.stream()
+                .filter(outcome -> outcome.split().equals("calibration"))
+                .map(outcome -> new EvalCalibration.SufficiencyObservation(outcome.id(),
+                        !byId.get(outcome.id()).isNegative(), outcome.topCosine()))
+                .toList();
+        EvalCalibration.ThresholdSelection selected = EvalCalibration.selectThreshold(calibration);
+        List<QuestionOutcome> validation = hybrid.stream().filter(outcome -> outcome.split().equals("validation")).toList();
+        int truePositives = 0;
+        int falsePositives = 0;
+        int falseNegatives = 0;
+        int trueNegatives = 0;
+        for (QuestionOutcome outcome : validation) {
+            boolean sufficient = outcome.topCosine() >= selected.threshold();
+            boolean positive = !byId.get(outcome.id()).isNegative();
+            if (positive && sufficient) {
+                truePositives++;
+            } else if (positive) {
+                falseNegatives++;
+            } else if (sufficient) {
+                falsePositives++;
+            } else {
+                trueNegatives++;
+            }
+        }
+        int positives = truePositives + falseNegatives;
+        int negatives = falsePositives + trueNegatives;
+        log.info("Calibrated sufficient-cosine={} (calibration TPR/FPR={}/{}, validation TPR/FPR={}/{})",
+                selected.threshold(), selected.truePositiveRate(), selected.falsePositiveRate(),
+                positives == 0 ? 0 : truePositives / (double) positives,
+                negatives == 0 ? 0 : falsePositives / (double) negatives);
+        return new CalibrationSummary(selected.threshold(), selected.truePositiveRate(), selected.falsePositiveRate(),
+                positives == 0 ? 0 : truePositives / (double) positives,
+                negatives == 0 ? 0 : falsePositives / (double) negatives,
+                truePositives, falsePositives, falseNegatives, trueNegatives);
+    }
+
     private ModeSummary evaluate(RetrievalMode mode, List<QuestionOutcome> outcomes) {
-        List<Question> questions = questionSet.questions();
+        List<EvalQuestion> questions = questionSet.questions();
         int positives = 0;
         int negatives = 0;
         double recallHits = 0;
         double reciprocalRanks = 0;
         double ndcgSum = 0;
+        int multiQuestions = 0;
+        double multiFragmentRecall = 0;
+        double multiFullCoverage = 0;
         double sufficient = 0;
         double negativeSufficient = 0;
         double positiveMinCosine = Double.MAX_VALUE;
         double negativeMaxCosine = -1;
         List<Long> latencies = new ArrayList<>();
-        for (Question question : questions) {
+        for (EvalQuestion question : questions) {
             RetrievalResult result = retrieval.search(new RetrievalQuery(question.question(), NDCG_K, mode, null));
             latencies.add(result.timings().totalMs());
-            int firstRelevant = -1;
+            EvalMetrics.QuestionMetrics metrics = EvalMetrics.evaluate(question, result.hits(), RECALL_K, NDCG_K);
+            int firstRelevant = metrics.firstRelevantRank();
             if (question.isNegative()) {
                 negatives++;
                 if (result.evidenceSufficient()) {
@@ -815,40 +881,44 @@ class RagEvalTest {
                 negativeMaxCosine = Math.max(negativeMaxCosine, result.maxVectorScore());
             } else {
                 positives++;
-                double dcg = 0;
-                for (RetrievedChunk hit : result.hits()) {
-                    if (isRelevant(hit, question)) {
-                        if (firstRelevant < 0) {
-                            firstRelevant = hit.rank();
-                        }
-                        dcg += 1.0 / (Math.log(hit.rank() + 1) / Math.log(2));
-                    }
-                }
-                if (firstRelevant > 0 && firstRelevant <= RECALL_K) {
+                if (metrics.recallAtK()) {
                     recallHits++;
                 }
+                reciprocalRanks += metrics.reciprocalRank();
+                ndcgSum += metrics.ndcgAtK();
+                if (question.isMultiChunk()) {
+                    multiQuestions++;
+                    multiFragmentRecall += metrics.fragmentRecallAtK();
+                    multiFullCoverage += metrics.fullCoverageAtK() ? 1 : 0;
+                }
                 if (firstRelevant > 0) {
-                    reciprocalRanks += 1.0 / firstRelevant;
                     positiveMinCosine = Math.min(positiveMinCosine, result.maxVectorScore());
                 }
-                ndcgSum += dcg / idealDcg(question, result);
                 if (result.evidenceSufficient()) {
                     sufficient++;
                 }
-                if (firstRelevant < 0 || firstRelevant > RECALL_K) {
+                if (!metrics.recallAtK()) {
                     log.warn("[{}] {} miss: '{}' first relevant rank {} top docs {}", mode, question.id(), question.question(),
                             firstRelevant, result.hits().stream().limit(3).map(h -> h.provenance().documentId()).toList());
                 }
             }
             outcomes.add(new QuestionOutcome(question.id(), mode, firstRelevant, result.maxVectorScore(),
                     result.evidenceSufficient(), result.timings().totalMs(),
-                    result.hits().stream().map(h -> h.provenance().documentId()).toList()));
+                    result.hits().stream().map(h -> h.provenance().documentId()).toList(), question.categories(),
+                    splitById.get(question.id()), metrics.recallAtK(), metrics.reciprocalRank(), metrics.ndcgAtK(),
+                    metrics.fragmentRecallAtK(), metrics.fullCoverageAtK()));
         }
         latencies.sort(null);
         return new ModeSummary(mode, positives, negatives, recallHits / positives, reciprocalRanks / positives,
-                ndcgSum / positives, sufficient / positives, negatives == 0 ? 0 : negativeSufficient / negatives,
+                ndcgSum / positives, multiQuestions == 0 ? 0 : multiFragmentRecall / multiQuestions,
+                multiQuestions == 0 ? 0 : multiFullCoverage / multiQuestions,
+                sufficient / positives, negatives == 0 ? 0 : negativeSufficient / negatives,
                 positiveMinCosine == Double.MAX_VALUE ? -1 : positiveMinCosine, negativeMaxCosine,
                 percentile(latencies, 0.5), percentile(latencies, 0.95));
+    }
+
+    private static boolean isRelevant(RetrievedChunk hit, EvalQuestion question) {
+        return question.relevant().stream().anyMatch(target -> EvalMetrics.isRelevant(hit, target));
     }
 
     private static boolean isRelevant(RetrievedChunk hit, Question question) {
@@ -865,11 +935,6 @@ class RagEvalTest {
     /** Case- and whitespace-insensitive comparison (markdown paragraphs contain line breaks). */
     private static String normalise(String value) {
         return value.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ");
-    }
-
-    /** Ideal DCG assumes at most one relevant chunk is needed (questions are answered by a single passage). */
-    private static double idealDcg(Question question, RetrievalResult result) {
-        return 1.0;
     }
 
     private static double percentile(List<Long> sorted, double p) {
@@ -891,6 +956,9 @@ class RagEvalTest {
     }
 
     private static String titleOf(Path file) throws IOException {
+        if (!file.toString().endsWith(".md")) {
+            return EvalFixtures.documentKey(file);
+        }
         try (Stream<String> lines = Files.lines(file)) {
             return lines.filter(l -> l.startsWith("# ")).map(l -> l.substring(2).strip()).findFirst()
                     .orElse(file.getFileName().toString());

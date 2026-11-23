@@ -42,7 +42,7 @@ chatbot:
   index:
     dir: ${chatbot.data-dir}/index      # lucene/ + manifest.json
     in-memory: false
-    max-chunk-size: 800                  # characters; calibrated on the eval set (docs/eval-log.md); part of the index manifest
+    max-chunk-size: 1200                 # characters; calibrated on the 224-question eval set (docs/eval-log.md); part of the index manifest
     overlap-size: 100
     embedding-batch-size: 32
   ingestion:
@@ -54,7 +54,7 @@ chatbot:
     rrf-k: 60
     min-cosine: 0.0                      # vector noise floor (plain cosine)
     min-text-score: 0.0                  # BM25 is corpus-relative: rank only
-    sufficient-cosine: 0.3               # calibrated on the eval set (docs/eval-log.md): negatives max 0.22, positives min 0.32
+    sufficient-cosine: 0.289795458316803 # calibrated on Eval 2.0 calibration split (docs/eval-log.md, 2026-11-24)
     expand-neighbours: 0                 # section chunks shown on each side of every hit (0 = off); also the agentic search tools
     # Share of the returned hits one document may fill while another still has candidates. BM25 matches a
     # document's own name in nearly every chunk of it, so a question naming two documents gets a lexical

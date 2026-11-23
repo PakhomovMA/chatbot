@@ -1,21 +1,24 @@
 # Retrieval evaluation log
 
 Как измеряется: `./gradlew ragEval` (`src/test/java/com/personal/chatbot/eval/RagEvalTest.java`) индексирует
-5 golden-документов из `src/test/resources/eval/docs` реальной моделью EmbeddingGemma (ONNX) и прогоняет
-44 вопроса из `questions.json`: 38 позитивных (ответ есть в корпусе) и 6 негативных (ответа нет).
-Hit релевантен, если принадлежит ожидаемому документу и содержит одну из фраз `mustContain`
-(без учёта регистра и пробелов). Метрики: Recall@5, MRR, nDCG@10 (одна релевантная цитата на вопрос),
-доля позитивов с `evidenceSufficient=true`, доля негативов с `evidenceSufficient=true` (должна быть 0),
-латентность p50/p95. Отчёты: `build/reports/rag-eval/*.json`. Параметры: `-Peval.chunkSize`,
-`-Peval.overlap`, `-Peval.sufficientCosine`, `-Peval.minRecall` (gate, по умолчанию 0.8),
-`-Peval.llm`, `-Peval.ollamaUrl`, `-Peval.embedding` (`onnx` по умолчанию или `ollama:<model>`).
+18 synthetic-документов из `src/test/resources/eval/docs` реальной моделью EmbeddingGemma (ONNX) и прогоняет
+224 вопроса из `questions.json`: 200 позитивов и 24 негатива (18 near-topic и 6 общих). Корпус включает
+RU/EN Markdown, два длинных PDF, таблицы и исходный код. Все 44 legacy-вопроса сохранены.
+
+Каждый позитив размечает один или несколько обязательных фрагментов `document + mustContain`; сравнение
+нечувствительно к регистру и пробелам. Метрики: Recall@5, MRR, multi-relevance nDCG@10, fragment/full
+multi-chunk coverage@5, sufficiency для позитивов и негативов, latency p50/p95. Calibration/validation split
+фиксирован seed 20261123; отчёт содержит выбранный порог и отдельные validation confusion counts.
+Отчёты: `build/reports/rag-eval/*.json`. Парное сравнение: `uv run scripts/compare_rag_eval.py A.json B.json`
+(10 000 bootstrap resamples, 95% CI). Параметры: `-Peval.chunkSize`, `-Peval.overlap`,
+`-Peval.sufficientCosine`, `-Peval.minRecall` (gate, по умолчанию 0.8), `-Peval.llm`, `-Peval.ollamaUrl`,
+`-Peval.embedding` (`onnx` по умолчанию или `ollama:<model>`).
 
 Второй набор — `questions-hard.json` (10 позитивов + 4 негатива «около темы»): вопросы словами
 пользователя, а не документации, включая русские к английскому корпусу. Он существует ради ветки
-`expandSearch` (Phase 9a), которая на golden-наборе не срабатывает вовсе; в gate по Recall он не входит.
+`expandSearch` (Phase 9a), которая на legacy golden-наборе не срабатывает вовсе; в gate по Recall он не входит.
 Стратегии `REWRITE`/`HYDE` требуют работающей Ollama — без неё измеряются только остальные.
 
-Ограничение: набор маленький (5 документов, 25 чанков), цифры показывают порядок, а не статистику.
 Пороги пересматривать при смене embedding-модели (fingerprint) или существенном росте корпуса.
 
 ## 2026-09-07 — baseline Phase 4
@@ -1037,3 +1040,80 @@ Default остаётся ONNX v1. На текстовом английском �
 
 Найденный дефект: `OllamaTextEmbedder` не находил модель, заданную без тега (`embeddinggemma-2`), потому что
 Ollama перечисляет её как `embeddinggemma-2:latest`. Исправлено: имя без тега читается как `:latest`.
+
+## 2026-11-24 — Eval 2.0, 18 документов и 224 вопроса (MAX-5)
+
+Новый основной набор: 18 synthetic-документов (RU/EN, два длинных PDF, таблицы, Java/Python/SQL), 224 вопроса,
+200 позитивов и 24 негатива. Квоты: 62 multi-chunk (27.7 %; все требуют разные чанки),
+12 сравнений двух документов, 17 RU→EN и 12 EN→RU. Все 44 прежних вопроса сохранены как `legacy`.
+Набор валидируется через production parser и реальный chunker без модели; отдельные unit-тесты покрывают
+multi-relevance nDCG, однократный учёт чанка, split, калибровку и paired comparison.
+
+Первые 160 вопросов (136 позитивов) дали inconclusive CI по ranking. Набор расширен 64 вопросами о ранее
+не покрытых фактах, а не перефразировками; после изменения stratified split весь sweep повторён. Split seed
+20261123, ranking ниже — полный набор, выбор chunking — только calibration-часть.
+
+### Chunking, ONNX v1, overlap 100
+
+| chunk | чанков | calibration multi fragment / full@5 | calibration Recall@5 / MRR / nDCG@10 | полный Recall@5 / MRR / nDCG@10 | полный multi fragment / full@5 |
+|---:|---:|---:|---:|---:|---:|
+| 500 | 133 | 0.661 / 0.387 | 0.861 / 0.775 / 0.875 | 0.910 / 0.822 / 0.907 | 0.677 / 0.403 |
+| 800 | 71 | 0.726 / 0.484 | 0.881 / 0.767 / 0.836 | 0.920 / 0.811 / 0.864 | 0.702 / 0.419 |
+| **1200** | **49** | **0.742 / 0.516** | **0.921** / 0.778 / 0.814 | **0.945** / 0.820 / 0.854 | **0.750 / 0.516** |
+
+Выбран 1200 по заранее заданному приоритету multi-chunk fragment Recall@5. Меньшие чанки дают более высокий
+nDCG, но чаще оставляют вторую часть multi-chunk вопроса вне top-5. Изменение 800 → 1200 меняет manifest и
+требует `POST /api/knowledge-base/reindex`.
+
+### Sufficiency threshold
+
+Порог выбран по calibration midpoints с максимумом Youden J, затем применён к validation. Это не фильтр,
+гарантирующий ноль ошибок: близкие негативы пересекаются с позитивами по cosine.
+
+| Embedding | threshold | calibration TPR / FPR | validation TPR / FPR | validation TP / FP / FN / TN | полный sufficient pos / neg |
+|---|---:|---:|---:|---:|---:|
+| ONNX v1 | 0.289795458316803 | 1.000 / 0.500 | 1.000 / 0.667 | 99 / 8 / 0 / 4 | 1.000 / 0.583 |
+| Ollama v2 | 0.689956545829773 | 0.921 / 0.333 | 0.899 / 0.250 | 89 / 3 / 10 / 9 | 0.910 / 0.292 |
+
+У v1 нет FN, но высокий FPR на near-topic негативах. У v2 ниже FPR ценой нескольких FN. Один cosine threshold
+не является надёжным near-topic фильтром. Для production остаётся v1; v2 использует собственный порог в профиле
+`embeddinggemma2`.
+
+### Парное сравнение v1 и v2
+
+Одинаковые 1200/100, вопросы и retrieval; различаются embedding и откалиброванный порог. 10 000 paired bootstrap
+resamples, seed 20261123, percentile 95% CI для `v2 - v1`. Границы эквивалентности ±0.02 заданы до запуска.
+
+| Метрика | N | Δ v2−v1 | 95% CI | Итог |
+|---|---:|---:|---:|---|
+| Recall@5 | 200 | 0.0000 | [-0.0200, +0.0200] | equivalent |
+| MRR | 200 | +0.0210 | [-0.0080, +0.0503] | inconclusive |
+| nDCG@10 | 200 | +0.0128 | [-0.0064, +0.0322] | inconclusive |
+| Negative sufficiency | 24 | -0.2917 | [-0.4583, -0.1250] | **different** |
+
+Итог: модели **различимы по negative sufficiency**; Recall@5 эквивалентен, а MRR/nDCG остаются inconclusive.
+При выбранных порогах v2 реже признаёт near-topic негативы достаточными, но чаще помечает позитивы
+недостаточными. Maintainer явно подтвердил использование negative sufficiency из буквального acceptance MAX-5,
+без объявления общего ranking-паритета.
+
+Команды основных прогонов:
+
+```bash
+./gradlew ragEval --tests '*RagEvalTest.hybridRetrievalMeetsRecallTarget' \
+  -Peval.chunkSize=1200 -Peval.overlap=100 -Peval.sufficientCosine=0.289795458316803 -PskipFrontend
+./gradlew ragEval --tests '*RagEvalTest.hybridRetrievalMeetsRecallTarget' \
+  -Peval.chunkSize=1200 -Peval.overlap=100 -Peval.embedding=ollama:embeddinggemma-2 \
+  -Peval.sufficientCosine=0.689956545829773 -PskipFrontend
+uv run scripts/compare_rag_eval.py build/reports/rag-eval/eval-20261124-012651-c1200-o100.json \
+  build/reports/rag-eval/eval-20261124-012710-c1200-o100.json
+```
+
+Внутренний `totalMs` округлён до целых миллисекунд и на этом локальном корпусе даёт p50/p95 = 0; эти значения
+не используются для выбора конфигурации. Для latency нужен отдельный замер с более точным таймером.
+
+Финальные gate: `./gradlew clean build` прошёл, включая 14 frontend-тестов; полный `./gradlew ragEval -PskipFrontend`
+прошёл все пять eval-тестов за 7 мин 21 с на defaults 1200/100 и v1 threshold 0.289795458316803.
+В hermetic-профиле сохранена историческая геометрия 800/0.3: FakeTextEmbedder и маленькие fixtures не наследуют
+model-specific production-калибровку. Comparison после чистого прогона повторён на отчётах 012651 (v1) и
+012710 (v2); CI и verdict совпали с таблицей выше. После независимого review удалён exact duplicate, восстановлены
+четыре русские RU→EN-формулировки и добавлена проверка уникальности нормализованного текста.
